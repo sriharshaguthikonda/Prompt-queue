@@ -3,7 +3,7 @@
 Let the AI Always Work, Then Check: Seamless Task Queuing for Busy Minds.
 
 ## Why this exists
-Sometimes you have multiple, repetitive tasks for ChatGPT, Gemini, Grok, or Claude—like asking them to draft variations, generate batches of images, or produce several code snippets. Manually pasting a prompt, waiting, then pasting the next is slow and distracting. This extension lets you queue all prompts, hit Start, and get back to work while it runs for you. When everything is done, you get notified.
+Sometimes you have multiple, repetitive tasks for ChatGPT, Gemini, Grok, or Claude—like asking them to draft variations, generate batches of images, or produce several code snippets. Manually pasting a prompt, waiting, then pasting the next is slow and distracting. This extension lets you queue all prompts, hit Start, and get back to work while it runs for you. 
 
 ## What it does
 Auto-Prompt automates sending a sequence of prompts to AI chat sites (ChatGPT, Gemini, Grok, Claude). Paste your list, click Start, and it will:
@@ -12,7 +12,13 @@ Auto-Prompt automates sending a sequence of prompts to AI chat sites (ChatGPT, G
 - Send the next prompt
 - Repeat until done
 
-You can leave the page or close the popup. The background worker keeps running. You will get a completion notification.
+You can leave the page or close the popup. The background worker keeps running. 
+
+
+If you have more ideas to improve efficiency with these AI products, open an issue or ping me—happy to iterate.
+
+
+
 
 ## Supported sites
 - ChatGPT: `chat.openai.com`, `chatgpt.com`
@@ -59,21 +65,6 @@ You can leave the page or close the popup. The background worker keeps running. 
   - Gemini/Grok/Claude: absence of stop/spinner/typing indicators
 - You can tweak default timing in the popup; seconds are converted to ms internally
 
-## Ideas to extend or improve
-- Parallel runs across multiple tabs (with per-tab queues)
-- Per-site profiles (different selectors and timing presets)
-- Export results to Markdown/HTML
-- Auto-save outputs per prompt to local files or Google Drive
-- Keyboard shortcuts to start/stop/pause
-- Rate limit controls to avoid hitting provider limits
-- Image workflows (loop over prompts to generate images, download automatically)
-
-If you have more ideas to improve efficiency with these AI products, open an issue or ping me—happy to iterate.
-
-## Permissions
-- activeTab, tabs, scripting: to inject and message the content script
-- storage: to save settings and history
-- notifications: to notify when automation completes
 
 ## Development
 - Edit files in place and reload the extension from `chrome://extensions`
