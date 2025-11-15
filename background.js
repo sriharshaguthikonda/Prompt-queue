@@ -15,6 +15,9 @@ const state = {
   },
   lastActivityTime: Date.now(),
   recoveryAttempts: 0,
+  processing: false,
+  promptStartTime: 0,
+  lastRecoveryTime: 0,
 };
 
 const DEFAULT_SETTINGS = {
@@ -29,8 +32,9 @@ const DEFAULT_SETTINGS = {
 const RECOVERY_CONFIG = {
   maxRecoveryAttempts: 3,
   recoveryDelayMs: 2000,
-  staleThresholdMs: 10000, // Consider stale if no activity for 10s
+  staleThresholdMs: 35000, // 35 seconds: gives time for slow AI responses
   healthCheckIntervalMs: 5000,
+  minRecoveryIntervalMs: 3000, // Don't attempt recovery more than once per 3 seconds
 };
 
 function coerceNumber(v, min, max, fallback) {
@@ -201,6 +205,7 @@ async function attemptRecovery() {
 
   console.log('[Recovery] Connection restored, resuming automation');
   state.lastActivityTime = Date.now();
+  state.promptStartTime = Date.now(); // Reset prompt timer
   await saveState();
   
   // Resume from current prompt
@@ -213,10 +218,17 @@ async function healthCheck() {
 
   const now = Date.now();
   const timeSinceActivity = now - state.lastActivityTime;
+  const timeSinceLastRecovery = now - state.lastRecoveryTime;
+
+  // Only attempt recovery if enough time has passed since last attempt
+  if (timeSinceLastRecovery < RECOVERY_CONFIG.minRecoveryIntervalMs) {
+    return;
+  }
 
   // If we haven't seen activity in a while and we're supposed to be running, something is wrong
   if (timeSinceActivity > RECOVERY_CONFIG.staleThresholdMs) {
-    console.log('[Health] Detected stale state, attempting recovery');
+    console.log('[Health] Detected stale state (no activity for ' + timeSinceActivity + 'ms), attempting recovery');
+    state.lastRecoveryTime = now;
     await attemptRecovery();
   }
 }
@@ -346,6 +358,8 @@ async function sendNextPrompt() {
 
   const promptText = buildMessageText(state.prompts[state.currentIndex]);
   state.lastActivityTime = Date.now();
+  state.promptStartTime = Date.now();
+  state.processing = true;
   await saveState();
   
   chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() }).catch(() => {});
@@ -360,7 +374,8 @@ async function sendNextPrompt() {
     });
   } catch (err) {
     console.error("Error sending prompt to content:", err);
-    // Don't immediately fail - let recovery logic handle it
+    state.processing = false;
+    // Trigger recovery on send failure
     state.lastActivityTime = Date.now() - RECOVERY_CONFIG.staleThresholdMs - 1000;
     await saveState();
   }
@@ -385,6 +400,12 @@ function makeHistorySignature(item) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message?.type) {
+      case "CONTENT_READY": {
+        // Content script injected and ready
+        state.lastActivityTime = Date.now();
+        await saveState();
+        return;
+      }
       case "START_AUTOMATION": {
         const prompts = Array.isArray(message.prompts) ? message.prompts.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
         const tabId = message.tabId;
@@ -426,22 +447,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case "RESPONSE_COMPLETE": {
         sendResponse({ ok: true });
-        if (!state.running) {
+        if (!state.running || !state.processing) {
           return;
         }
-        // Prevent duplicate completions from processing
-        if (state.processing) {
-          console.log('[Response] Already processing, ignoring duplicate RESPONSE_COMPLETE');
-          return;
-        }
-        state.processing = true;
+        state.processing = false;
         state.currentIndex += 1;
         state.lastActivityTime = Date.now();
-        state.recoveryAttempts = 0; // Reset on successful completion
+        state.recoveryAttempts = 0; // Reset recovery attempts on successful completion
         await saveState();
         chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() }).catch(() => {});
+        
+        // Small delay before next prompt to avoid rate limiting
+        await new Promise(resolve => setTimeout(resolve, 500));
         await sendNextPrompt();
-        state.processing = false;
         return;
       }
       case "SAVE_PROMPT_HISTORY": {

@@ -282,41 +282,55 @@
   }
 
   async function handleSendPrompt(text, options) {
-    const site = detectSite();
-    const cfg = selectorsForSite(site);
-
-    let inputEl = queryFirst(cfg.inputCandidates);
-    let sendBtn = queryFirst(cfg.sendButtonCandidates);
-    const stopBtnSel = cfg.stopButtonCandidates?.[0] || null;
-    let messagesContainer = queryFirst(cfg.messagesContainerCandidates);
-
-    if ((site === 'chatgpt' || site === 'gemini' || site === 'claude') && !inputEl) {
-      const composer = document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
-      composer?.scrollIntoView({ block: 'end' });
-      composer?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      await new Promise((r) => setTimeout(r, 150));
-      inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
-      sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
-      messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
+    if (isProcessing) {
+      console.log('[HandleSendPrompt] Already processing a prompt, ignoring');
+      chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE' }).catch(() => {});
+      return;
     }
 
-    if (!inputEl) throw new Error('Could not find chat input on this page.');
+    isProcessing = true;
+    try {
+      const site = detectSite();
+      const cfg = selectorsForSite(site);
 
-    setTextInInput(inputEl, text);
-    await new Promise((r) => setTimeout(r, 150));
-    await clickSend(sendBtn, inputEl);
+      let inputEl = queryFirst(cfg.inputCandidates);
+      let sendBtn = queryFirst(cfg.sendButtonCandidates);
+      const stopBtnSel = cfg.stopButtonCandidates?.[0] || null;
+      let messagesContainer = queryFirst(cfg.messagesContainerCandidates);
 
-    await waitForCompletion({
-      sendButton: sendBtn,
-      stopButtonSelector: stopBtnSel,
-      messagesContainer,
-      stableMs: options?.stableMs,
-      maxWaitMs: options?.maxWaitMs,
-      pollIntervalMs: options?.pollIntervalMs,
-    });
+      if ((site === 'chatgpt' || site === 'gemini' || site === 'claude') && !inputEl) {
+        const composer = document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+        composer?.scrollIntoView({ block: 'end' });
+        composer?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 150));
+        inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+        sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
+        messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
+      }
 
-    chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE' }).catch(() => {});
-    return true;
+      if (!inputEl) throw new Error('Could not find chat input on this page.');
+
+      setTextInInput(inputEl, text);
+      await new Promise((r) => setTimeout(r, 150));
+      await clickSend(sendBtn, inputEl);
+
+      await waitForCompletion({
+        sendButton: sendBtn,
+        stopButtonSelector: stopBtnSel,
+        messagesContainer,
+        stableMs: options?.stableMs,
+        maxWaitMs: options?.maxWaitMs,
+        pollIntervalMs: options?.pollIntervalMs,
+      });
+
+      chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE' }).catch(() => {});
+    } catch (e) {
+      console.error('[HandleSendPrompt] Error:', e);
+      // Always signal completion, even on error
+      chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE' }).catch(() => {});
+    } finally {
+      isProcessing = false;
+    }
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
