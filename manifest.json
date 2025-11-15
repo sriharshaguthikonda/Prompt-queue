@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Auto-Prompt: Go grab a coffee",
+  "name": "AI Prompt Queue",
   "version": "0.1.0",
   "description": "Let the AI Always Work, Then Check: Seamless Task Queuing for Busy Minds.",
   "permissions": [
@@ -27,7 +27,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "Auto-Prompt: Go grab a coffee",
+    "default_title": "AI Prompt Queue",
     "default_popup": "popup.html",
     "default_icon": {
       "16": "images/icon.png",

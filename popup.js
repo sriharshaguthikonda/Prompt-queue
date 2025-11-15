@@ -29,10 +29,15 @@ async function refreshStatus() {
   try {
     const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
     if (res?.ok && res.status) {
-      const { running, currentIndex, total } = res.status;
+      const { running, currentIndex, total, recoveryAttempts } = res.status;
       setProgress(running ? currentIndex : total, total);
       if (running) {
-        setStatus(`Running prompt ${currentIndex + 1} of ${total}...`);
+        // Show recovery status if attempting recovery
+        if (recoveryAttempts > 0) {
+          setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`);
+        } else {
+          setStatus(`Running prompt ${currentIndex + 1} of ${total}...`);
+        }
       } else if (total > 0 && currentIndex >= total) {
         setStatus('Complete');
       } else {
@@ -124,10 +129,39 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
   try {
     await chrome.runtime.sendMessage({ type: 'STOP_AUTOMATION' });
     setStatus('Stopped');
+    // Refresh to clear any recovery status
+    await refreshStatus();
   } catch (e) {
     setStatus('Stop failed');
   }
 });
+
+// Save current prompts to history
+const saveHistoryBtn = document.getElementById('saveHistoryBtn');
+if (saveHistoryBtn) {
+  saveHistoryBtn.addEventListener('click', async () => {
+    const textarea = document.getElementById('prompts');
+    const prompts = parsePrompts(textarea.value);
+    if (prompts.length === 0) {
+      setStatus('No prompts to save.');
+      return;
+    }
+    try {
+      const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      await chrome.runtime.sendMessage({ 
+        type: 'SAVE_PROMPT_HISTORY', 
+        item: { prompts, settings: settings?.settings } 
+      });
+      // Immediately refresh the history list
+      await loadHistoryIntoUI();
+      setStatus('Saved to history');
+      // Clear status after 2 seconds
+      setTimeout(() => setStatus('Idle'), 2000);
+    } catch (e) {
+      setStatus('Failed to save history');
+    }
+  });
+}
 
 function createHistoryRow(item, index) {
   const wrapper = document.createElement('div');
@@ -190,19 +224,51 @@ async function loadHistoryIntoUI() {
 
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
-    const { currentIndex, total } = message.status;
-    setStatus(`Running prompt ${currentIndex + 1} of ${total}...`);
+    const { currentIndex, total, recoveryAttempts } = message.status;
+    // Show recovery status if attempting recovery
+    if (recoveryAttempts > 0) {
+      setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`);
+    } else {
+      setStatus(`Running prompt ${currentIndex + 1} of ${total}...`);
+    }
     setProgress(currentIndex, total);
   } else if (message?.type === 'AUTOMATION_COMPLETE') {
     setStatus('Complete');
     setProgress(1, 1);
   } else if (message?.type === 'AUTOMATION_ERROR') {
     setStatus(`Error: ${message.error}`);
+    // Refresh status after error to show proper state
+    setTimeout(refreshStatus, 1000);
   }
+});
+
+// Auto-refresh status periodically when popup is open
+let refreshInterval;
+
+function startAutoRefresh() {
+  // Refresh every 2 seconds while popup is open
+  refreshInterval = setInterval(refreshStatus, 2000);
+}
+
+function stopAutoRefresh() {
+  if (refreshInterval) {
+    clearInterval(refreshInterval);
+    refreshInterval = null;
+  }
+}
+
+// Start auto-refresh when popup opens
+document.addEventListener('DOMContentLoaded', () => {
+  startAutoRefresh();
+});
+
+// Stop auto-refresh when popup closes
+window.addEventListener('unload', () => {
+  stopAutoRefresh();
 });
 
 (async function init() {
   await loadSettingsIntoUI();
   await loadHistoryIntoUI();
   await refreshStatus();
-})(); 
+})();

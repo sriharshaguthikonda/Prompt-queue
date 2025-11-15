@@ -4,6 +4,8 @@
   if (window.__aiTaskSequencerInjected) return;
   window.__aiTaskSequencerInjected = true;
 
+  let isProcessing = false; // Prevent concurrent prompt processing
+
   const DEFAULTS = {
     stableMs: 1200,
     maxWaitMs: 180000,
@@ -319,6 +321,12 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
+      // Handle PING for health checks (used by recovery logic)
+      if (message?.type === 'PING') {
+        sendResponse({ ok: true, timestamp: Date.now() });
+        return;
+      }
+
       if (message?.type === 'SEND_PROMPT' && typeof message.text === 'string') {
         try {
           await handleSendPrompt(message.text, message.options);
@@ -332,5 +340,6 @@
     return true;
   });
 
+  // Notify background that content script is ready
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
-})(); 
+})();
