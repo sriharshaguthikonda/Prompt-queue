@@ -8,7 +8,8 @@
     "scripting",
     "storage",
     "tabs",
-    "notifications"
+    "notifications",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",
@@ -28,7 +29,6 @@
   },
   "action": {
     "default_title": "AI Prompt Queue",
-    "default_popup": "popup.html",
     "default_icon": {
       "16": "images/icon.png",
       "24": "images/icon.png",
@@ -36,5 +36,8 @@
       "48": "images/icon.png",
       "128": "images/icon.png"
     }
+  },
+  "side_panel": {
+    "default_path": "popup.html"
   }
 } 

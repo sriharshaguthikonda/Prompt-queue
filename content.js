@@ -4,7 +4,7 @@
   if (window.__aiTaskSequencerInjected) return;
   window.__aiTaskSequencerInjected = true;
 
-  let isProcessing = false; // Prevent concurrent prompt processing
+  let currentPromptId = null; // Track per-prompt instead of global flag
 
   const DEFAULTS = {
     stableMs: 1200,
@@ -39,8 +39,9 @@
             'form button[type="submit"]',
           ],
           stopButtonCandidates: [
+            'button[data-testid="stop-button"]',
+            'button[aria-label="Stop streaming"]',
             'button[aria-label="Stop generating"]',
-            'button[data-testid="stop-button"]'
           ],
           messagesContainerCandidates: [
             '[data-testid="conversation-turns"]',
@@ -149,16 +150,21 @@
       selection.removeAllRanges();
       selection.addRange(range);
       document.execCommand('delete', false, null);
+      
       const ok = document.execCommand('insertText', false, text);
-      if (!ok) {
+      if (ok) return;
+      
+      throw new Error('insertText returned false');
+    } catch (_) {
+      try {
         const before = new InputEvent('beforeinput', { inputType: 'insertFromPaste', data: text, bubbles: true, cancelable: true });
         el.dispatchEvent(before);
         const input = new InputEvent('input', { data: text, bubbles: true, cancelable: true });
         el.dispatchEvent(input);
         el.textContent = text;
+      } catch (_) {
+        el.textContent = text;
       }
-    } catch (_) {
-      el.textContent = text;
     }
   }
 
@@ -281,14 +287,48 @@
     });
   }
 
-  async function handleSendPrompt(text, options) {
-    if (isProcessing) {
-      console.log('[HandleSendPrompt] Already processing a prompt, ignoring');
-      chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE' }).catch(() => {});
+  function waitForStreamsToStop({ stopButtonSelector, maxWaitMs }) {
+    const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
+
+    return new Promise((resolve) => {
+      const startTime = Date.now();
+
+      const checkStop = () => {
+        const elapsed = Date.now() - startTime;
+        const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
+        const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
+
+        if (!stopPresent) {
+          // No stop button = not streaming, safe to proceed
+          resolve();
+          return;
+        }
+
+        if (elapsed > effectiveMaxWaitMs) {
+          // Timeout: give up and proceed anyway
+          console.warn('[WaitForStreamsToStop] Timeout waiting for stream to stop');
+          resolve();
+          return;
+        }
+
+        // Still streaming, check again soon
+        setTimeout(checkStop, 300);
+      };
+
+      checkStop();
+    });
+  }
+
+  async function handleSendPrompt(text, options, promptId) {
+    if (currentPromptId !== null && currentPromptId !== promptId) {
+      console.log('[HandleSendPrompt] Different prompt already processing, ignoring');
+      try {
+        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
+      } catch (_) {}
       return;
     }
 
-    isProcessing = true;
+    currentPromptId = promptId;
     try {
       const site = detectSite();
       const cfg = selectorsForSite(site);
@@ -310,6 +350,9 @@
 
       if (!inputEl) throw new Error('Could not find chat input on this page.');
 
+      // Wait for any active streaming/processing to complete before sending
+      await waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: DEFAULTS.maxWaitMs });
+
       setTextInInput(inputEl, text);
       await new Promise((r) => setTimeout(r, 150));
       await clickSend(sendBtn, inputEl);
@@ -323,37 +366,40 @@
         pollIntervalMs: options?.pollIntervalMs,
       });
 
-      chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE' }).catch(() => {});
+      try {
+        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
+      } catch (_) {}
     } catch (e) {
       console.error('[HandleSendPrompt] Error:', e);
-      // Always signal completion, even on error
-      chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE' }).catch(() => {});
+      try {
+        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, error: String(e) });
+      } catch (_) {}
     } finally {
-      isProcessing = false;
+      currentPromptId = null;
     }
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     (async () => {
-      // Handle PING for health checks (used by recovery logic)
-      if (message?.type === 'PING') {
-        sendResponse({ ok: true, timestamp: Date.now() });
-        return;
-      }
-
-      if (message?.type === 'SEND_PROMPT' && typeof message.text === 'string') {
-        try {
-          await handleSendPrompt(message.text, message.options);
-          sendResponse({ ok: true });
-        } catch (e) {
-          sendResponse({ ok: false, error: String(e) });
+      try {
+        if (message?.type === 'PING') {
+          sendResponse({ ok: true, timestamp: Date.now() });
+          return;
         }
-        return;
+
+        if (message?.type === 'SEND_PROMPT' && typeof message.text === 'string') {
+          const promptId = message.promptId || Math.random();
+          await handleSendPrompt(message.text, message.options, promptId);
+          sendResponse({ ok: true });
+          return;
+        }
+      } catch (e) {
+        console.error('[MessageListener] Unexpected error:', e);
+        sendResponse({ ok: false, error: String(e) });
       }
     })();
     return true;
   });
 
-  // Notify background that content script is ready
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
 })();

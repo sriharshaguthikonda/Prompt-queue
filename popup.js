@@ -45,7 +45,7 @@ async function refreshStatus() {
       }
     }
   } catch (e) {
-    // ignore
+    console.error('[RefreshStatus] Error:', e);
   }
 }
 
@@ -69,27 +69,37 @@ async function loadSettingsIntoUI() {
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
     }
-  } catch (_) {}
+  } catch (e) {
+    console.error('[LoadSettings] Error:', e);
+  }
 }
 
 async function saveSettingsFromUI() {
-  const maxWaitSec = Number(document.getElementById('maxWaitSec').value);
-  const stableSec = Number(document.getElementById('stableSec').value);
-  const pollSec = Number(document.getElementById('pollSec').value);
-  const settings = {
-    maxWaitMs: secToMs(maxWaitSec),
-    stableMs: secToMs(stableSec),
-    pollIntervalMs: secToMs(pollSec),
-    systemPrompt: document.getElementById('systemPrompt').value || '',
-    prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
-  };
-  await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
+  try {
+    const maxWaitSec = Number(document.getElementById('maxWaitSec').value);
+    const stableSec = Number(document.getElementById('stableSec').value);
+    const pollSec = Number(document.getElementById('pollSec').value);
+    const settings = {
+      maxWaitMs: secToMs(maxWaitSec),
+      stableMs: secToMs(stableSec),
+      pollIntervalMs: secToMs(pollSec),
+      systemPrompt: document.getElementById('systemPrompt').value || '',
+      prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
+    };
+    await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
+  } catch (e) {
+    console.error('[SaveSettings] Error:', e);
+  }
 }
 
 document.getElementById('themeSelect').addEventListener('change', async (e) => {
   const val = e.target.value;
   applyTheme(val);
-  await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: { theme: val } });
+  try {
+    await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: { theme: val } });
+  } catch (e) {
+    console.error('[ThemeChange] Error:', e);
+  }
 });
 
 ['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt'].forEach((id) => {
@@ -98,19 +108,19 @@ document.getElementById('themeSelect').addEventListener('change', async (e) => {
 });
 
 document.getElementById('startBtn').addEventListener('click', async () => {
-  const textarea = document.getElementById('prompts');
-  const prompts = parsePrompts(textarea.value);
-  if (prompts.length === 0) {
-    setStatus('Please enter at least one prompt.');
-    return;
-  }
-  const tabId = await getActiveTabId();
-  if (!tabId) {
-    setStatus('No active tab found.');
-    return;
-  }
-  setStatus('Starting...');
   try {
+    const textarea = document.getElementById('prompts');
+    const prompts = parsePrompts(textarea.value);
+    if (prompts.length === 0) {
+      setStatus('Please enter at least one prompt.');
+      return;
+    }
+    const tabId = await getActiveTabId();
+    if (!tabId) {
+      setStatus('No active tab found.');
+      return;
+    }
+    setStatus('Starting...');
     const res = await chrome.runtime.sendMessage({ type: 'START_AUTOMATION', prompts, tabId });
     if (res?.ok) {
       setStatus(`Running prompt 1 of ${prompts.length}...`);
@@ -121,6 +131,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       setStatus(`Failed to start: ${res?.error || 'Unknown error'}`);
     }
   } catch (e) {
+    console.error('[StartBtn] Error:', e);
     setStatus(`Failed to start: ${e}`);
   }
 });
@@ -132,6 +143,7 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
     // Refresh to clear any recovery status
     await refreshStatus();
   } catch (e) {
+    console.error('[StopBtn] Error:', e);
     setStatus('Stop failed');
   }
 });
@@ -140,13 +152,13 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
 const saveHistoryBtn = document.getElementById('saveHistoryBtn');
 if (saveHistoryBtn) {
   saveHistoryBtn.addEventListener('click', async () => {
-    const textarea = document.getElementById('prompts');
-    const prompts = parsePrompts(textarea.value);
-    if (prompts.length === 0) {
-      setStatus('No prompts to save.');
-      return;
-    }
     try {
+      const textarea = document.getElementById('prompts');
+      const prompts = parsePrompts(textarea.value);
+      if (prompts.length === 0) {
+        setStatus('No prompts to save.');
+        return;
+      }
       const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
       await chrome.runtime.sendMessage({ 
         type: 'SAVE_PROMPT_HISTORY', 
@@ -158,7 +170,23 @@ if (saveHistoryBtn) {
       // Clear status after 2 seconds
       setTimeout(() => setStatus('Idle'), 2000);
     } catch (e) {
+      console.error('[SaveHistoryBtn] Error:', e);
       setStatus('Failed to save history');
+    }
+  });
+}
+
+// Add reload history button listener
+const reloadHistoryBtn = document.getElementById('reloadHistoryBtn');
+if (reloadHistoryBtn) {
+  reloadHistoryBtn.addEventListener('click', async () => {
+    try {
+      await loadHistoryIntoUI();
+      setStatus('History reloaded');
+      setTimeout(() => setStatus('Idle'), 1500);
+    } catch (e) {
+      console.error('[ReloadHistoryBtn] Error:', e);
+      setStatus('Failed to reload history');
     }
   });
 }
@@ -210,16 +238,22 @@ function createHistoryRow(item, index) {
 }
 
 async function loadHistoryIntoUI() {
-  const list = document.getElementById('history');
-  list.innerHTML = '';
   try {
+    const list = document.getElementById('history');
+    if (!list) {
+      console.error('[LoadHistory] History list element not found');
+      return;
+    }
+    list.innerHTML = '';
     const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
     if (res?.ok) {
       (res.history || []).forEach((item, idx) => {
         list.appendChild(createHistoryRow(item, idx));
       });
     }
-  } catch (_e) {}
+  } catch (e) {
+    console.error('[LoadHistory] Error:', e);
+  }
 }
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -242,24 +276,41 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// Auto-refresh status periodically when popup is open
-let refreshInterval;
+// Use AbortController for auto-refresh instead of setInterval
+let refreshAbortController = null;
 
 function startAutoRefresh() {
-  // Refresh every 2 seconds while popup is open
-  refreshInterval = setInterval(refreshStatus, 2000);
+  if (refreshAbortController) return; // Already running
+  refreshAbortController = new AbortController();
+  const signal = refreshAbortController.signal;
+
+  const doRefresh = async () => {
+    if (signal.aborted) return;
+    await refreshStatus();
+    if (!signal.aborted) {
+      setTimeout(doRefresh, 2000);
+    }
+  };
+  doRefresh();
 }
 
 function stopAutoRefresh() {
-  if (refreshInterval) {
-    clearInterval(refreshInterval);
-    refreshInterval = null;
+  if (refreshAbortController) {
+    refreshAbortController.abort();
+    refreshAbortController = null;
   }
 }
 
 // Start auto-refresh when popup opens
-document.addEventListener('DOMContentLoaded', () => {
-  startAutoRefresh();
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    await loadSettingsIntoUI();
+    await loadHistoryIntoUI();
+    await refreshStatus();
+    startAutoRefresh();
+  } catch (e) {
+    console.error('[DOMContentLoaded] Error:', e);
+  }
 });
 
 // Stop auto-refresh when popup closes

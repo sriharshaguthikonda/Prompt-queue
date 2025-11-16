@@ -1,5 +1,10 @@
 // Background service worker for AI Task Sequencer with sleep/wake support
 
+// Open side panel when extension icon is clicked
+chrome.action.onClicked.addListener((tab) => {
+  chrome.sidePanel.open({ tabId: tab.id });
+});
+
 const state = {
   prompts: [],
   currentIndex: 0,
@@ -18,6 +23,7 @@ const state = {
   processing: false,
   promptStartTime: 0,
   lastRecoveryTime: 0,
+  currentPromptId: null,
 };
 
 const DEFAULT_SETTINGS = {
@@ -32,9 +38,10 @@ const DEFAULT_SETTINGS = {
 const RECOVERY_CONFIG = {
   maxRecoveryAttempts: 3,
   recoveryDelayMs: 2000,
-  staleThresholdMs: 35000, // 35 seconds: gives time for slow AI responses
+  staleThresholdMs: 60000, // Increased to 60 seconds for slower AI responses
   healthCheckIntervalMs: 5000,
-  minRecoveryIntervalMs: 3000, // Don't attempt recovery more than once per 3 seconds
+  minRecoveryIntervalMs: 3000,
+  recoveryBackoffMultiplier: 1.5, // Exponential backoff
 };
 
 function coerceNumber(v, min, max, fallback) {
@@ -123,16 +130,26 @@ async function isTabAlive(tabId) {
 async function testContentScriptConnection(tabId) {
   return new Promise((resolve) => {
     try {
-      chrome.tabs.sendMessage(tabId, { type: "PING" }, (response) => {
-        if (chrome.runtime.lastError) {
-          resolve(false);
-        } else {
-          resolve(response?.ok === true);
+      const timeoutId = setTimeout(() => {
+        console.log('[TestConnection] Timeout reached');
+        resolve(false);
+      }, 2000);
+
+      chrome.tabs.sendMessage(
+        tabId,
+        { type: "PING" },
+        (response) => {
+          clearTimeout(timeoutId);
+          if (chrome.runtime.lastError) {
+            console.error('[TestConnection] Error:', chrome.runtime.lastError);
+            resolve(false);
+          } else {
+            resolve(response?.ok === true);
+          }
         }
-      });
-      // Timeout after 2 seconds
-      setTimeout(() => resolve(false), 2000);
-    } catch {
+      );
+    } catch (e) {
+      console.error('[TestConnection] Error:', e);
       resolve(false);
     }
   });
@@ -168,48 +185,60 @@ async function attemptRecovery() {
     console.log('[Recovery] Max attempts reached, stopping automation');
     state.running = false;
     await saveState();
-    chrome.runtime.sendMessage({ 
-      type: "AUTOMATION_ERROR", 
-      error: "Failed to recover after sleep/wake. Please restart.", 
-      status: getStatus() 
-    }).catch(() => {});
+    try {
+      chrome.runtime.sendMessage({ 
+        type: "AUTOMATION_ERROR", 
+        error: "Failed to recover after sleep/wake. Please restart.", 
+        status: getStatus() 
+      });
+    } catch (_) {}
     return false;
   }
 
   state.recoveryAttempts += 1;
+  
+  // Exponential backoff delay
+  const backoffDelay = Math.min(
+    RECOVERY_CONFIG.recoveryDelayMs * Math.pow(RECOVERY_CONFIG.recoveryBackoffMultiplier, state.recoveryAttempts - 1),
+    10000 // Cap at 10 seconds
+  );
+
   await saveState();
 
-  // Check if tab is still alive
   const tabAlive = await isTabAlive(state.tabId);
   if (!tabAlive) {
     console.log('[Recovery] Tab no longer exists or not supported');
     state.running = false;
     await saveState();
-    chrome.runtime.sendMessage({ 
-      type: "AUTOMATION_ERROR", 
-      error: "Tab was closed or navigated away. Automation stopped.", 
-      status: getStatus() 
-    }).catch(() => {});
+    try {
+      chrome.runtime.sendMessage({ 
+        type: "AUTOMATION_ERROR", 
+        error: "Tab was closed or navigated away. Automation stopped.", 
+        status: getStatus() 
+      });
+    } catch (_) {}
     return false;
   }
 
-  // Try to reconnect content script
-  await new Promise(resolve => setTimeout(resolve, RECOVERY_CONFIG.recoveryDelayMs));
+  await new Promise(resolve => setTimeout(resolve, backoffDelay));
   const ready = await ensureContentScriptReady(state.tabId);
   
   if (!ready) {
     console.log('[Recovery] Could not establish connection to content script');
-    // Will retry on next health check
     return false;
   }
 
   console.log('[Recovery] Connection restored, resuming automation');
   state.lastActivityTime = Date.now();
-  state.promptStartTime = Date.now(); // Reset prompt timer
+  state.promptStartTime = Date.now();
   await saveState();
   
-  // Resume from current prompt
-  await sendNextPrompt();
+  try {
+    await sendNextPrompt();
+  } catch (e) {
+    console.error('[Recovery] Error resuming automation:', e);
+    return false;
+  }
   return true;
 }
 
@@ -220,12 +249,10 @@ async function healthCheck() {
   const timeSinceActivity = now - state.lastActivityTime;
   const timeSinceLastRecovery = now - state.lastRecoveryTime;
 
-  // Only attempt recovery if enough time has passed since last attempt
   if (timeSinceLastRecovery < RECOVERY_CONFIG.minRecoveryIntervalMs) {
     return;
   }
 
-  // If we haven't seen activity in a while and we're supposed to be running, something is wrong
   if (timeSinceActivity > RECOVERY_CONFIG.staleThresholdMs) {
     console.log('[Health] Detected stale state (no activity for ' + timeSinceActivity + 'ms), attempting recovery');
     state.lastRecoveryTime = now;
@@ -233,7 +260,6 @@ async function healthCheck() {
   }
 }
 
-// Start periodic health checks
 setInterval(healthCheck, RECOVERY_CONFIG.healthCheckIntervalMs);
 
 // ============ SETTINGS ============
@@ -262,7 +288,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
-      target: { tabId },
+      target: { tabId, allFrames: false },
       files: ["content.js"],
     });
   } catch (err) {
@@ -299,16 +325,25 @@ async function sendToContent(tabId, message) {
     throw new Error('Could not establish connection to content script');
   }
 
-  try {
-    chrome.tabs.sendMessage(tabId, message, () => {
-      const lastErr = chrome.runtime.lastError;
-    });
-  } catch (err) {
-    await injectContentScript(tabId);
-    chrome.tabs.sendMessage(tabId, message, () => {
-      const lastErr = chrome.runtime.lastError;
-    });
-  }
+  return new Promise((resolve, reject) => {
+    try {
+      chrome.tabs.sendMessage(
+        tabId,
+        message,
+        (response) => {
+          if (chrome.runtime.lastError) {
+            console.error('[SendToContent] Error:', chrome.runtime.lastError);
+            reject(new Error(chrome.runtime.lastError.message));
+          } else {
+            resolve(response);
+          }
+        }
+      );
+    } catch (err) {
+      console.error('[SendToContent] Exception:', err);
+      reject(err);
+    }
+  });
 }
 
 // ============ AUTOMATION LOGIC ============
@@ -333,7 +368,9 @@ async function startAutomation({ prompts, tabId, options }) {
   await saveState();
 
   chrome.action.setBadgeText({ text: '' });
-  chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() }).catch(() => {});
+  try {
+    chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
+  } catch (_) {}
 
   await injectContentScript(tabId);
   await sendNextPrompt();
@@ -352,7 +389,9 @@ async function sendNextPrompt() {
   if (state.currentIndex >= state.prompts.length) {
     state.running = false;
     await clearState();
-    chrome.runtime.sendMessage({ type: "AUTOMATION_COMPLETE", status: getStatus() }).catch(() => {});
+    try {
+      chrome.runtime.sendMessage({ type: "AUTOMATION_COMPLETE", status: getStatus() });
+    } catch (_) {}
     return;
   }
 
@@ -360,9 +399,12 @@ async function sendNextPrompt() {
   state.lastActivityTime = Date.now();
   state.promptStartTime = Date.now();
   state.processing = true;
+  state.currentPromptId = Math.random();
   await saveState();
   
-  chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() }).catch(() => {});
+  try {
+    chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
+  } catch (_) {}
 
   try {
     await sendToContent(state.tabId, { 
@@ -370,14 +412,17 @@ async function sendNextPrompt() {
       text: promptText, 
       index: state.currentIndex, 
       total: state.prompts.length, 
-      options: state.options 
+      options: state.options,
+      promptId: state.currentPromptId,
     });
   } catch (err) {
     console.error("Error sending prompt to content:", err);
     state.processing = false;
-    // Trigger recovery on send failure
     state.lastActivityTime = Date.now() - RECOVERY_CONFIG.staleThresholdMs - 1000;
     await saveState();
+    try {
+      chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(err), status: getStatus() });
+    } catch (_) {}
   }
 }
 
@@ -399,115 +444,136 @@ function makeHistorySignature(item) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
-    switch (message?.type) {
-      case "CONTENT_READY": {
-        // Content script injected and ready
-        state.lastActivityTime = Date.now();
-        await saveState();
-        return;
-      }
-      case "START_AUTOMATION": {
-        const prompts = Array.isArray(message.prompts) ? message.prompts.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
-        const tabId = message.tabId;
-        const options = message.options || {};
-        if (!tabId || prompts.length === 0) {
-          sendResponse({ ok: false, error: "Missing tabId or prompts." });
+    try {
+      switch (message?.type) {
+        case "CONTENT_READY": {
+          state.lastActivityTime = Date.now();
+          await saveState();
           return;
         }
-        try {
-          const tab = await chrome.tabs.get(tabId);
-          if (!isSupportedUrl(tab?.url)) {
-            sendResponse({ ok: false, error: 'Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.' });
+        case "START_AUTOMATION": {
+          const prompts = Array.isArray(message.prompts) ? message.prompts.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
+          const tabId = message.tabId;
+          const options = message.options || {};
+          if (!tabId || prompts.length === 0) {
+            sendResponse({ ok: false, error: "Missing tabId or prompts." });
             return;
           }
-        } catch (e) {
-          sendResponse({ ok: false, error: 'Unable to read active tab.' });
-          return;
-        }
-        sendResponse({ ok: true });
-        try {
-          await startAutomation({ prompts, tabId, options });
-        } catch (e) {
-          state.running = false;
-          await saveState();
-          chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(e), status: getStatus() }).catch(() => {});
-        }
-        return;
-      }
-      case "STOP_AUTOMATION": {
-        state.running = false;
-        await clearState();
-        sendResponse({ ok: true });
-        return;
-      }
-      case "AUTOMATION_STATUS_REQUEST": {
-        await loadSettings();
-        sendResponse({ ok: true, status: getStatus() });
-        return;
-      }
-      case "RESPONSE_COMPLETE": {
-        sendResponse({ ok: true });
-        if (!state.running || !state.processing) {
-          return;
-        }
-        state.processing = false;
-        state.currentIndex += 1;
-        state.lastActivityTime = Date.now();
-        state.recoveryAttempts = 0; // Reset recovery attempts on successful completion
-        await saveState();
-        chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() }).catch(() => {});
-        
-        // Small delay before next prompt to avoid rate limiting
-        await new Promise(resolve => setTimeout(resolve, 500));
-        await sendNextPrompt();
-        return;
-      }
-      case "SAVE_PROMPT_HISTORY": {
-        const historyItem = message.item;
-        if (historyItem && typeof historyItem === 'object') {
-          const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
-          const sig = makeHistorySignature(historyItem);
-          const exists = aiTaskSequencerHistory.some((h) => h.__sig === sig);
-          if (!exists) {
-            aiTaskSequencerHistory.unshift({ ...historyItem, savedAt: Date.now(), __sig: sig });
-            const trimmed = aiTaskSequencerHistory.slice(0, 50);
-            await chrome.storage.local.set({ aiTaskSequencerHistory: trimmed });
+          try {
+            const tab = await chrome.tabs.get(tabId);
+            if (!isSupportedUrl(tab?.url)) {
+              sendResponse({ ok: false, error: 'Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.' });
+              return;
+            }
+          } catch (e) {
+            sendResponse({ ok: false, error: 'Unable to read active tab.' });
+            return;
           }
           sendResponse({ ok: true });
-        } else {
-          sendResponse({ ok: false, error: 'Invalid history item' });
+          try {
+            await startAutomation({ prompts, tabId, options });
+          } catch (e) {
+            console.error('[StartAutomation] Error:', e);
+            state.running = false;
+            await saveState();
+            try {
+              chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(e), status: getStatus() });
+            } catch (_) {}
+          }
+          return;
         }
-        return;
-      }
-      case "GET_PROMPT_HISTORY": {
-        const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
-        sendResponse({ ok: true, history: aiTaskSequencerHistory });
-        return;
-      }
-      case "DELETE_PROMPT_HISTORY": {
-        const index = message.index;
-        const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
-        if (typeof index === 'number' && index >= 0 && index < aiTaskSequencerHistory.length) {
-          aiTaskSequencerHistory.splice(index, 1);
-          await chrome.storage.local.set({ aiTaskSequencerHistory });
+        case "STOP_AUTOMATION": {
+          state.running = false;
+          await clearState();
           sendResponse({ ok: true });
-        } else {
-          sendResponse({ ok: false, error: 'Invalid index' });
+          return;
         }
-        return;
+        case "AUTOMATION_STATUS_REQUEST": {
+          await loadSettings();
+          sendResponse({ ok: true, status: getStatus() });
+          return;
+        }
+        case "RESPONSE_COMPLETE": {
+          sendResponse({ ok: true });
+          if (!state.running || !state.processing) {
+            return;
+          }
+          if (message.promptId && message.promptId !== state.currentPromptId) {
+            console.log('[ResponseComplete] Stale prompt response, ignoring');
+            return;
+          }
+          state.processing = false;
+          state.currentIndex += 1;
+          state.lastActivityTime = Date.now();
+          state.recoveryAttempts = 0;
+          await saveState();
+          try {
+            chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
+          } catch (_) {}
+          
+          await new Promise(resolve => setTimeout(resolve, 500));
+          try {
+            await sendNextPrompt();
+          } catch (e) {
+            console.error('[ResponseComplete] Error sending next prompt:', e);
+            state.running = false;
+            await saveState();
+            try {
+              chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(e), status: getStatus() });
+            } catch (_) {}
+          }
+          return;
+        }
+        case "SAVE_PROMPT_HISTORY": {
+          const historyItem = message.item;
+          if (historyItem && typeof historyItem === 'object') {
+            const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
+            const sig = makeHistorySignature(historyItem);
+            const exists = aiTaskSequencerHistory.some((h) => h.__sig === sig);
+            if (!exists) {
+              aiTaskSequencerHistory.unshift({ ...historyItem, savedAt: Date.now(), __sig: sig });
+              const trimmed = aiTaskSequencerHistory.slice(0, 50);
+              await chrome.storage.local.set({ aiTaskSequencerHistory: trimmed });
+            }
+            sendResponse({ ok: true });
+          } else {
+            sendResponse({ ok: false, error: 'Invalid history item' });
+          }
+          return;
+        }
+        case "GET_PROMPT_HISTORY": {
+          const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
+          sendResponse({ ok: true, history: aiTaskSequencerHistory });
+          return;
+        }
+        case "DELETE_PROMPT_HISTORY": {
+          const index = message.index;
+          const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
+          if (typeof index === 'number' && index >= 0 && index < aiTaskSequencerHistory.length) {
+            aiTaskSequencerHistory.splice(index, 1);
+            await chrome.storage.local.set({ aiTaskSequencerHistory });
+            sendResponse({ ok: true });
+          } else {
+            sendResponse({ ok: false, error: 'Invalid index' });
+          }
+          return;
+        }
+        case "SAVE_SETTINGS": {
+          await saveSettings(message.settings || {});
+          sendResponse({ ok: true, settings: state.options });
+          return;
+        }
+        case "GET_SETTINGS": {
+          await loadSettings();
+          sendResponse({ ok: true, settings: state.options });
+          return;
+        }
+        default:
+          return;
       }
-      case "SAVE_SETTINGS": {
-        await saveSettings(message.settings || {});
-        sendResponse({ ok: true, settings: state.options });
-        return;
-      }
-      case "GET_SETTINGS": {
-        await loadSettings();
-        sendResponse({ ok: true, settings: state.options });
-        return;
-      }
-      default:
-        return;
+    } catch (e) {
+      console.error('[MessageHandler] Unhandled error:', e);
+      sendResponse({ ok: false, error: String(e) });
     }
   })();
   return true;
@@ -522,7 +588,6 @@ chrome.runtime.onStartup.addListener(async () => {
     console.log('[Startup] Found running automation, attempting recovery');
     state.lastActivityTime = Date.now() - RECOVERY_CONFIG.staleThresholdMs - 1000;
     await saveState();
-    // Health check will pick it up
   }
 });
 
