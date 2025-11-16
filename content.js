@@ -328,11 +328,19 @@
       }
 
       if (message?.type === 'SEND_PROMPT' && typeof message.text === 'string') {
+        if (isProcessing) {
+          console.warn('AI Task Sequencer: Ignoring SEND_PROMPT, already processing.');
+          sendResponse({ ok: false, error: 'Already processing another prompt.' });
+          return;
+        }
+        isProcessing = true;
         try {
           await handleSendPrompt(message.text, message.options);
           sendResponse({ ok: true });
         } catch (e) {
           sendResponse({ ok: false, error: String(e) });
+        } finally {
+          isProcessing = false;
         }
         return;
       }

@@ -15,6 +15,7 @@ const state = {
   },
   lastActivityTime: Date.now(),
   recoveryAttempts: 0,
+  processing: false,
 };
 
 const DEFAULT_SETTINGS = {
@@ -435,13 +436,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         state.processing = true;
-        state.currentIndex += 1;
-        state.lastActivityTime = Date.now();
-        state.recoveryAttempts = 0; // Reset on successful completion
-        await saveState();
-        chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() }).catch(() => {});
-        await sendNextPrompt();
-        state.processing = false;
+        try {
+          state.currentIndex += 1;
+          state.lastActivityTime = Date.now();
+          state.recoveryAttempts = 0; // Reset on successful completion
+          await saveState();
+          chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() }).catch(() => {});
+          await sendNextPrompt();
+        } finally {
+          state.processing = false;
+        }
         return;
       }
       case "SAVE_PROMPT_HISTORY": {
