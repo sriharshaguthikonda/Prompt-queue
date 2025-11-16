@@ -10,9 +10,17 @@ function parsePrompts(text) {
     .filter((s) => s.length > 0);
 }
 
-function setStatus(text) {
+function setStatus(text, type = 'idle') {
   const statusEl = document.getElementById('status');
-  statusEl.textContent = text;
+  const badge = statusEl.querySelector('.status-badge');
+  const dot = statusEl.querySelector('.status-dot');
+  
+  if (badge) {
+    badge.className = `status-badge status-${type}`;
+    badge.innerHTML = `<span class="status-dot ${type}"></span><span>${text}</span>`;
+  } else {
+    statusEl.textContent = text;
+  }
 }
 
 function setProgress(current, total) {
@@ -20,6 +28,92 @@ function setProgress(current, total) {
   if (!bar || !total) return;
   const pct = Math.min(100, Math.max(0, Math.round(((current) / total) * 100)));
   bar.style.width = `${pct}%`;
+}
+
+// Toast Notifications
+function showToast(message, type = 'info', duration = 3000) {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  
+  toast.textContent = message;
+  toast.className = `toast show ${type}`;
+  
+  setTimeout(() => {
+    toast.classList.remove('show');
+  }, duration);
+}
+
+// Error Handling
+function showError(message, details = null, stack = null) {
+  const errorPanel = document.getElementById('errorPanel');
+  if (!errorPanel) return;
+  
+  const errorMessage = errorPanel.querySelector('.error-message');
+  const errorStack = errorPanel.querySelector('.error-stack');
+  const errorDetailsDiv = errorPanel.querySelector('.error-details');
+  const toggleBtn = errorPanel.querySelector('.error-toggle-details');
+  
+  // Set error message
+  errorMessage.textContent = message;
+  
+  // Set error details
+  if (details || stack) {
+    const detailsText = [
+      details ? `Details: ${details}` : '',
+      stack ? `Stack: ${stack}` : ''
+    ].filter(Boolean).join('\n\n');
+    
+    errorStack.textContent = detailsText;
+    toggleBtn.style.display = 'inline-block';
+  } else {
+    toggleBtn.style.display = 'none';
+  }
+  
+  // Show error panel
+  errorPanel.classList.remove('hidden');
+  
+  // Auto-hide after 10 seconds
+  setTimeout(() => {
+    hideError();
+  }, 10000);
+}
+
+function hideError() {
+  const errorPanel = document.getElementById('errorPanel');
+  if (errorPanel) {
+    errorPanel.classList.add('hidden');
+  }
+}
+
+function clearError() {
+  const errorPanel = document.getElementById('errorPanel');
+  if (errorPanel) {
+    errorPanel.querySelector('.error-message').textContent = '';
+    errorPanel.querySelector('.error-stack').textContent = '';
+    errorPanel.querySelector('.error-details').classList.add('hidden');
+    errorPanel.querySelector('.error-toggle-details').textContent = 'Show Details';
+  }
+}
+
+// Button State Management
+function setButtonsDisabled(disabled) {
+  const shouldDisable = disabled && document.getElementById('disableButtonsDuringAutomation')?.checked;
+  const buttons = document.querySelectorAll('button:not(#disableButtonsDuringAutomation)');
+  buttons.forEach(btn => {
+    btn.disabled = shouldDisable;
+  });
+}
+
+// Loading Skeleton
+function showHistoryLoading(show = true) {
+  const loading = document.getElementById('historyLoading');
+  const history = document.getElementById('history');
+  if (show) {
+    loading?.classList.remove('hidden');
+    history.innerHTML = '';
+  } else {
+    loading?.classList.add('hidden');
+  }
 }
 
 function secToMs(v) { return typeof v === 'number' && !Number.isNaN(v) ? Math.round(v * 1000) : undefined; }
@@ -31,17 +125,18 @@ async function refreshStatus() {
     if (res?.ok && res.status) {
       const { running, currentIndex, total, recoveryAttempts } = res.status;
       setProgress(running ? currentIndex : total, total);
+      setButtonsDisabled(running);
       if (running) {
         // Show recovery status if attempting recovery
         if (recoveryAttempts > 0) {
-          setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`);
+          setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`, 'running');
         } else {
-          setStatus(`Running prompt ${currentIndex + 1} of ${total}...`);
+          setStatus(`Running prompt ${currentIndex + 1} of ${total}...`, 'running');
         }
       } else if (total > 0 && currentIndex >= total) {
-        setStatus('Complete');
+        setStatus('Complete', 'idle');
       } else {
-        setStatus('Idle');
+        setStatus('Idle', 'idle');
       }
     }
   } catch (e) {
@@ -158,7 +253,7 @@ if (saveHistoryBtn) {
       const textarea = document.getElementById('prompts');
       const prompts = parsePrompts(textarea.value);
       if (prompts.length === 0) {
-        setStatus('No prompts to save.');
+        showToast('No prompts to save', 'error');
         return;
       }
       const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
@@ -168,12 +263,10 @@ if (saveHistoryBtn) {
       });
       // Immediately refresh the history list
       await loadHistoryIntoUI();
-      setStatus('Saved to history');
-      // Clear status after 2 seconds
-      setTimeout(() => setStatus('Idle'), 2000);
+      showToast('✓ Saved to history', 'success');
     } catch (e) {
       console.error('[SaveHistoryBtn] Error:', e);
-      setStatus('Failed to save history');
+      showToast('Failed to save history', 'error');
     }
   });
 }
@@ -184,11 +277,10 @@ if (reloadHistoryBtn) {
   reloadHistoryBtn.addEventListener('click', async () => {
     try {
       await loadHistoryIntoUI();
-      setStatus('History reloaded');
-      setTimeout(() => setStatus('Idle'), 1500);
+      showToast('✓ History reloaded', 'success');
     } catch (e) {
       console.error('[ReloadHistoryBtn] Error:', e);
-      setStatus('Failed to reload history');
+      showToast('Failed to reload history', 'error');
     }
   });
 }
@@ -215,12 +307,11 @@ if (exportBtn) {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        setStatus('Exported successfully');
-        setTimeout(() => setStatus('Idle'), 2000);
+        showToast(`✓ Exported ${res.history.length} items`, 'success');
       }
     } catch (e) {
       console.error('[ExportBtn] Error:', e);
-      setStatus('Export failed');
+      showToast('Export failed', 'error');
     }
   });
 }
@@ -242,7 +333,7 @@ if (importBtn && importFile) {
       const importData = JSON.parse(text);
       
       if (!importData.history || !Array.isArray(importData.history)) {
-        setStatus('Invalid JSON format');
+        showToast('Invalid JSON format', 'error');
         return;
       }
       
@@ -258,11 +349,10 @@ if (importBtn && importFile) {
       
       // Reload UI
       await loadHistoryIntoUI();
-      setStatus(`Imported ${importData.history.length} items`);
-      setTimeout(() => setStatus('Idle'), 2000);
+      showToast(`✓ Imported ${importData.history.length} items`, 'success');
     } catch (e) {
       console.error('[ImportFile] Error:', e);
-      setStatus('Import failed: ' + e.message);
+      showToast(`Import failed: ${e.message}`, 'error');
     }
     
     // Reset file input
@@ -281,11 +371,20 @@ function createHistoryRow(item, index) {
 
   const left = document.createElement('div');
   left.style.flex = '1';
-  left.style.whiteSpace = 'nowrap';
-  left.style.overflow = 'hidden';
-  left.style.textOverflow = 'ellipsis';
-  left.textContent = `${date}: ${title}`;
-  left.title = (item.prompts || []).join('\n');
+  
+  const titleEl = document.createElement('div');
+  titleEl.style.whiteSpace = 'nowrap';
+  titleEl.style.overflow = 'hidden';
+  titleEl.style.textOverflow = 'ellipsis';
+  titleEl.textContent = title;
+  titleEl.title = (item.prompts || []).join('\n');
+  
+  const dateEl = document.createElement('div');
+  dateEl.className = 'history-item-date';
+  dateEl.textContent = date;
+  
+  left.appendChild(titleEl);
+  left.appendChild(dateEl);
 
   const ctrls = document.createElement('div');
   ctrls.className = 'mini-controls';
@@ -298,6 +397,7 @@ function createHistoryRow(item, index) {
       await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: item.settings });
       await loadSettingsIntoUI();
     }
+    updatePromptCount();
   });
 
   const delBtn = document.createElement('button');
@@ -319,42 +419,77 @@ function createHistoryRow(item, index) {
 async function loadHistoryIntoUI() {
   try {
     const list = document.getElementById('history');
+    const countBadge = document.getElementById('historyCount');
+    const clearBtn = document.getElementById('clearHistoryBtn');
+    
     if (!list) {
       console.error('[LoadHistory] History list element not found');
       return;
     }
-    list.innerHTML = '';
+    
+    showHistoryLoading(true);
+    
+    // Simulate loading delay for better UX
+    await new Promise(r => setTimeout(r, 300));
+    
     const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
     if (res?.ok) {
-      (res.history || []).forEach((item, idx) => {
+      const history = res.history || [];
+      if (countBadge) {
+        countBadge.textContent = `${history.length} item${history.length !== 1 ? 's' : ''}`;
+      }
+      if (clearBtn) {
+        clearBtn.style.display = history.length > 0 ? 'block' : 'none';
+      }
+      history.forEach((item, idx) => {
         list.appendChild(createHistoryRow(item, idx));
       });
     }
+    
+    showHistoryLoading(false);
   } catch (e) {
     console.error('[LoadHistory] Error:', e);
+    showHistoryLoading(false);
   }
 }
 
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
-    const { currentIndex, total, recoveryAttempts } = message.status;
-    lastActivityTime = Date.now();
-    // Show recovery status if attempting recovery
-    if (recoveryAttempts > 0) {
-      setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`);
-    } else {
-      setStatus(`Running prompt ${currentIndex + 1} of ${total}...`);
+  try {
+    if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
+      const { currentIndex, total, recoveryAttempts } = message.status;
+      lastActivityTime = Date.now();
+      setButtonsDisabled(true);
+      clearError();
+      // Show recovery status if attempting recovery
+      if (recoveryAttempts > 0) {
+        setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`, 'running');
+      } else {
+        setStatus(`Running prompt ${currentIndex + 1} of ${total}...`, 'running');
+      }
+      setProgress(currentIndex, total);
+    } else if (message?.type === 'AUTOMATION_COMPLETE') {
+      setStatus('Complete', 'idle');
+      setProgress(1, 1);
+      setButtonsDisabled(false);
+      clearError();
+      showToast('✓ Automation complete!', 'success');
+      stopCountdownTimer();
+    } else if (message?.type === 'AUTOMATION_ERROR') {
+      setStatus(`Error: ${message.error}`, 'error');
+      setButtonsDisabled(false);
+      showToast(`✗ Error: ${message.error}`, 'error', 5000);
+      showError(
+        `Automation Error: ${message.error}`,
+        message.details || 'No additional details available',
+        message.stack || 'No stack trace available'
+      );
+      stopCountdownTimer();
+      // Refresh status after error to show proper state
+      setTimeout(refreshStatus, 1000);
     }
-    setProgress(currentIndex, total);
-  } else if (message?.type === 'AUTOMATION_COMPLETE') {
-    setStatus('Complete');
-    setProgress(1, 1);
-    stopCountdownTimer();
-  } else if (message?.type === 'AUTOMATION_ERROR') {
-    setStatus(`Error: ${message.error}`);
-    stopCountdownTimer();
-    // Refresh status after error to show proper state
-    setTimeout(refreshStatus, 1000);
+  } catch (e) {
+    console.error('[MessageListener] Error handling message:', e);
+    showError('Failed to handle message', e.message, e.stack);
   }
 });
 
@@ -445,6 +580,132 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 });
 
+// Collapsible sections
+document.getElementById('optionsHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#optionsHeader .collapsible-toggle');
+  const content = document.getElementById('optionsContent');
+  toggle.classList.toggle('collapsed');
+  content.classList.toggle('collapsed');
+});
+
+document.getElementById('advancedHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#advancedHeader .collapsible-toggle');
+  const content = document.getElementById('advancedContent');
+  toggle.classList.toggle('collapsed');
+  content.classList.toggle('collapsed');
+});
+
+// Prompt counter
+const promptsTextarea = document.getElementById('prompts');
+const updatePromptCount = () => {
+  const prompts = parsePrompts(promptsTextarea.value);
+  const counter = document.querySelector('.prompt-counter');
+  if (counter) {
+    counter.textContent = `${prompts.length} prompt${prompts.length !== 1 ? 's' : ''} loaded`;
+  }
+};
+
+if (promptsTextarea) {
+  promptsTextarea.addEventListener('input', updatePromptCount);
+  updatePromptCount();
+}
+
+// Preset buttons
+const presets = {
+  fast: { maxWait: 60, stable: 0.5, poll: 0.2 },
+  balanced: { maxWait: 180, stable: 1.2, poll: 0.3 },
+  thorough: { maxWait: 300, stable: 2, poll: 0.3 }
+};
+
+document.querySelectorAll('.preset-btn[data-preset]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const preset = btn.dataset.preset;
+    const config = presets[preset];
+    if (config) {
+      document.getElementById('maxWaitSec').value = config.maxWait;
+      document.getElementById('stableSec').value = config.stable;
+      document.getElementById('pollSec').value = config.poll;
+      saveSettingsFromUI();
+      
+      // Visual feedback
+      document.querySelectorAll('.preset-btn[data-preset]').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+  });
+});
+
+// History search
+const historySearch = document.getElementById('historySearch');
+if (historySearch) {
+  historySearch.addEventListener('input', (e) => {
+    const query = e.target.value.toLowerCase();
+    document.querySelectorAll('.history-item').forEach(item => {
+      const text = item.textContent.toLowerCase();
+      item.style.display = text.includes(query) ? '' : 'none';
+    });
+  });
+}
+
+// Clear history button
+const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+if (clearHistoryBtn) {
+  clearHistoryBtn.addEventListener('click', async () => {
+    if (confirm('Are you sure you want to clear all saved histories? This cannot be undone.')) {
+      try {
+        await chrome.storage.local.set({ aiTaskSequencerHistory: [] });
+        await loadHistoryIntoUI();
+        showToast('✓ History cleared', 'success');
+      } catch (e) {
+        console.error('[ClearHistory] Error:', e);
+        showToast('Failed to clear history', 'error');
+      }
+    }
+  });
+}
+
+// Error Panel Event Listeners
+const errorPanel = document.getElementById('errorPanel');
+if (errorPanel) {
+  // Close button
+  const closeBtn = errorPanel.querySelector('.error-close');
+  if (closeBtn) {
+    closeBtn.addEventListener('click', hideError);
+  }
+  
+  // Toggle details button
+  const toggleBtn = errorPanel.querySelector('.error-toggle-details');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      const details = errorPanel.querySelector('.error-details');
+      const isHidden = details.classList.contains('hidden');
+      
+      if (isHidden) {
+        details.classList.remove('hidden');
+        toggleBtn.textContent = 'Hide Details';
+      } else {
+        details.classList.add('hidden');
+        toggleBtn.textContent = 'Show Details';
+      }
+    });
+  }
+  
+  // Copy error button
+  const copyBtn = errorPanel.querySelector('.error-copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      const message = errorPanel.querySelector('.error-message').textContent;
+      const stack = errorPanel.querySelector('.error-stack').textContent;
+      const fullError = `${message}\n\n${stack}`;
+      
+      navigator.clipboard.writeText(fullError).then(() => {
+        showToast('✓ Error copied to clipboard', 'success', 2000);
+      }).catch(() => {
+        showToast('Failed to copy error', 'error');
+      });
+    });
+  }
+}
+
 // Stop auto-refresh when popup closes
 window.addEventListener('unload', () => {
   stopAutoRefresh();
@@ -452,7 +713,12 @@ window.addEventListener('unload', () => {
 });
 
 (async function init() {
-  await loadSettingsIntoUI();
-  await loadHistoryIntoUI();
-  await refreshStatus();
+  try {
+    await loadSettingsIntoUI();
+    await loadHistoryIntoUI();
+    await refreshStatus();
+  } catch (e) {
+    console.error('[Init] Error during initialization:', e);
+    showError('Failed to initialize extension', e.message, e.stack);
+  }
 })();

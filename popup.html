@@ -3,66 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <title>Auto-Prompt: Go grab a coffee</title>
-    <style>
-      body.theme-dark {
-        --bg: #0b0f14;
-        --panel: #111723;
-        --panel-2: #0e1522;
-        --text: #e6edf3;
-        --muted: #a3b1c2;
-        --accent: #10b981;
-        --border: #1e293b;
-        --input-bg: #0a1220;
-        --btn1-from: #16a34a;
-        --btn1-to: #15803d;
-        --btn2-from: #1b2540;
-        --btn2-to: #151c31;
-      }
-      body.theme-light {
-        --bg: #f8fafc;
-        --panel: #ffffff;
-        --panel-2: #ffffff;
-        --text: #0f172a;
-        --muted: #475569;
-        --accent: #10b981;
-        --border: #e2e8f0;
-        --input-bg: #ffffff;
-        --btn1-from: #22c55e;
-        --btn1-to: #16a34a;
-        --btn2-from: #ffffff;
-        --btn2-to: #ffffff;
-      }
-      body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; margin: 0; width: 100%; max-width: 500px; color: var(--text); background: var(--bg); }
-      .container { padding: 12px; }
-      .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 8px; }
-      h1 { font-size: 16px; margin: 0; }
-      .tagline { font-size: 12px; color: var(--muted); margin: 6px 0 12px; }
-      .theme-toggle { display:flex; gap:6px; align-items:center; font-size:12px; color: var(--muted); }
-      .theme-toggle select { border:1px solid var(--border); background: var(--input-bg); color: var(--text); border-radius:8px; padding:4px 6px; }
-      .card { background: linear-gradient(180deg, var(--panel), var(--panel-2)); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
-      label { font-size: 12px; color: var(--muted); }
-      .desc { font-size: 11px; color: var(--muted); margin-top: 4px; }
-      textarea { width: 100%; height: 120px; box-sizing: border-box; resize: vertical; border-radius: 8px; padding: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text); transition: all 0.3s ease; }
-      textarea:focus { height: 250px; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2); }
-      input[type="text"], input[type="number"] { width: 100%; box-sizing: border-box; border-radius: 8px; padding: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text); }
-      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-      .controls { display: flex; gap: 8px; margin-top: 8px; }
-      button { flex: 1; padding: 10px; cursor: pointer; border-radius: 8px; border: 1px solid var(--border); background: linear-gradient(180deg, var(--btn2-from), var(--btn2-to)); color: var(--text); font-weight: 600; }
-      button.primary { background: linear-gradient(180deg, var(--btn1-from), var(--btn1-to)); border-color: var(--btn1-to); color: #fff; }
-      button.secondary { background: linear-gradient(180deg, var(--btn2-from), var(--btn2-to)); }
-      .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
-      #status { margin-top: 8px; font-size: 12px; color: var(--muted); white-space: pre-wrap; }
-      .section-title { font-size: 12px; color: var(--muted); margin: 10px 0 6px; }
-      .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-      .history-list { max-height: 120px; overflow: auto; display: grid; gap: 6px; }
-      .history-item { background: var(--input-bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px; font-size: 11px; color: var(--muted); }
-      .inline { display: flex; gap: 8px; align-items: center; }
-      .inline input[type="checkbox"] { transform: scale(1.1); }
-      .progress { height: 8px; border-radius: 999px; background: rgba(148,163,184,0.25); overflow: hidden; }
-      .bar { height: 100%; width: 0; background: linear-gradient(90deg, var(--btn1-from), var(--btn1-to)); transition: width 0.25s ease; }
-      .history-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-      .mini-controls { display:flex; gap:6px; }
-    </style>
+    <link rel="stylesheet" href="styles.css" />
   </head>
   <body class="theme-dark">
     <div class="container">
@@ -79,47 +20,65 @@
       <div class="tagline">Let the AI Always Work, Then Check: Seamless Task Queuing for Busy Minds.</div>
 
       <div class="card">
-        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
-          <div style="flex: 2;">
+        <div class="prompts-container">
+          <div class="prompts-left">
             <label for="prompts">Prompts (one per line)</label>
-            <textarea id="prompts" placeholder="Paste prompts here, one per line..." style="height: 150px;"></textarea>
+            <textarea id="prompts" placeholder="Paste prompts here, one per line..."></textarea>
+            <div class="prompt-counter">0 prompts loaded</div>
           </div>
-          <div style="flex: 1;">
+          <div class="prompts-right">
             <div class="inline">
               <input id="prependSystemPrompt" type="checkbox" checked />
               <label for="prependSystemPrompt">Prepend to each prompt</label>
             </div>
-            <textarea id="systemPrompt" placeholder="Optional system prompt..." style="height: 150px; font-size: 12px;"></textarea>
+            <textarea id="systemPrompt" placeholder="Optional system prompt..."></textarea>
           </div>
         </div>
 
-        <div class="section-title">Options</div>
-        <div class="row">
-          <div>
-            <label for="maxWaitSec">Max wait (seconds)</label>
-            <input id="maxWaitSec" type="number" min="5" step="5" placeholder="180" />
-            <div class="desc">Upper limit per prompt. We stop waiting and move on once this time is reached.</div>
+        <div class="preset-buttons">
+          <button class="preset-btn" data-preset="fast">⚡ Fast</button>
+          <button class="preset-btn" data-preset="balanced">⚖️ Balanced</button>
+          <button class="preset-btn" data-preset="thorough">🔍 Thorough</button>
+        </div>
+
+        <div class="collapsible-header" id="optionsHeader">
+          <span class="collapsible-toggle">▼</span>
+          <span class="section-title" style="margin: 0;">Options</span>
+        </div>
+        <div class="collapsible-content" id="optionsContent">
+          <div class="row">
+            <div>
+              <label for="maxWaitSec">Max wait (seconds)</label>
+              <input id="maxWaitSec" type="number" min="5" step="5" placeholder="180" />
+              <div class="desc">Upper limit per prompt. We stop waiting and move on once this time is reached.</div>
+            </div>
+            <div>
+              <label for="stableSec">Stable (seconds)</label>
+              <input id="stableSec" type="number" min="0.2" step="0.1" placeholder="1.2" />
+              <div id="stableCountdown" class="desc" style="color: var(--accent); font-weight: 600; margin-top: 4px; display: none;">Countdown: <span id="countdownValue">0.0</span>s</div>
+              <div class="desc">How long the page must stay unchanged (no new tokens/DOM changes) to consider the answer finished.</div>
+            </div>
           </div>
-          <div>
-            <label for="stableSec">Stable (seconds)</label>
-            <input id="stableSec" type="number" min="0.2" step="0.1" placeholder="1.2" />
-            <div id="stableCountdown" class="desc" style="color: var(--accent); font-weight: 600; margin-top: 4px; display: none;">Countdown: <span id="countdownValue">0.0</span>s</div>
-            <div class="desc">How long the page must stay unchanged (no new tokens/DOM changes) to consider the answer finished.</div>
+          <div class="row">
+            <div>
+              <label for="pollSec">Poll interval (seconds)</label>
+              <input id="pollSec" type="number" min="0.1" step="0.05" placeholder="0.3" />
+              <div class="desc">How often we check for changes. Smaller values can finish a bit sooner but cost more CPU.</div>
+            </div>
           </div>
         </div>
-        <div class="row">
-          <div>
-            <label for="pollSec">Poll interval (seconds)</label>
-            <input id="pollSec" type="number" min="0.1" step="0.05" placeholder="0.3" />
-            <div class="desc">How often we check for changes. Smaller values can finish a bit sooner but cost more CPU.</div>
+
+        <div class="collapsible-header" id="advancedHeader">
+          <span class="collapsible-toggle collapsed">▼</span>
+          <span class="section-title" style="margin: 0;">Advanced Options</span>
+        </div>
+        <div class="collapsible-content collapsed" id="advancedContent">
+          <div class="inline">
+            <input id="enableMaxWaitTimeout" type="checkbox" checked />
+            <label for="enableMaxWaitTimeout">Enable max wait timeout</label>
           </div>
+          <div class="desc">If disabled, will wait indefinitely for response. If enabled, will timeout after max wait seconds.</div>
         </div>
-        <div class="section-title">Advanced Options</div>
-        <div class="inline">
-          <input id="enableMaxWaitTimeout" type="checkbox" checked />
-          <label for="enableMaxWaitTimeout">Enable max wait timeout</label>
-        </div>
-        <div class="desc">If disabled, will wait indefinitely for response. If enabled, will timeout after max wait seconds.</div>
 
         <div class="progress" aria-hidden="true"><div id="progressBar" class="bar"></div></div>
 
@@ -128,21 +87,60 @@
           <button id="stopBtn" class="secondary">Stop</button>
         </div>
         <div class="hint">Open ChatGPT, Gemini, Grok, or Claude in the active tab, then click Start.</div>
-        <div id="status">Idle</div>
+        <div id="status">
+          <span class="status-badge status-idle">
+            <span class="status-dot idle"></span>
+            <span>Idle</span>
+          </span>
+        </div>
       </div>
 
       <div class="section-title">Saved prompt histories</div>
       <div class="card">
-        <div class="controls">
-          <button id="saveHistoryBtn" class="secondary">Save current as history</button>
-          <button id="reloadHistoryBtn" class="secondary">Reload</button>
+        <div class="history-header">
+          <div class="history-buttons">
+            <button id="saveHistoryBtn" class="preset-btn">💾 Save</button>
+            <button id="reloadHistoryBtn" class="preset-btn">🔄 Reload</button>
+          </div>
+          <span class="history-count" id="historyCount">0 items</span>
         </div>
-        <div class="controls">
-          <button id="exportBtn" class="secondary">Export as JSON</button>
-          <button id="importBtn" class="secondary">Import from JSON</button>
-          <input id="importFile" type="file" accept=".json" style="display: none;" />
+        <div class="history-buttons">
+          <button id="exportBtn" class="preset-btn">📥 Export</button>
+          <button id="importBtn" class="preset-btn">📤 Import</button>
+          <input id="importFile" type="file" accept=".json" />
+        </div>
+        <input id="historySearch" class="history-search" type="text" placeholder="Search histories..." />
+        <div id="historyLoading" class="history-loading">
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
+          <div class="skeleton"></div>
         </div>
         <div id="history" class="history-list"></div>
+        <button id="clearHistoryBtn" class="preset-btn clear-history-btn">🗑️ Clear all</button>
+      </div>
+
+      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+        <input id="disableButtonsDuringAutomation" type="checkbox" checked />
+        <label for="disableButtonsDuringAutomation">Disable buttons during automation</label>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="toast"></div>
+
+    <!-- Error Panel -->
+    <div id="errorPanel" class="error-panel hidden">
+      <div class="error-header">
+        <span class="error-title">⚠️ Error Details</span>
+        <button class="error-close">✕</button>
+      </div>
+      <div class="error-content">
+        <div class="error-message"></div>
+        <div class="error-details hidden">
+          <div class="error-stack"></div>
+          <button class="error-copy-btn">📋 Copy Error</button>
+        </div>
+        <button class="error-toggle-details">Show Details</button>
       </div>
     </div>
 

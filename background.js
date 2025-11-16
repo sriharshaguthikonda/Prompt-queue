@@ -5,6 +5,48 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
 });
 
+// Handle tab activation to resume automation
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
+  // If automation is running and we switch to the automation tab, resume it
+  if (state.running && state.tabId === activeInfo.tabId) {
+    console.log('[TabActivated] Resuming automation on tab:', activeInfo.tabId);
+    // Send resume signal to content script
+    try {
+      await chrome.tabs.sendMessage(activeInfo.tabId, { 
+        type: 'RESUME_AUTOMATION',
+        state: state
+      });
+    } catch (e) {
+      console.error('[TabActivated] Error resuming automation:', e);
+    }
+  }
+});
+
+// Handle tab updates (navigation, refresh, etc.)
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // If the automation tab is being refreshed, pause automation
+  if (state.running && state.tabId === tabId && changeInfo.status === 'loading') {
+    console.log('[TabUpdated] Tab is loading, pausing automation');
+    state.running = false;
+    // Notify popup
+    chrome.runtime.sendMessage({ 
+      type: 'AUTOMATION_PAUSED',
+      reason: 'Tab is loading'
+    }).catch(() => {});
+  }
+  
+  // If the automation tab finished loading, resume
+  if (state.running === false && state.tabId === tabId && changeInfo.status === 'complete') {
+    console.log('[TabUpdated] Tab loaded, resuming automation');
+    state.running = true;
+    // Send resume signal
+    chrome.tabs.sendMessage(tabId, { 
+      type: 'RESUME_AUTOMATION',
+      state: state
+    }).catch(() => {});
+  }
+});
+
 const state = {
   prompts: [],
   currentIndex: 0,

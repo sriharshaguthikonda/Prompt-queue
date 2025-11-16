@@ -316,8 +316,9 @@
     });
   }
 
-  function waitForStreamsToStop({ stopButtonSelector, maxWaitMs }) {
-    const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
+  function waitForStreamsToStop({ stopButtonSelector, maxWaitMs, enableTimeout }) {
+    const enableTimeoutCheck = enableTimeout !== false;
+    const effectiveMaxWaitMs = enableTimeoutCheck && typeof maxWaitMs === 'number' ? maxWaitMs : Infinity;
 
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
@@ -334,7 +335,8 @@
           console.log('[WaitForStreamsToStop] No stop button detected', { 
             noStopButtonCount, 
             requiredNoStopChecks,
-            elapsed 
+            elapsed,
+            enableTimeout: enableTimeoutCheck
           });
           
           // Require multiple consecutive checks without stop button to confirm not streaming
@@ -346,7 +348,7 @@
         } else {
           // Reset counter if stop button appears
           noStopButtonCount = 0;
-          console.log('[WaitForStreamsToStop] Stop button detected, resetting counter');
+          console.log('[WaitForStreamsToStop] Stop button detected, resetting counter', { enableTimeout: enableTimeoutCheck });
         }
 
         if (elapsed > effectiveMaxWaitMs) {
@@ -437,10 +439,10 @@
       if (!inputEl) throw new Error('Could not find chat input on this page.');
 
       // Wait for any active streaming/processing to complete before sending
-      console.log('[HandleSendPrompt] Waiting for streams to stop', { promptId, maxWaitMs: DEFAULTS.maxWaitMs });
+      console.log('[HandleSendPrompt] Waiting for streams to stop', { promptId, maxWaitMs: DEFAULTS.maxWaitMs, enableTimeout: options?.enableMaxWaitTimeout });
       try {
         await Promise.race([
-          waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: DEFAULTS.maxWaitMs }),
+          waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: DEFAULTS.maxWaitMs, enableTimeout: options?.enableMaxWaitTimeout }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('waitForStreamsToStop timeout')), DEFAULTS.maxWaitMs + 5000))
         ]);
       } catch (e) {
