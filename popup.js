@@ -164,6 +164,8 @@ async function loadSettingsIntoUI() {
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
       document.getElementById('enableMaxWaitTimeout').checked = s.enableMaxWaitTimeout !== false;
+      document.getElementById('stopWord').value = s.stopWord || '';
+      document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive !== false;
     }
   } catch (e) {
     console.error('[LoadSettings] Error:', e);
@@ -182,6 +184,8 @@ async function saveSettingsFromUI() {
       systemPrompt: document.getElementById('systemPrompt').value || '',
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
       enableMaxWaitTimeout: document.getElementById('enableMaxWaitTimeout').checked,
+      stopWord: document.getElementById('stopWord').value || '',
+      stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
     };
     await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
   } catch (e) {
@@ -199,7 +203,7 @@ document.getElementById('themeSelect').addEventListener('change', async (e) => {
   }
 });
 
-['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt','enableMaxWaitTimeout'].forEach((id) => {
+['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt','enableMaxWaitTimeout','stopWord','stopWordCaseSensitive'].forEach((id) => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('change', saveSettingsFromUI);
 });
@@ -486,6 +490,9 @@ chrome.runtime.onMessage.addListener((message) => {
       stopCountdownTimer();
       // Refresh status after error to show proper state
       setTimeout(refreshStatus, 1000);
+    } else if (message?.type === 'AUTOMATION_PAUSED') {
+      setStatus(`Paused: ${message.reason}`, 'idle');
+      showToast(`⏸️ Automation paused: ${message.reason}`, 'info', 3000);
     }
   } catch (e) {
     console.error('[MessageListener] Error handling message:', e);

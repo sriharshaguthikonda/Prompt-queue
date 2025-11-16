@@ -77,6 +77,8 @@ const DEFAULT_SETTINGS = {
   prependSystemPrompt: true,
   theme: 'dark',
   enableMaxWaitTimeout: true,
+  stopWord: '',
+  stopWordCaseSensitive: false,
 };
 
 const RECOVERY_CONFIG = {
@@ -107,6 +109,8 @@ function validateSettings(input = {}) {
     prependSystemPrompt: input.prependSystemPrompt !== false,
     theme: input.theme === 'light' ? 'light' : 'dark',
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
+    stopWord: typeof input.stopWord === 'string' ? input.stopWord : DEFAULT_SETTINGS.stopWord,
+    stopWordCaseSensitive: input.stopWordCaseSensitive === true,
   };
 }
 

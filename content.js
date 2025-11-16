@@ -241,7 +241,21 @@
     return !stop && !spinner;
   }
 
-  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout }) {
+  function checkStopWord(stopWord, caseSensitive) {
+    if (!stopWord || stopWord.trim() === '') return false;
+    
+    const pageText = document.body.innerText;
+    const searchText = caseSensitive ? pageText : pageText.toLowerCase();
+    const searchWord = caseSensitive ? stopWord : stopWord.toLowerCase();
+    
+    const found = searchText.includes(searchWord);
+    if (found) {
+      console.log('[CheckStopWord] Stop word found on page:', { stopWord, found });
+    }
+    return found;
+  }
+
+  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, stopWord, stopWordCaseSensitive }) {
     const site = detectSite();
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
@@ -249,7 +263,7 @@
     const enableTimeout = enableMaxWaitTimeout !== false;
     const completionId = Math.random();
 
-    console.log('[WaitForCompletion] Starting', { completionId, effectiveStableMs, effectiveMaxWaitMs, effectivePollMs, enableTimeout });
+    console.log('[WaitForCompletion] Starting', { completionId, effectiveStableMs, effectiveMaxWaitMs, effectivePollMs, enableTimeout, stopWord });
 
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -280,6 +294,18 @@
           canSend = isGrokDone();
         } else if (site === 'claude') {
           canSend = isClaudeDone();
+        }
+
+        // Check for stop word
+        if (stopWord && checkStopWord(stopWord, stopWordCaseSensitive)) {
+          console.warn('[WaitForCompletion] Stop word detected, stopping automation', { 
+            completionId, 
+            stopWord,
+            elapsed 
+          });
+          cleanup();
+          resolve({ stoppedByStopWord: true, stopWord });
+          return;
         }
 
         if (stableFor >= effectiveStableMs && !stopBtnPresent && canSend) {
@@ -454,34 +480,10 @@
       console.log('[HandleSendPrompt] Setting text input', { promptId, textLength: text?.length });
       setTextInInput(inputEl, text);
       await new Promise((r) => setTimeout(r, 150));
-      
-      console.log('[HandleSendPrompt] Clicking send button', { promptId });
-      await clickSend(sendBtn, inputEl);
-
-      console.log('[HandleSendPrompt] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: options?.enableMaxWaitTimeout });
-      try {
-        await Promise.race([
-          waitForCompletion({
-            sendButton: sendBtn,
-            stopButtonSelector: stopBtnSel,
-            messagesContainer,
-            stableMs: options?.stableMs,
-            maxWaitMs: options?.maxWaitMs,
-            pollIntervalMs: options?.pollIntervalMs,
-            enableMaxWaitTimeout: options?.enableMaxWaitTimeout,
-          }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('waitForCompletion timeout')), (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 5000))
-        ]);
-      } catch (e) {
-        console.error('[HandleSendPrompt] waitForCompletion failed', { promptId, error: e?.message });
-        throw e;
-      }
-      
-      console.log('[HandleSendPrompt] Completion detected, sending RESPONSE_COMPLETE', { promptId });
-      try {
-        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
-      } catch (_) {}
-    } catch (e) {
+      inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+      sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
+      messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
+      console.log('[HandleSendPrompt] After focus attempt', { hasInputEl: !!inputEl, hasSendBtn: !!sendBtn });
       console.error('[HandleSendPrompt] Error during processing', { 
         promptId, 
         error: e?.message, 
@@ -520,6 +522,17 @@
           await handleSendPrompt(message.text, message.options, promptId);
           console.log('[MessageListener] handleSendPrompt completed', { promptId, timestamp: Date.now() });
           sendResponse({ ok: true });
+          return;
+        }
+
+        if (message?.type === 'RESUME_AUTOMATION') {
+          console.log('[MessageListener] RESUME_AUTOMATION received', { 
+            currentPromptId,
+            timestamp: Date.now()
+          });
+          // Tab has become active again, automation can resume
+          // Content script is ready to continue
+          sendResponse({ ok: true, ready: true });
           return;
         }
         
