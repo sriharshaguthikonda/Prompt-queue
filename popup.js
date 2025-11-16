@@ -68,6 +68,7 @@ async function loadSettingsIntoUI() {
       document.getElementById('pollSec').value = msToSec(s.pollIntervalMs);
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
+      document.getElementById('enableMaxWaitTimeout').checked = s.enableMaxWaitTimeout !== false;
     }
   } catch (e) {
     console.error('[LoadSettings] Error:', e);
@@ -85,6 +86,7 @@ async function saveSettingsFromUI() {
       pollIntervalMs: secToMs(pollSec),
       systemPrompt: document.getElementById('systemPrompt').value || '',
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
+      enableMaxWaitTimeout: document.getElementById('enableMaxWaitTimeout').checked,
     };
     await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
   } catch (e) {
@@ -102,7 +104,7 @@ document.getElementById('themeSelect').addEventListener('change', async (e) => {
   }
 });
 
-['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt'].forEach((id) => {
+['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt','enableMaxWaitTimeout'].forEach((id) => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('change', saveSettingsFromUI);
 });

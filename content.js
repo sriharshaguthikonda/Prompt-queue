@@ -241,14 +241,15 @@
     return !stop && !spinner;
   }
 
-  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs }) {
+  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout }) {
     const site = detectSite();
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
     const effectivePollMs = typeof pollIntervalMs === 'number' ? pollIntervalMs : DEFAULTS.pollIntervalMs;
+    const enableTimeout = enableMaxWaitTimeout !== false;
     const completionId = Math.random();
 
-    console.log('[WaitForCompletion] Starting', { completionId, effectiveStableMs, effectiveMaxWaitMs, effectivePollMs });
+    console.log('[WaitForCompletion] Starting', { completionId, effectiveStableMs, effectiveMaxWaitMs, effectivePollMs, enableTimeout });
 
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -293,8 +294,8 @@
           resolve();
           return;
         }
-        if (elapsed > effectiveMaxWaitMs) {
-          console.warn('[WaitForCompletion] Max wait timeout reached', { 
+        if (enableTimeout && elapsed > effectiveMaxWaitMs) {
+          console.warn('[WaitForCompletion] Max wait timeout reached (timeout enabled)', { 
             completionId, 
             elapsed, 
             effectiveMaxWaitMs, 
@@ -320,6 +321,8 @@
 
     return new Promise((resolve, reject) => {
       const startTime = Date.now();
+      let noStopButtonCount = 0;
+      const requiredNoStopChecks = 3; // Require 3 consecutive checks without stop button
 
       const checkStop = () => {
         const elapsed = Date.now() - startTime;
@@ -327,9 +330,23 @@
         const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
 
         if (!stopPresent) {
-          // No stop button = not streaming, safe to proceed
-          resolve();
-          return;
+          noStopButtonCount++;
+          console.log('[WaitForStreamsToStop] No stop button detected', { 
+            noStopButtonCount, 
+            requiredNoStopChecks,
+            elapsed 
+          });
+          
+          // Require multiple consecutive checks without stop button to confirm not streaming
+          if (noStopButtonCount >= requiredNoStopChecks) {
+            console.log('[WaitForStreamsToStop] Confirmed: No active stream, safe to proceed');
+            resolve();
+            return;
+          }
+        } else {
+          // Reset counter if stop button appears
+          noStopButtonCount = 0;
+          console.log('[WaitForStreamsToStop] Stop button detected, resetting counter');
         }
 
         if (elapsed > effectiveMaxWaitMs) {
@@ -339,7 +356,7 @@
           return;
         }
 
-        // Still streaming, check again soon
+        // Still checking, verify again soon
         setTimeout(checkStop, 300);
       };
 
@@ -439,7 +456,7 @@
       console.log('[HandleSendPrompt] Clicking send button', { promptId });
       await clickSend(sendBtn, inputEl);
 
-      console.log('[HandleSendPrompt] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs });
+      console.log('[HandleSendPrompt] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: options?.enableMaxWaitTimeout });
       try {
         await Promise.race([
           waitForCompletion({
@@ -449,6 +466,7 @@
             stableMs: options?.stableMs,
             maxWaitMs: options?.maxWaitMs,
             pollIntervalMs: options?.pollIntervalMs,
+            enableMaxWaitTimeout: options?.enableMaxWaitTimeout,
           }),
           new Promise((_, reject) => setTimeout(() => reject(new Error('waitForCompletion timeout')), (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 5000))
         ]);

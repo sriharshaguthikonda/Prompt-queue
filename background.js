@@ -34,6 +34,7 @@ const DEFAULT_SETTINGS = {
   systemPrompt: '',
   prependSystemPrompt: true,
   theme: 'dark',
+  enableMaxWaitTimeout: true,
 };
 
 const RECOVERY_CONFIG = {
@@ -63,6 +64,7 @@ function validateSettings(input = {}) {
     systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
     prependSystemPrompt: input.prependSystemPrompt !== false,
     theme: input.theme === 'light' ? 'light' : 'dark',
+    enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
   };
 }
 
