@@ -191,6 +191,83 @@ if (reloadHistoryBtn) {
   });
 }
 
+// Export history as JSON
+const exportBtn = document.getElementById('exportBtn');
+if (exportBtn) {
+  exportBtn.addEventListener('click', async () => {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
+      if (res?.ok && res.history) {
+        const exportData = {
+          version: '1.0',
+          exportedAt: new Date().toISOString(),
+          history: res.history
+        };
+        const jsonString = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([jsonString], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `prompt-queue-export-${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        setStatus('Exported successfully');
+        setTimeout(() => setStatus('Idle'), 2000);
+      }
+    } catch (e) {
+      console.error('[ExportBtn] Error:', e);
+      setStatus('Export failed');
+    }
+  });
+}
+
+// Import history from JSON
+const importBtn = document.getElementById('importBtn');
+const importFile = document.getElementById('importFile');
+if (importBtn && importFile) {
+  importBtn.addEventListener('click', () => {
+    importFile.click();
+  });
+  
+  importFile.addEventListener('change', async (event) => {
+    try {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      
+      const text = await file.text();
+      const importData = JSON.parse(text);
+      
+      if (!importData.history || !Array.isArray(importData.history)) {
+        setStatus('Invalid JSON format');
+        return;
+      }
+      
+      // Get existing history
+      const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
+      const existingHistory = res?.history || [];
+      
+      // Merge imported with existing (imported first)
+      const mergedHistory = [...importData.history, ...existingHistory].slice(0, 50);
+      
+      // Save merged history
+      await chrome.storage.local.set({ aiTaskSequencerHistory: mergedHistory });
+      
+      // Reload UI
+      await loadHistoryIntoUI();
+      setStatus(`Imported ${importData.history.length} items`);
+      setTimeout(() => setStatus('Idle'), 2000);
+    } catch (e) {
+      console.error('[ImportFile] Error:', e);
+      setStatus('Import failed: ' + e.message);
+    }
+    
+    // Reset file input
+    importFile.value = '';
+  });
+}
+
 function createHistoryRow(item, index) {
   const wrapper = document.createElement('div');
   wrapper.className = 'history-item';
@@ -259,6 +336,7 @@ async function loadHistoryIntoUI() {
 chrome.runtime.onMessage.addListener((message) => {
   if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
     const { currentIndex, total, recoveryAttempts } = message.status;
+    lastActivityTime = Date.now();
     // Show recovery status if attempting recovery
     if (recoveryAttempts > 0) {
       setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`);
@@ -269,8 +347,10 @@ chrome.runtime.onMessage.addListener((message) => {
   } else if (message?.type === 'AUTOMATION_COMPLETE') {
     setStatus('Complete');
     setProgress(1, 1);
+    stopCountdownTimer();
   } else if (message?.type === 'AUTOMATION_ERROR') {
     setStatus(`Error: ${message.error}`);
+    stopCountdownTimer();
     // Refresh status after error to show proper state
     setTimeout(refreshStatus, 1000);
   }
@@ -278,6 +358,55 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Use AbortController for auto-refresh instead of setInterval
 let refreshAbortController = null;
+let countdownAbortController = null;
+let lastActivityTime = Date.now();
+
+function startCountdownTimer() {
+  if (countdownAbortController) return;
+  countdownAbortController = new AbortController();
+  const signal = countdownAbortController.signal;
+
+  const doCountdown = async () => {
+    if (signal.aborted) return;
+    
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
+      if (res?.ok && res.status?.running) {
+        const stableSecInput = document.getElementById('stableSec');
+        const stableMs = secToMs(Number(stableSecInput.value)) || 1200;
+        const countdownEl = document.getElementById('stableCountdown');
+        const countdownValue = document.getElementById('countdownValue');
+        
+        // Show countdown
+        countdownEl.style.display = 'block';
+        
+        // Simulate countdown (updates every 100ms)
+        const elapsed = Date.now() - lastActivityTime;
+        const remaining = Math.max(0, stableMs - elapsed);
+        const remainingSec = (remaining / 1000).toFixed(1);
+        countdownValue.textContent = remainingSec;
+      } else {
+        // Hide countdown when not running
+        const countdownEl = document.getElementById('stableCountdown');
+        countdownEl.style.display = 'none';
+      }
+    } catch (e) {
+      console.error('[Countdown] Error:', e);
+    }
+    
+    if (!signal.aborted) {
+      setTimeout(doCountdown, 100);
+    }
+  };
+  doCountdown();
+}
+
+function stopCountdownTimer() {
+  if (countdownAbortController) {
+    countdownAbortController.abort();
+    countdownAbortController = null;
+  }
+}
 
 function startAutoRefresh() {
   if (refreshAbortController) return; // Already running
@@ -308,6 +437,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadHistoryIntoUI();
     await refreshStatus();
     startAutoRefresh();
+    startCountdownTimer();
   } catch (e) {
     console.error('[DOMContentLoaded] Error:', e);
   }
@@ -316,6 +446,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Stop auto-refresh when popup closes
 window.addEventListener('unload', () => {
   stopAutoRefresh();
+  stopCountdownTimer();
 });
 
 (async function init() {

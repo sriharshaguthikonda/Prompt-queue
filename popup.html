@@ -91,6 +91,7 @@
           <div>
             <label for="stableSec">Stable (seconds)</label>
             <input id="stableSec" type="number" min="0.2" step="0.1" placeholder="1.2" />
+            <div id="stableCountdown" class="desc" style="color: var(--accent); font-weight: 600; margin-top: 4px; display: none;">Countdown: <span id="countdownValue">0.0</span>s</div>
             <div class="desc">How long the page must stay unchanged (no new tokens/DOM changes) to consider the answer finished.</div>
           </div>
         </div>
@@ -123,6 +124,11 @@
         <div class="controls">
           <button id="saveHistoryBtn" class="secondary">Save current as history</button>
           <button id="reloadHistoryBtn" class="secondary">Reload</button>
+        </div>
+        <div class="controls">
+          <button id="exportBtn" class="secondary">Export as JSON</button>
+          <button id="importBtn" class="secondary">Import from JSON</button>
+          <input id="importFile" type="file" accept=".json" style="display: none;" />
         </div>
         <div id="history" class="history-list"></div>
       </div>

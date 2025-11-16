@@ -24,6 +24,7 @@ const state = {
   promptStartTime: 0,
   lastRecoveryTime: 0,
   currentPromptId: null,
+  stableCountdownMs: 0,
 };
 
 const DEFAULT_SETTINGS = {
@@ -57,7 +58,7 @@ function coerceNumber(v, min, max, fallback) {
 function validateSettings(input = {}) {
   return {
     stableMs: coerceNumber(input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMs),
-    maxWaitMs: coerceNumber(input.maxWaitMs, 5000, 600000, DEFAULT_SETTINGS.maxWaitMs),
+    maxWaitMs: coerceNumber(input.maxWaitMs, 5000, 86400000, DEFAULT_SETTINGS.maxWaitMs),
     pollIntervalMs: coerceNumber(input.pollIntervalMs, 50, 5000, DEFAULT_SETTINGS.pollIntervalMs),
     systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
     prependSystemPrompt: input.prependSystemPrompt !== false,
