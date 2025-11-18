@@ -408,8 +408,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         try {
           await startAutomation({ prompts, tabId, options });
         } catch (e) {
-          state.running = false;
-          await saveState();
+          await clearState();
           chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(e), status: getStatus() }).catch(() => {});
         }
         return;
