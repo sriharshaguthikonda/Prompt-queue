@@ -216,11 +216,27 @@
     return !!loadingShimmer || !!thinkingIndicator || !!stopPresent;
   }
 
+  function checkForStopWord(stopWord, caseSensitive) {
+    if (!stopWord || stopWord.trim() === '') return false;
+  
+    const pageText = document.body.innerText;
+    const searchText = caseSensitive ? stopWord : stopWord.toLowerCase();
+    const checkText = caseSensitive ? pageText : pageText.toLowerCase();
+  
+    const found = checkText.includes(searchText);
+    if (found) {
+      console.log('[StopWord] Stop word detected:', { stopWord, found });
+    }
+    return found;
+  }
+
   function isChatGPTReadyToSend() {
-    const sendEnabled = document.querySelector('form button[data-testid="send-button"]:not([disabled])');
+    // Check if send button is enabled or if we're in a state where we can send
+    const sendBtn = document.querySelector('[data-testid="send-button"]');
+    if (sendBtn && isButtonEnabled(sendBtn)) return true;
     const regenPresent = document.querySelector('button:has([data-testid="regenerate-response-button"]) , button[aria-label*="Regenerate"]');
     const isThinking = isChatGPTThinking();
-    return (!!sendEnabled || !!regenPresent) && !isThinking;
+    return (!!sendBtn || !!regenPresent) && !isThinking;
   }
 
   function isGeminiDone() {
@@ -239,20 +255,6 @@
     const stop = document.querySelector('button[aria-label*="Stop"], [data-testid*="stop"]');
     const spinner = document.querySelector('[aria-busy="true"], [role="progressbar"], [data-loading="true"]');
     return !stop && !spinner;
-  }
-
-  function checkStopWord(stopWord, caseSensitive) {
-    if (!stopWord || stopWord.trim() === '') return false;
-    
-    const pageText = document.body.innerText;
-    const searchText = caseSensitive ? pageText : pageText.toLowerCase();
-    const searchWord = caseSensitive ? stopWord : stopWord.toLowerCase();
-    
-    const found = searchText.includes(searchWord);
-    if (found) {
-      console.log('[CheckStopWord] Stop word found on page:', { stopWord, found });
-    }
-    return found;
   }
 
   function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, stopWord, stopWordCaseSensitive }) {
@@ -285,6 +287,14 @@
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
         const stopBtnPresent = stopBtn && isButtonEnabled(stopBtn);
 
+        // Check for stop word
+        if (stopWord && checkForStopWord(stopWord, stopWordCaseSensitive)) {
+          console.log('[WaitForCompletion] Stop word detected, stopping automation', { completionId, stopWord });
+          cleanup();
+          resolve({ stoppedByStopWord: true });
+          return;
+        }
+
         let canSend = isButtonEnabled(sendButton);
         if (site === 'chatgpt') {
           if (!sendButton) canSend = true; else if (!canSend) canSend = isChatGPTReadyToSend();
@@ -294,18 +304,6 @@
           canSend = isGrokDone();
         } else if (site === 'claude') {
           canSend = isClaudeDone();
-        }
-
-        // Check for stop word
-        if (stopWord && checkStopWord(stopWord, stopWordCaseSensitive)) {
-          console.warn('[WaitForCompletion] Stop word detected, stopping automation', { 
-            completionId, 
-            stopWord,
-            elapsed 
-          });
-          cleanup();
-          resolve({ stoppedByStopWord: true, stopWord });
-          return;
         }
 
         if (stableFor >= effectiveStableMs && !stopBtnPresent && canSend) {
@@ -350,13 +348,23 @@
       const startTime = Date.now();
       let noStopButtonCount = 0;
       const requiredNoStopChecks = 3; // Require 3 consecutive checks without stop button
+      const site = detectSite();
 
       const checkStop = () => {
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
         const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
 
-        if (!stopPresent) {
+        let stillStreaming = stopPresent;
+
+        // For ChatGPT, also treat thinking indicators as active streaming
+        if (site === 'chatgpt') {
+          if (isChatGPTThinking()) {
+            stillStreaming = true;
+          }
+        }
+
+        if (!stillStreaming) {
           noStopButtonCount++;
           console.log('[WaitForStreamsToStop] No stop button detected', { 
             noStopButtonCount, 
@@ -385,7 +393,7 @@
         }
 
         // Still checking, verify again soon
-        setTimeout(checkStop, 300);
+        setTimeout(checkStop, 1000);
       };
 
       checkStop();
@@ -394,44 +402,99 @@
 
   async function handleSendPrompt(text, options, promptId) {
     console.log('[HandleSendPrompt] Received prompt request', { promptId, currentPromptId, textLength: text?.length });
-    
+  
+    // Wait for any currently processing prompt to complete
     if (currentPromptId !== null && currentPromptId !== promptId) {
-      console.warn('[HandleSendPrompt] BLOCKED: Different prompt already processing', { 
+      console.warn('[HandleSendPrompt] QUEUED: Waiting for current prompt to complete', { 
         newPromptId: promptId, 
         currentPromptId, 
         timestamp: Date.now() 
       });
       
-      // Force reset if the same prompt ID keeps getting blocked (stuck state)
-      // This prevents infinite loops where a prompt never completes
-      console.warn('[HandleSendPrompt] FORCE RESET: Clearing stuck currentPromptId to allow queue to proceed', { 
-        stuckPromptId: currentPromptId,
-        newPromptId: promptId
+      const enableQueueTimeout = options?.enableMaxWaitTimeout !== false;
+      // When queue timeout is enabled, wait up to 30 seconds for current prompt to finish.
+      // When disabled, wait indefinitely until currentPromptId is cleared by the previous prompt.
+      let waitTime = 0;
+      const maxWaitTime = 30000;
+      const checkInterval = 100;
+      console.log('[HandleSendPrompt] Waiting loop for previous prompt started', {
+        currentPromptId,
+        newPromptId: promptId,
+        maxWaitTime,
+        checkInterval,
       });
-      currentPromptId = null;
       
-      try {
-        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
-      } catch (_) {}
-      return;
+      if (enableQueueTimeout) {
+        while (currentPromptId !== null && waitTime < maxWaitTime) {
+          await new Promise(r => setTimeout(r, checkInterval));
+          waitTime += checkInterval;
+
+          if (waitTime % 5000 === 0) {
+            console.log('[HandleSendPrompt] Still waiting for previous prompt to complete', {
+              currentPromptId,
+              newPromptId: promptId,
+              waitedMs: waitTime,
+            });
+          }
+        }
+
+        if (currentPromptId !== null) {
+          const site = detectSite();
+          console.error('[HandleSendPrompt] TIMEOUT: Previous prompt did not complete, forcing reset', { 
+            stuckPromptId: currentPromptId,
+            newPromptId: promptId,
+            waitedMs: waitTime,
+            site,
+            timestamp: Date.now(),
+          });
+          currentPromptId = null;
+        } else {
+          console.log('[HandleSendPrompt] Previous prompt completed, proceeding', { 
+            newPromptId: promptId,
+            waitedMs: waitTime
+          });
+        }
+      } else {
+        // No queue timeout: wait indefinitely until the previous prompt clears currentPromptId
+        while (currentPromptId !== null) {
+          await new Promise(r => setTimeout(r, checkInterval));
+          waitTime += checkInterval;
+
+          if (waitTime % 5000 === 0) {
+            console.log('[HandleSendPrompt] Still waiting for previous prompt to complete (no timeout)', {
+              currentPromptId,
+              newPromptId: promptId,
+              waitedMs: waitTime,
+            });
+          }
+        }
+
+        console.log('[HandleSendPrompt] Previous prompt completed, proceeding (no timeout)', {
+          newPromptId: promptId,
+          waitedMs: waitTime,
+        });
+      }
     }
 
     currentPromptId = promptId;
     console.log('[HandleSendPrompt] Starting processing', { promptId, timestamp: Date.now() });
     
     // Set a safety timeout to force cleanup if this prompt takes too long
+    const enablePromptTimeout = options?.enableMaxWaitTimeout !== false;
     const maxPromptDuration = (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 10000; // Add 10s buffer
-    const timeoutId = setTimeout(() => {
-      console.error('[HandleSendPrompt] TIMEOUT: Prompt processing exceeded max duration', { 
-        promptId, 
-        maxPromptDuration,
-        timestamp: Date.now()
-      });
-      currentPromptId = null;
-      try {
-        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, error: 'Prompt processing timeout' });
-      } catch (_) {}
-    }, maxPromptDuration);
+    const timeoutId = enablePromptTimeout
+      ? setTimeout(() => {
+          console.error('[HandleSendPrompt] TIMEOUT: Prompt processing exceeded max duration', { 
+            promptId, 
+            maxPromptDuration,
+            timestamp: Date.now()
+          });
+          currentPromptId = null;
+          try {
+            chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, error: 'Prompt processing timeout' });
+          } catch (_) {}
+        }, maxPromptDuration)
+      : null;
     
     try {
       const site = detectSite();
@@ -465,12 +528,9 @@
       if (!inputEl) throw new Error('Could not find chat input on this page.');
 
       // Wait for any active streaming/processing to complete before sending
-      console.log('[HandleSendPrompt] Waiting for streams to stop', { promptId, maxWaitMs: DEFAULTS.maxWaitMs, enableTimeout: options?.enableMaxWaitTimeout });
+      console.log('[HandleSendPrompt] Waiting for streams to stop', { promptId, enableTimeout: false });
       try {
-        await Promise.race([
-          waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: DEFAULTS.maxWaitMs, enableTimeout: options?.enableMaxWaitTimeout }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('waitForStreamsToStop timeout')), DEFAULTS.maxWaitMs + 5000))
-        ]);
+        await waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: undefined, enableTimeout: false });
       } catch (e) {
         console.error('[HandleSendPrompt] waitForStreamsToStop failed', { promptId, error: e?.message });
         throw e;
@@ -480,10 +540,61 @@
       console.log('[HandleSendPrompt] Setting text input', { promptId, textLength: text?.length });
       setTextInInput(inputEl, text);
       await new Promise((r) => setTimeout(r, 150));
-      inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
-      sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
-      messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
-      console.log('[HandleSendPrompt] After focus attempt', { hasInputEl: !!inputEl, hasSendBtn: !!sendBtn });
+      
+      console.log('[HandleSendPrompt] Clicking send button', { promptId });
+      await clickSend(sendBtn, inputEl);
+
+      const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
+      console.log('[HandleSendPrompt] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, stopWord: options?.stopWord });
+      try {
+        let result;
+        if (enableCompletionTimeout) {
+          result = await Promise.race([
+            waitForCompletion({
+              sendButton: sendBtn,
+              stopButtonSelector: stopBtnSel,
+              messagesContainer,
+              stableMs: options?.stableMs,
+              maxWaitMs: options?.maxWaitMs,
+              pollIntervalMs: options?.pollIntervalMs,
+              enableMaxWaitTimeout: enableCompletionTimeout,
+              stopWord: options?.stopWord,
+              stopWordCaseSensitive: options?.stopWordCaseSensitive,
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('waitForCompletion timeout')), (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 5000))
+          ]);
+        } else {
+          result = await waitForCompletion({
+            sendButton: sendBtn,
+            stopButtonSelector: stopBtnSel,
+            messagesContainer,
+            stableMs: options?.stableMs,
+            maxWaitMs: options?.maxWaitMs,
+            pollIntervalMs: options?.pollIntervalMs,
+            enableMaxWaitTimeout: enableCompletionTimeout,
+            stopWord: options?.stopWord,
+            stopWordCaseSensitive: options?.stopWordCaseSensitive,
+          });
+        }
+
+        // Check if automation was stopped by stop word
+        if (result?.stoppedByStopWord) {
+          console.log('[HandleSendPrompt] Automation stopped by stop word', { promptId });
+          try {
+            chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, stoppedByStopWord: true });
+          } catch (_) {}
+          return;
+        }
+      } catch (e) {
+        console.error('[HandleSendPrompt] waitForCompletion failed', { promptId, error: e?.message });
+        throw e;
+      }
+      
+      console.log('[HandleSendPrompt] Completion detected, sending RESPONSE_COMPLETE', { promptId });
+      try {
+        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
+      } catch (_) {}
+    } catch (e) {
       console.error('[HandleSendPrompt] Error during processing', { 
         promptId, 
         error: e?.message, 
@@ -522,17 +633,6 @@
           await handleSendPrompt(message.text, message.options, promptId);
           console.log('[MessageListener] handleSendPrompt completed', { promptId, timestamp: Date.now() });
           sendResponse({ ok: true });
-          return;
-        }
-
-        if (message?.type === 'RESUME_AUTOMATION') {
-          console.log('[MessageListener] RESUME_AUTOMATION received', { 
-            currentPromptId,
-            timestamp: Date.now()
-          });
-          // Tab has become active again, automation can resume
-          // Content script is ready to continue
-          sendResponse({ ok: true, ready: true });
           return;
         }
         

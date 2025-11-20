@@ -91,6 +91,19 @@
 - **When disabled**: Buttons remain clickable during automation
 - **Tip**: Keep enabled to avoid interrupting automation
 
+#### Stop on Keyword/Phrase
+- **Default**: Disabled (unchecked)
+- **Purpose**: Automatically stop automation if specific text appears on the page
+- **Input**: Enter any word or phrase to watch for
+- **Case Sensitive**: Optional checkbox to make matching case-sensitive
+- **Use Cases**:
+  - Stop if AI returns an error message
+  - Stop if rate limit message appears
+  - Stop if specific keyword is detected in response
+  - Stop if page shows "Error" or "Failed"
+- **Example**: Enter "Error" to stop if error message appears
+- **Tip**: Leave unchecked if you don't need this feature
+
 ---
 
 ## Presets
@@ -174,22 +187,20 @@ Quick-set timing configurations for common scenarios:
 ### Prompts Not Being Sent
 **Problem**: Prompts are entered but not sending
 - ✓ Check if the chat input is visible on the page
-- ✓ Try clicking in the chat input first to focus it
-- ✓ Increase "Max Wait" time if responses are slow
-- ✓ Disable "Enable Max Wait Timeout" for very long tasks
 
 ### Automation Stops Prematurely
 **Problem**: Automation stops before all prompts are sent
-- ✓ Increase "Max Wait (seconds)" value
-- ✓ Increase "Stable (seconds)" if responses are still being generated
-- ✓ Check browser console for error messages
-- ✓ Disable "Enable Max Wait Timeout" if getting timeout errors
+- Increase "Max Wait" time if responses are slow
+- Disable "Enable Max Wait Timeout" for very long tasks
+- Check browser console for error messages
+- Disable "Enable Max Wait Timeout" if getting timeout errors
+- Ensure only one automation is running at a time
+- Wait for previous automation to complete before starting a new one
 
 ### Responses Not Complete
 **Problem**: Next prompt sends before response is fully generated
-- ✓ Increase "Stable (seconds)" to wait longer for changes
-- ✓ Decrease "Poll Interval" for more frequent checks
-- ✓ Disable "Enable Max Wait Timeout" for complex responses
+- Increase "Stable (seconds)" to wait longer for changes
+- Decrease "Poll Interval" for more frequent checks
 
 ### Buttons Disabled After Automation
 **Problem**: Buttons remain disabled after automation completes

@@ -286,7 +286,11 @@ button.secondary {
 }
 
 .prompts-left textarea {
-  height: 150px;
+  height: 60px;
+}
+
+.prompts-left textarea:focus {
+  height: 200px;
 }
 
 .prompts-right textarea {
@@ -660,6 +664,35 @@ button:disabled:hover {
 .error-copy-btn:hover {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Stop Word Container */
+.stop-word-container {
+  background: rgba(59, 130, 246, 0.05);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 6px;
+  padding: 10px;
+  margin-top: 8px;
+}
+
+.stop-word-container.hidden {
+  display: none;
+}
+
+.stop-word-input {
+  font-size: 12px !important;
+  padding: 8px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  background: var(--input-bg) !important;
+  color: var(--text) !important;
+  transition: all 0.2s;
+}
+
+.stop-word-input:focus {
+  border-color: var(--accent) !important;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
 }
 
 /* Responsive */

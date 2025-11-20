@@ -17,13 +17,18 @@
           </select>
         </div>
       </div>
-      <div class="tagline">Let the AI Always Work, Then Check: Seamless Task Queuing for Busy Minds.</div>
+      <div class="tagline">Queue your prompts.</div>
 
       <div class="card">
-        <div class="prompts-container">
+        <div class="collapsible-header" id="promptsHeader">
+          <span class="collapsible-toggle">▼</span>
+          <span class="section-title" style="margin: 0;">Prompts</span>
+        </div>
+        <div class="prompts-container collapsible-content" id="promptsContent">
           <div class="prompts-left">
-            <label for="prompts">Prompts (one per line)</label>
-            <textarea id="prompts" placeholder="Paste prompts here, one per line..."></textarea>
+            <label for="prompts"></label>
+            <textarea id="prompts" placeholder="Paste prompts here, one per line...
+Prompts (one per line)"></textarea>
             <div class="prompt-counter">0 prompts loaded</div>
           </div>
           <div class="prompts-right">
@@ -70,7 +75,7 @@
 
         <div class="collapsible-header" id="advancedHeader">
           <span class="collapsible-toggle collapsed">▼</span>
-          <span class="section-title">Advanced Options</span>
+          <span class="section-title" style="margin: 0;">Advanced Options</span>
         </div>
         <div class="collapsible-content collapsed" id="advancedContent">
           <div class="inline">
@@ -78,15 +83,6 @@
             <label for="enableMaxWaitTimeout">Enable max wait timeout</label>
           </div>
           <div class="desc">If disabled, will wait indefinitely for response. If enabled, will timeout after max wait seconds.</div>
-          <div style="margin-top: 12px;">
-            <label for="stopWord">Stop Word (optional)</label>
-            <input id="stopWord" type="text" placeholder="e.g., Error, Failed, Stop" />
-            <div class="desc">Automation will stop if this word appears on the page. Leave empty to disable.</div>
-          </div>
-          <div class="inline" style="margin-top: 8px;">
-            <input id="stopWordCaseSensitive" type="checkbox" />
-            <label for="stopWordCaseSensitive">Case sensitive</label>
-          </div>
         </div>
 
         <div class="progress" aria-hidden="true"><div id="progressBar" class="bar"></div></div>
@@ -131,6 +127,28 @@
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">
         <input id="disableButtonsDuringAutomation" type="checkbox" checked />
         <label for="disableButtonsDuringAutomation">Disable buttons during automation</label>
+      </div>
+
+      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+        <input id="enableStopWord" type="checkbox" />
+        <label for="enableStopWord">Stop on keyword/phrase</label>
+      </div>
+
+      <div id="stopWordContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
+        <input 
+          id="stopWord" 
+          type="text" 
+          placeholder="Enter stop word or phrase..." 
+          class="stop-word-input"
+          style="width: 100%; padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+        />
+        <small style="color: var(--muted); display: block; margin-bottom: 6px;">
+          Automation will stop if this text appears on the page
+        </small>
+        <div class="inline" style="gap: 6px;">
+          <input id="stopWordCaseSensitive" type="checkbox" />
+          <label for="stopWordCaseSensitive" style="font-size: 12px;">Case sensitive</label>
+        </div>
       </div>
     </div>
 

@@ -164,8 +164,17 @@ async function loadSettingsIntoUI() {
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
       document.getElementById('enableMaxWaitTimeout').checked = s.enableMaxWaitTimeout !== false;
+      document.getElementById('enableStopWord').checked = s.enableStopWord === true;
       document.getElementById('stopWord').value = s.stopWord || '';
-      document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive !== false;
+      document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
+      
+      // Show/hide stop word container based on checkbox
+      const stopWordContainer = document.getElementById('stopWordContainer');
+      if (s.enableStopWord === true) {
+        stopWordContainer.classList.remove('hidden');
+      } else {
+        stopWordContainer.classList.add('hidden');
+      }
     }
   } catch (e) {
     console.error('[LoadSettings] Error:', e);
@@ -184,6 +193,7 @@ async function saveSettingsFromUI() {
       systemPrompt: document.getElementById('systemPrompt').value || '',
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
       enableMaxWaitTimeout: document.getElementById('enableMaxWaitTimeout').checked,
+      enableStopWord: document.getElementById('enableStopWord').checked,
       stopWord: document.getElementById('stopWord').value || '',
       stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
     };
@@ -203,10 +213,42 @@ document.getElementById('themeSelect').addEventListener('change', async (e) => {
   }
 });
 
-['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt','enableMaxWaitTimeout','stopWord','stopWordCaseSensitive'].forEach((id) => {
+['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt','enableMaxWaitTimeout'].forEach((id) => {
   const el = document.getElementById(id);
   if (el) el.addEventListener('change', saveSettingsFromUI);
 });
+
+// Max wait timeout toggle
+const enableMaxWaitTimeoutCheckbox = document.getElementById('enableMaxWaitTimeout');
+if (enableMaxWaitTimeoutCheckbox) {
+  enableMaxWaitTimeoutCheckbox.addEventListener('change', saveSettingsFromUI);
+}
+
+// Stop word toggle and container
+const enableStopWordCheckbox = document.getElementById('enableStopWord');
+const stopWordContainer = document.getElementById('stopWordContainer');
+const stopWordInput = document.getElementById('stopWord');
+const stopWordCaseSensitiveCheckbox = document.getElementById('stopWordCaseSensitive');
+
+if (enableStopWordCheckbox) {
+  enableStopWordCheckbox.addEventListener('change', () => {
+    if (enableStopWordCheckbox.checked) {
+      stopWordContainer.classList.remove('hidden');
+      stopWordInput.focus();
+    } else {
+      stopWordContainer.classList.add('hidden');
+    }
+    saveSettingsFromUI();
+  });
+}
+
+if (stopWordInput) {
+  stopWordInput.addEventListener('input', saveSettingsFromUI);
+}
+
+if (stopWordCaseSensitiveCheckbox) {
+  stopWordCaseSensitiveCheckbox.addEventListener('change', saveSettingsFromUI);
+}
 
 document.getElementById('startBtn').addEventListener('click', async () => {
   try {
@@ -490,9 +532,6 @@ chrome.runtime.onMessage.addListener((message) => {
       stopCountdownTimer();
       // Refresh status after error to show proper state
       setTimeout(refreshStatus, 1000);
-    } else if (message?.type === 'AUTOMATION_PAUSED') {
-      setStatus(`Paused: ${message.reason}`, 'idle');
-      showToast(`⏸️ Automation paused: ${message.reason}`, 'info', 3000);
     }
   } catch (e) {
     console.error('[MessageListener] Error handling message:', e);
@@ -588,6 +627,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // Collapsible sections
+document.getElementById('promptsHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#promptsHeader .collapsible-toggle');
+  const content = document.getElementById('promptsContent');
+  toggle.classList.toggle('collapsed');
+  content.classList.toggle('collapsed');
+});
+
 document.getElementById('optionsHeader')?.addEventListener('click', () => {
   const toggle = document.querySelector('#optionsHeader .collapsible-toggle');
   const content = document.getElementById('optionsContent');

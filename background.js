@@ -5,48 +5,6 @@ chrome.action.onClicked.addListener((tab) => {
   chrome.sidePanel.open({ tabId: tab.id });
 });
 
-// Handle tab activation to resume automation
-chrome.tabs.onActivated.addListener(async (activeInfo) => {
-  // If automation is running and we switch to the automation tab, resume it
-  if (state.running && state.tabId === activeInfo.tabId) {
-    console.log('[TabActivated] Resuming automation on tab:', activeInfo.tabId);
-    // Send resume signal to content script
-    try {
-      await chrome.tabs.sendMessage(activeInfo.tabId, { 
-        type: 'RESUME_AUTOMATION',
-        state: state
-      });
-    } catch (e) {
-      console.error('[TabActivated] Error resuming automation:', e);
-    }
-  }
-});
-
-// Handle tab updates (navigation, refresh, etc.)
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // If the automation tab is being refreshed, pause automation
-  if (state.running && state.tabId === tabId && changeInfo.status === 'loading') {
-    console.log('[TabUpdated] Tab is loading, pausing automation');
-    state.running = false;
-    // Notify popup
-    chrome.runtime.sendMessage({ 
-      type: 'AUTOMATION_PAUSED',
-      reason: 'Tab is loading'
-    }).catch(() => {});
-  }
-  
-  // If the automation tab finished loading, resume
-  if (state.running === false && state.tabId === tabId && changeInfo.status === 'complete') {
-    console.log('[TabUpdated] Tab loaded, resuming automation');
-    state.running = true;
-    // Send resume signal
-    chrome.tabs.sendMessage(tabId, { 
-      type: 'RESUME_AUTOMATION',
-      state: state
-    }).catch(() => {});
-  }
-});
-
 const state = {
   prompts: [],
   currentIndex: 0,
@@ -77,6 +35,7 @@ const DEFAULT_SETTINGS = {
   prependSystemPrompt: true,
   theme: 'dark',
   enableMaxWaitTimeout: true,
+  enableStopWord: false,
   stopWord: '',
   stopWordCaseSensitive: false,
 };
@@ -109,7 +68,8 @@ function validateSettings(input = {}) {
     prependSystemPrompt: input.prependSystemPrompt !== false,
     theme: input.theme === 'light' ? 'light' : 'dark',
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
-    stopWord: typeof input.stopWord === 'string' ? input.stopWord : DEFAULT_SETTINGS.stopWord,
+    enableStopWord: input.enableStopWord === true,
+    stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
     stopWordCaseSensitive: input.stopWordCaseSensitive === true,
   };
 }
@@ -484,6 +444,11 @@ function makeHistorySignature(item) {
       pollIntervalMs: item.settings?.pollIntervalMs || undefined,
       systemPrompt: item.settings?.systemPrompt || '',
       prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
+      theme: item.settings?.theme === 'light' ? 'light' : 'dark',
+      enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
+      enableStopWord: item.settings?.enableStopWord === true,
+      stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
+      stopWordCaseSensitive: item.settings?.stopWordCaseSensitive === true,
     },
   };
   return JSON.stringify(normalized);
@@ -494,6 +459,9 @@ function makeHistorySignature(item) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
+      // Rehydrate state on each message so MV3 service worker restarts don't lose automation context
+      await loadState();
+
       switch (message?.type) {
         case "CONTENT_READY": {
           state.lastActivityTime = Date.now();

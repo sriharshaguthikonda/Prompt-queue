@@ -14,7 +14,12 @@
         "maxWaitMs": 180000,
         "pollIntervalMs": 300,
         "systemPrompt": "You are a helpful AI assistant. Provide clear and concise explanations.",
-        "prependSystemPrompt": true
+        "prependSystemPrompt": true,
+        "theme": "dark",
+        "enableMaxWaitTimeout": true,
+        "enableStopWord": true,
+        "stopWord": "machine learning basics",
+        "stopWordCaseSensitive": false
       },
       "savedAt": 1700000000000,
       "title": "Machine Learning Basics"
@@ -31,7 +36,12 @@
         "maxWaitMs": 240000,
         "pollIntervalMs": 300,
         "systemPrompt": "You are an expert Python developer. Provide production-ready code with explanations.",
-        "prependSystemPrompt": true
+        "prependSystemPrompt": true,
+        "theme": "dark",
+        "enableMaxWaitTimeout": true,
+        "enableStopWord": false,
+        "stopWord": "",
+        "stopWordCaseSensitive": false
       },
       "savedAt": 1700001000000,
       "title": "Python Factorial Implementation"
@@ -48,7 +58,12 @@
         "maxWaitMs": 180000,
         "pollIntervalMs": 300,
         "systemPrompt": "",
-        "prependSystemPrompt": false
+        "prependSystemPrompt": false,
+        "theme": "dark",
+        "enableMaxWaitTimeout": true,
+        "enableStopWord": false,
+        "stopWord": "",
+        "stopWordCaseSensitive": false
       },
       "savedAt": 1700002000000,
       "title": "TypeScript Deep Dive"

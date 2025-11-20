@@ -1,0 +1,9 @@
+{
+  "name": "prompt-queue",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "jest"
+  },
+  "devDependencies": {}
+}
