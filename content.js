@@ -1,16 +1,19 @@
 // Content script for AI Task Sequencer
 
+// Console prefix patch - runs in page context
+// NOTE: This patch exists in all 3 JS files because Chrome extensions have separate
+// JavaScript contexts (service worker, popup, page). Each context needs its own patch.
 (function () {
   if (console.__aiPromptQueuePatched) return;
   const PREFIX = '[AI Prompt Queue]';
   console.__aiPromptQueuePatched = true;
-  const methods = ['log', 'info', 'warn', 'error', 'debug'];
-  methods.forEach((method) => {
-    if (typeof console[method] === 'function') {
-      const original = console[method].bind(console);
+  ['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
+    const original = console[method]?.bind(console);
+    if (original) {
       console[method] = (...args) => {
-        if (args.length > 0 && typeof args[0] === 'string') {
-          original(`${PREFIX} ${args[0]}`, ...args.slice(1));
+        const first = args[0];
+        if (typeof first === 'string') {
+          original(`${PREFIX} ${first}`, ...args.slice(1));
         } else {
           original(PREFIX, ...args);
         }
@@ -24,11 +27,12 @@
   window.__aiTaskSequencerInjected = true;
 
   let currentPromptId = null; // Track per-prompt instead of global flag
+  let automationAborted = false; // Signal to queued prompts to stop
 
   const DEFAULTS = {
-    stableMs: 1200,
+    stableMs: 10000,
     maxWaitMs: 180000,
-    pollIntervalMs: 300,
+    pollIntervalMs: 1500,
   };
 
   function detectSite() {
@@ -514,7 +518,7 @@
       });
       
       if (enableQueueTimeout) {
-        while (currentPromptId !== null && waitTime < maxWaitTime) {
+        while (currentPromptId !== null && waitTime < maxWaitTime && !automationAborted) {
           await new Promise(r => setTimeout(r, checkInterval));
           waitTime += checkInterval;
 
@@ -525,6 +529,14 @@
               waitedMs: waitTime,
             });
           }
+        }
+
+        if (automationAborted) {
+          console.log('[PromptQueue] Automation was aborted (stop word), not proceeding', {
+            newPromptId: promptId,
+            waitedMs: waitTime,
+          });
+          return; // Don't process this prompt
         }
 
         if (currentPromptId !== null) {
@@ -545,17 +557,17 @@
         }
       } else {
         // No queue timeout: wait indefinitely until the previous prompt clears currentPromptId
-        while (currentPromptId !== null) {
+        while (currentPromptId !== null && !automationAborted) {
           await new Promise(r => setTimeout(r, checkInterval));
           waitTime += checkInterval;
+        }
 
-          if (waitTime % 5000 === 0) {
-            console.log('[PromptQueue] Still waiting for previous prompt to complete (no timeout)', {
-              currentPromptId,
-              newPromptId: promptId,
-              waitedMs: waitTime,
-            });
-          }
+        if (automationAborted) {
+          console.log('[PromptQueue] Automation was aborted (stop word), not proceeding', {
+            newPromptId: promptId,
+            waitedMs: waitTime,
+          });
+          return; // Don't process this prompt
         }
 
         console.log('[PromptQueue] Previous prompt completed, proceeding (no timeout)', {
@@ -566,6 +578,7 @@
     }
 
     currentPromptId = promptId;
+    automationAborted = false; // Reset abort flag for new prompt
     console.log('[PromptQueue] Starting processing', { promptId, timestamp: Date.now() });
     
     // Set a safety timeout to force cleanup if this prompt takes too long
@@ -683,7 +696,8 @@
       }
 
       const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
-      console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, stopWord: options?.stopWord });
+      const effectiveStopWord = options?.enableStopWord ? options?.stopWord : null;
+      console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, enableStopWord: options?.enableStopWord, stopWord: effectiveStopWord });
       try {
         let result;
         if (enableCompletionTimeout) {
@@ -696,7 +710,7 @@
               maxWaitMs: options?.maxWaitMs,
               pollIntervalMs: options?.pollIntervalMs,
               enableMaxWaitTimeout: enableCompletionTimeout,
-              stopWord: options?.stopWord,
+              stopWord: effectiveStopWord,
               stopWordCaseSensitive: options?.stopWordCaseSensitive,
             }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('waitForCompletion timeout')), (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 5000))
@@ -710,7 +724,7 @@
             maxWaitMs: options?.maxWaitMs,
             pollIntervalMs: options?.pollIntervalMs,
             enableMaxWaitTimeout: enableCompletionTimeout,
-            stopWord: options?.stopWord,
+            stopWord: effectiveStopWord,
             stopWordCaseSensitive: options?.stopWordCaseSensitive,
           });
         }
@@ -718,6 +732,7 @@
         // Check if automation was stopped by stop word
         if (result?.stoppedByStopWord) {
           console.log('[PromptQueue] Automation stopped by stop word', { promptId });
+          automationAborted = true; // Signal queued prompts to abort
           try {
             chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, stoppedByStopWord: true });
           } catch (_) {}

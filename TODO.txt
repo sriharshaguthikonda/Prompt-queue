@@ -1,0 +1,101 @@
+================================================================================
+                        AI PROMPT QUEUE - TODO LIST
+================================================================================
+
+EXISTING BUGS:
+--------------
+[X] Stop phrase not working - "Section 10" vs "section 10" case sensitivity issue
+    - FIXED: Race condition - settings weren't being sent with START_AUTOMATION
+    - FIXED: Added enableStopWord check before using stopWord in content.js
+    - FIXED: Now saves & fetches settings before starting automation
+
+[X] Queue stops after few prompts when clicking Start multiple times
+    - ROOT CAUSE: Multiple START_AUTOMATION calls overwrote state.currentPromptId
+      Each call reset state.currentIndex=0 and sent duplicate prompts with index 0
+      When prompts completed, RESPONSE_COMPLETE was ignored for mismatched promptIds
+    - FIXED: Syntax error in content.js (missing console.log call on line 556)
+    - FIXED: Background now rejects START_AUTOMATION if already running
+    - FIXED: Popup now checks if running before starting, shows error toast
+
+================================================================================
+CRITICAL ISSUES:
+================================================================================
+
+[X] 1. Remove duplicate initialization in popup.js
+       - FIXED: Removed IIFE at bottom, kept DOMContentLoaded handler
+
+[X] 2. Remove no-op tab listeners in background.js (lines 665-671)
+       - FIXED: Removed empty onActivated and onUpdated listeners
+
+[X] 3. Consolidate console patching
+       - BY DESIGN: Each file runs in separate JS context (service worker, popup, page)
+       - FIXED: Added explanatory comments and optimized code
+
+================================================================================
+MEDIUM PRIORITY:
+================================================================================
+
+[X] 4. Add input validation on JSON import
+       - FIXED: Validates each item has prompts array with at least one entry
+       - Reports invalid/skipped items count in toast
+
+[X] 5. Add deduplication on import
+       - FIXED: Uses prompt content signature to detect duplicates
+       - Reports duplicate count skipped in toast
+
+[X] 6. Clear error state on new automation start
+       - FIXED: Added hideError() call in start button click handler (done with bug fix)
+
+================================================================================
+LOW PRIORITY / ENHANCEMENTS:
+================================================================================
+
+[ ] 7. Add keyboard shortcuts
+       - Ctrl+Enter to start automation
+       - Escape to stop
+
+[ ] 8. Add Pause/Resume feature
+       - Currently only Start/Stop
+       - Pause would let users intervene mid-queue
+
+[ ] 9. Show individual prompt progress
+       - Display which specific prompt is running (truncated preview)
+
+[ ] 10. Add estimated time remaining
+        - Based on average response time per prompt
+
+[ ] 11. Multi-line prompt support
+        - Support delimiter-based multi-line prompts (e.g., --- separator)
+
+[ ] 12. Drag-and-drop prompt reordering
+
+[ ] 13. Response capture/export option
+
+[ ] 14. Rate limiting configuration
+        - Configurable delay between prompts
+
+[ ] 15. Create properly sized icons (16, 32, 48, 128px)
+
+================================================================================
+CODE QUALITY:
+================================================================================
+
+[ ] 16. Consider TypeScript migration
+
+[ ] 17. Extract shared constants to a module
+
+[ ] 18. Add JSDoc comments
+
+[ ] 19. Improve unit test coverage
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,15 +1,18 @@
 
+// Console prefix patch - runs in popup context
+// NOTE: This patch exists in all 3 JS files because Chrome extensions have separate
+// JavaScript contexts (service worker, popup, page). Each context needs its own patch.
 (function () {
   if (console.__aiPromptQueuePatched) return;
   const PREFIX = '[AI Prompt Queue]';
   console.__aiPromptQueuePatched = true;
-  const methods = ['log', 'info', 'warn', 'error', 'debug'];
-  methods.forEach((method) => {
-    if (typeof console[method] === 'function') {
-      const original = console[method].bind(console);
+  ['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
+    const original = console[method]?.bind(console);
+    if (original) {
       console[method] = (...args) => {
-        if (args.length > 0 && typeof args[0] === 'string') {
-          original(`${PREFIX} ${args[0]}`, ...args.slice(1));
+        const first = args[0];
+        if (typeof first === 'string') {
+          original(`${PREFIX} ${first}`, ...args.slice(1));
         } else {
           original(PREFIX, ...args);
         }
@@ -272,6 +275,14 @@ if (stopWordCaseSensitiveCheckbox) {
 
 document.getElementById('startBtn').addEventListener('click', async () => {
   try {
+    // Check if automation is already running
+    const statusRes = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
+    if (statusRes?.ok && statusRes.status?.running) {
+      showToast('Automation is already running. Stop it first.', 'error');
+      setStatus(`Running prompt ${statusRes.status.currentIndex + 1} of ${statusRes.status.total}...`, 'running');
+      return;
+    }
+    
     const textarea = document.getElementById('prompts');
     const prompts = parsePrompts(textarea.value);
     if (prompts.length === 0) {
@@ -284,18 +295,23 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       return;
     }
     setStatus('Starting...');
-    const res = await chrome.runtime.sendMessage({ type: 'START_AUTOMATION', prompts, tabId });
+    hideError(); // Clear any previous error
+    // Get current settings and include them in START_AUTOMATION to avoid race conditions
+    await saveSettingsFromUI();
+    const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+    const currentSettings = settingsRes?.settings || {};
+    const res = await chrome.runtime.sendMessage({ type: 'START_AUTOMATION', prompts, tabId, options: currentSettings });
     if (res?.ok) {
-      setStatus(`Running prompt 1 of ${prompts.length}...`);
+      setStatus(`Running prompt 1 of ${prompts.length}...`, 'running');
       setProgress(0, prompts.length);
-      const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      await chrome.runtime.sendMessage({ type: 'SAVE_PROMPT_HISTORY', item: { prompts, settings: settings?.settings } });
+      await chrome.runtime.sendMessage({ type: 'SAVE_PROMPT_HISTORY', item: { prompts, settings: currentSettings } });
     } else {
-      setStatus(`Failed to start: ${res?.error || 'Unknown error'}`);
+      setStatus(`Failed to start: ${res?.error || 'Unknown error'}`, 'error');
+      showToast(res?.error || 'Failed to start', 'error');
     }
   } catch (e) {
     console.error('[StartBtn] Error:', e);
-    setStatus(`Failed to start: ${e}`);
+    setStatus(`Failed to start: ${e}`, 'error');
   }
 });
 
@@ -403,19 +419,56 @@ if (importBtn && importFile) {
         return;
       }
       
+      // Validate each item has required fields
+      const validItems = importData.history.filter(item => {
+        if (!item || typeof item !== 'object') return false;
+        if (!Array.isArray(item.prompts) || item.prompts.length === 0) return false;
+        return true;
+      });
+      
+      if (validItems.length === 0) {
+        showToast('No valid history items found', 'error');
+        return;
+      }
+      
+      const invalidCount = importData.history.length - validItems.length;
+      if (invalidCount > 0) {
+        console.warn(`[Import] Skipped ${invalidCount} invalid items`);
+      }
+      
+      // Create signature for deduplication
+      const makeSignature = (item) => JSON.stringify((item.prompts || []).map(p => p.trim()));
+      
       // Get existing history
       const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
       const existingHistory = res?.history || [];
       
-      // Merge imported with existing (imported first)
-      const mergedHistory = [...importData.history, ...existingHistory].slice(0, 50);
+      // Build set of existing signatures for deduplication
+      const existingSignatures = new Set(existingHistory.map(makeSignature));
+      
+      // Filter out duplicates from imported items
+      const newItems = validItems.filter(item => !existingSignatures.has(makeSignature(item)));
+      
+      // Ensure imported items have savedAt timestamp
+      const itemsWithTimestamp = newItems.map(item => ({
+        ...item,
+        savedAt: item.savedAt || Date.now()
+      }));
+      
+      // Merge: new imports first, then existing
+      const mergedHistory = [...itemsWithTimestamp, ...existingHistory].slice(0, 50);
       
       // Save merged history
       await chrome.storage.local.set({ aiTaskSequencerHistory: mergedHistory });
       
       // Reload UI
       await loadHistoryIntoUI();
-      showToast(`✓ Imported ${importData.history.length} items`, 'success');
+      
+      const dupeCount = validItems.length - newItems.length;
+      let message = `✓ Imported ${newItems.length} item${newItems.length !== 1 ? 's' : ''}`;
+      if (dupeCount > 0) message += ` (${dupeCount} duplicate${dupeCount !== 1 ? 's' : ''} skipped)`;
+      if (invalidCount > 0) message += ` (${invalidCount} invalid skipped)`;
+      showToast(message, 'success');
     } catch (e) {
       console.error('[ImportFile] Error:', e);
       showToast(`Import failed: ${e.message}`, 'error');
@@ -534,11 +587,24 @@ chrome.runtime.onMessage.addListener((message) => {
       }
       setProgress(currentIndex, total);
     } else if (message?.type === 'AUTOMATION_COMPLETE') {
-      setStatus('Complete', 'idle');
-      setProgress(1, 1);
+      const reason = message.reason;
+      const status = message.status;
+      if (reason === 'stoppedByStopWord') {
+        setStatus('Stopped by stop phrase', 'idle');
+      } else {
+        setStatus('Complete', 'idle');
+      }
+      if (status?.total && typeof status.currentIndex === 'number') {
+        setProgress(status.currentIndex, status.total);
+      } else {
+        setProgress(1, 1);
+      }
       setButtonsDisabled(false);
       clearError();
-      showToast('✓ Automation complete!', 'success');
+      const toastMessage = reason === 'stoppedByStopWord'
+        ? '✓ Automation stopped by stop phrase'
+        : '✓ Automation complete!';
+      showToast(toastMessage, 'success');
       stopCountdownTimer();
     } else if (message?.type === 'AUTOMATION_ERROR') {
       setStatus(`Error: ${message.error}`, 'error');
@@ -661,12 +727,6 @@ document.getElementById('optionsHeader')?.addEventListener('click', () => {
   content.classList.toggle('collapsed');
 });
 
-document.getElementById('advancedHeader')?.addEventListener('click', () => {
-  const toggle = document.querySelector('#advancedHeader .collapsible-toggle');
-  const content = document.getElementById('advancedContent');
-  toggle.classList.toggle('collapsed');
-  content.classList.toggle('collapsed');
-});
 
 // Prompt counter
 const promptsTextarea = document.getElementById('prompts');
@@ -685,9 +745,9 @@ if (promptsTextarea) {
 
 // Preset buttons
 const presets = {
-  fast: { maxWait: 60, stable: 0.5, poll: 0.2 },
-  balanced: { maxWait: 180, stable: 1.2, poll: 0.3 },
-  thorough: { maxWait: 300, stable: 2, poll: 0.3 }
+  fast: { maxWait: 60, stable: 3, poll: 0.5 },
+  balanced: { maxWait: 180, stable: 10, poll: 1.5 },
+  thorough: { maxWait: 300, stable: 15, poll: 2 }
 };
 
 document.querySelectorAll('.preset-btn[data-preset]').forEach(btn => {
@@ -785,13 +845,4 @@ window.addEventListener('unload', () => {
   stopCountdownTimer();
 });
 
-(async function init() {
-  try {
-    await loadSettingsIntoUI();
-    await loadHistoryIntoUI();
-    await refreshStatus();
-  } catch (e) {
-    console.error('[Init] Error during initialization:', e);
-    showError('Failed to initialize extension', e.message, e.stack);
-  }
-})();
+// Initialization is handled by DOMContentLoaded event listener above

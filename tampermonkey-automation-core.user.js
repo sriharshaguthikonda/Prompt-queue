@@ -490,7 +490,7 @@
           waitTime += checkInterval;
 
           if (waitTime % 5000 === 0) {
-            console.log('[HandleSendPrompt] Still waiting for previous prompt to complete (no timeout)', {
+
               currentPromptId,
               newPromptId: promptId,
               waitedMs: waitTime,

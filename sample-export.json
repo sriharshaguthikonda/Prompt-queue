@@ -1,72 +1,59 @@
 {
   "version": "1.0",
-  "exportedAt": "2025-11-16T22:04:00.000Z",
+  "exportedAt": "2025-11-25T12:34:48.152Z",
   "history": [
     {
+      "__sig": "{\"prompts\":[\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\"],\"settings\":{\"stableMs\":10000,\"maxWaitMs\":180000,\"pollIntervalMs\":1500,\"systemPrompt\":\"yes\",\"prependSystemPrompt\":true,\"theme\":\"dark\",\"enableMaxWaitTimeout\":false,\"enableStopWord\":true,\"stopWord\":\"Section 10: Future section\",\"stopWordCaseSensitive\":false}}",
       "prompts": [
-        "Explain the concept of machine learning in simple terms",
-        "What are the main types of machine learning algorithms?",
-        "How does neural networks work?",
-        "What is deep learning and how is it different from machine learning?"
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        ".",
+        "."
       ],
+      "savedAt": 1764074087031,
       "settings": {
-        "stableMs": 1200,
-        "maxWaitMs": 180000,
-        "pollIntervalMs": 300,
-        "systemPrompt": "You are a helpful AI assistant. Provide clear and concise explanations.",
-        "prependSystemPrompt": true,
-        "theme": "dark",
-        "enableMaxWaitTimeout": true,
+        "enableMaxWaitTimeout": false,
         "enableStopWord": true,
-        "stopWord": "machine learning basics",
-        "stopWordCaseSensitive": false
-      },
-      "savedAt": 1700000000000,
-      "title": "Machine Learning Basics"
-    },
-    {
-      "prompts": [
-        "Write a Python function to calculate factorial",
-        "Optimize the factorial function using memoization",
-        "Write unit tests for the factorial function",
-        "Explain the time complexity of the optimized solution"
-      ],
-      "settings": {
-        "stableMs": 1500,
-        "maxWaitMs": 240000,
-        "pollIntervalMs": 300,
-        "systemPrompt": "You are an expert Python developer. Provide production-ready code with explanations.",
-        "prependSystemPrompt": true,
-        "theme": "dark",
-        "enableMaxWaitTimeout": true,
-        "enableStopWord": false,
-        "stopWord": "",
-        "stopWordCaseSensitive": false
-      },
-      "savedAt": 1700001000000,
-      "title": "Python Factorial Implementation"
-    },
-    {
-      "prompts": [
-        "What are the benefits of using TypeScript?",
-        "Compare TypeScript and JavaScript",
-        "Show me a TypeScript example with interfaces",
-        "How do generics work in TypeScript?"
-      ],
-      "settings": {
-        "stableMs": 1200,
         "maxWaitMs": 180000,
-        "pollIntervalMs": 300,
-        "systemPrompt": "",
-        "prependSystemPrompt": false,
-        "theme": "dark",
-        "enableMaxWaitTimeout": true,
-        "enableStopWord": false,
-        "stopWord": "",
-        "stopWordCaseSensitive": false
-      },
-      "savedAt": 1700002000000,
-      "title": "TypeScript Deep Dive"
+        "pollIntervalMs": 1500,
+        "prependSystemPrompt": true,
+        "stableMs": 10000,
+        "stopWord": "Section 10: Future section",
+        "stopWordCaseSensitive": false,
+        "systemPrompt": "yes",
+        "theme": "dark"
+      }
     }
   ]
 }

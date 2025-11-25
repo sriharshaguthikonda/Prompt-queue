@@ -1,16 +1,19 @@
 // Background service worker for AI Task Sequencer with sleep/wake support
 
+// Console prefix patch - runs in service worker context
+// NOTE: This patch exists in all 3 JS files because Chrome extensions have separate
+// JavaScript contexts (service worker, popup, page). Each context needs its own patch.
 (function () {
   if (console.__aiPromptQueuePatched) return;
   const PREFIX = '[AI Prompt Queue]';
   console.__aiPromptQueuePatched = true;
-  const methods = ['log', 'info', 'warn', 'error', 'debug'];
-  methods.forEach((method) => {
-    if (typeof console[method] === 'function') {
-      const original = console[method].bind(console);
+  ['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
+    const original = console[method]?.bind(console);
+    if (original) {
       console[method] = (...args) => {
-        if (args.length > 0 && typeof args[0] === 'string') {
-          original(`${PREFIX} ${args[0]}`, ...args.slice(1));
+        const first = args[0];
+        if (typeof first === 'string') {
+          original(`${PREFIX} ${first}`, ...args.slice(1));
         } else {
           original(PREFIX, ...args);
         }
@@ -47,9 +50,9 @@ const state = {
 };
 
 const DEFAULT_SETTINGS = {
-  stableMs: 1200,
+  stableMs: 10000,
   maxWaitMs: 180000,
-  pollIntervalMs: 300,
+  pollIntervalMs: 1500,
   systemPrompt: '',
   prependSystemPrompt: true,
   theme: 'dark',
@@ -488,6 +491,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "START_AUTOMATION": {
+          // Prevent starting a new automation while one is already running
+          if (state.running) {
+            console.log('[StartAutomation] Automation already running, ignoring new start request');
+            sendResponse({ ok: false, error: "Automation is already running. Stop the current automation first." });
+            return;
+          }
+          
           const prompts = Array.isArray(message.prompts) ? message.prompts.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
           const tabId = message.tabId;
           const options = message.options || {};
@@ -542,6 +552,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           state.currentIndex += 1;
           state.lastActivityTime = Date.now();
           state.recoveryAttempts = 0;
+
+          if (message.stoppedByStopWord) {
+            console.log('[ResponseComplete] Stopped by stop phrase, ending automation');
+            state.running = false;
+            await clearState();
+            try {
+              chrome.runtime.sendMessage({ type: "AUTOMATION_COMPLETE", status: getStatus(), reason: "stoppedByStopWord" });
+            } catch (_) {}
+            return;
+          }
+
           await saveState();
           try {
             chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
@@ -651,10 +672,4 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-chrome.tabs.onActivated.addListener(({ tabId }) => {
-  // No-op
-});
-
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  // No-op
-});
+// Tab listeners removed - they were no-ops wasting memory

@@ -73,17 +73,11 @@ Prompts (one per line)"></textarea>
           </div>
         </div>
 
-        <div class="collapsible-header" id="advancedHeader">
-          <span class="collapsible-toggle collapsed">▼</span>
-          <span class="section-title" style="margin: 0;">Advanced Options</span>
+        <div class="inline" style="margin-top: 12px;">
+          <input id="enableMaxWaitTimeout" type="checkbox" checked />
+          <label for="enableMaxWaitTimeout">Enable max wait timeout</label>
         </div>
-        <div class="collapsible-content collapsed" id="advancedContent">
-          <div class="inline">
-            <input id="enableMaxWaitTimeout" type="checkbox" checked />
-            <label for="enableMaxWaitTimeout">Enable max wait timeout</label>
-          </div>
-          <div class="desc">If disabled, will wait indefinitely for response. If enabled, will timeout after max wait seconds.</div>
-        </div>
+        <div class="desc">If disabled, will wait indefinitely for response. If enabled, will timeout after max wait seconds.</div>
 
         <div class="progress" aria-hidden="true"><div id="progressBar" class="bar"></div></div>
 
