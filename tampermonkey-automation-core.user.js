@@ -13,6 +13,25 @@
 // ==/UserScript==
 
 (function () {
+  if (console.__aiPromptQueuePatched) return;
+  const PREFIX = '[AI Prompt Queue]';
+  console.__aiPromptQueuePatched = true;
+  const methods = ['log', 'info', 'warn', 'error', 'debug'];
+  methods.forEach((method) => {
+    if (typeof console[method] === 'function') {
+      const original = console[method].bind(console);
+      console[method] = (...args) => {
+        if (args.length > 0 && typeof args[0] === 'string') {
+          original(`${PREFIX} ${args[0]}`, ...args.slice(1));
+        } else {
+          original(PREFIX, ...args);
+        }
+      };
+    }
+  });
+})();
+
+(function () {
   if (window.__aiTaskSequencerInjected) return;
   window.__aiTaskSequencerInjected = true;
 
