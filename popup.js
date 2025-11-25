@@ -699,6 +699,58 @@ function stopAutoRefresh() {
   }
 }
 
+// Check for sample-export.json and prompt to load
+async function checkForSampleExport() {
+  try {
+    const sampleUrl = chrome.runtime.getURL('sample-export.json');
+    const response = await fetch(sampleUrl);
+    if (!response.ok) return;
+    
+    const data = await response.json();
+    if (!data.history || !Array.isArray(data.history) || data.history.length === 0) return;
+    
+    // Check if history is empty (no point prompting if user already has data)
+    const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
+    if (res?.history && res.history.length > 0) return; // Already has history
+    
+    // Show confirmation toast
+    if (confirm(`Found sample-export.json with ${data.history.length} saved prompt(s). Load it?`)) {
+      await importSampleData(data);
+    }
+  } catch (e) {
+    // File doesn't exist or can't be read - that's fine
+    console.log('[SampleExport] No sample-export.json found or error:', e.message);
+  }
+}
+
+async function importSampleData(importData) {
+  try {
+    const validItems = importData.history.filter(item => {
+      if (!item || typeof item !== 'object') return false;
+      if (!Array.isArray(item.prompts) || item.prompts.length === 0) return false;
+      return true;
+    });
+    
+    if (validItems.length === 0) {
+      showToast('No valid items in sample file', 'error');
+      return;
+    }
+    
+    const itemsWithTimestamp = validItems.map(item => ({
+      ...item,
+      savedAt: item.savedAt || Date.now()
+    }));
+    
+    await chrome.storage.local.set({ aiTaskSequencerHistory: itemsWithTimestamp.slice(0, 50) });
+    await loadHistoryIntoUI();
+    showToast(`✓ Loaded ${validItems.length} item(s) from sample`, 'success');
+  } catch (e) {
+    console.error('[ImportSample] Error:', e);
+    showToast('Failed to load sample', 'error');
+    
+  }
+}
+
 // Start auto-refresh when popup opens
 document.addEventListener('DOMContentLoaded', async () => {
   try {
@@ -707,6 +759,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     await refreshStatus();
     startAutoRefresh();
     startCountdownTimer();
+    await checkForSampleExport();
   } catch (e) {
     console.error('[DOMContentLoaded] Error:', e);
   }

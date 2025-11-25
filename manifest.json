@@ -39,5 +39,11 @@
   },
   "side_panel": {
     "default_path": "popup.html"
-  }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["sample-export.json"],
+      "matches": ["<all_urls>"]
+    }
+  ]
 } 
