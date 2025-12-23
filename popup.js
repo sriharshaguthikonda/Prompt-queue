@@ -404,9 +404,23 @@ const updatePromptCount = () => {
   }
 };
 
+function autoResizeTextarea(el) {
+  if (!el) return;
+  const maxHeight = Math.floor(window.innerHeight * 0.7);
+  const minHeight = 200;
+  el.style.height = 'auto';
+  const nextHeight = Math.min(Math.max(minHeight, el.scrollHeight + 8), maxHeight);
+  el.style.height = `${nextHeight}px`;
+}
+
 if (promptsTextarea) {
-  promptsTextarea.addEventListener('input', updatePromptCount);
+  promptsTextarea.addEventListener('input', () => {
+    updatePromptCount();
+    autoResizeTextarea(promptsTextarea);
+  });
   updatePromptCount();
+  autoResizeTextarea(promptsTextarea);
+  window.addEventListener('resize', () => autoResizeTextarea(promptsTextarea));
 }
 
 const insertSeparatorBtn = document.getElementById('insertSeparatorBtn');
