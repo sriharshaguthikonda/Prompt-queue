@@ -16,7 +16,7 @@
           original(`${PREFIX} ${first}`, ...args.slice(1));
         } else {
           original(PREFIX, ...args);
-        }
+        // }
       };
     }
   });
@@ -118,6 +118,8 @@ async function saveState() {
     options: state.options,
     lastActivityTime: state.lastActivityTime,
     recoveryAttempts: state.recoveryAttempts,
+    processing: state.processing,
+    currentPromptId: state.currentPromptId,
     savedAt: Date.now(),
   };
   await chrome.storage.local.set({ aiTaskSequencerState: persistentState });
@@ -126,6 +128,7 @@ async function saveState() {
 async function loadState() {
   const { aiTaskSequencerState } = await chrome.storage.local.get('aiTaskSequencerState');
   if (aiTaskSequencerState) {
+    const oldState = { running: state.running, currentIndex: state.currentIndex, prompts: state.prompts.length };
     state.prompts = aiTaskSequencerState.prompts || [];
     state.currentIndex = aiTaskSequencerState.currentIndex || 0;
     state.running = aiTaskSequencerState.running || false;
@@ -133,6 +136,18 @@ async function loadState() {
     state.options = aiTaskSequencerState.options || state.options;
     state.lastActivityTime = aiTaskSequencerState.lastActivityTime || Date.now();
     state.recoveryAttempts = aiTaskSequencerState.recoveryAttempts || 0;
+    state.processing = aiTaskSequencerState.processing || false;
+    state.currentPromptId = aiTaskSequencerState.currentPromptId || null;
+    console.log('[LoadState] State loaded from storage', {
+      oldState,
+      newState: { 
+        running: state.running, 
+        currentIndex: state.currentIndex, 
+        prompts: state.prompts.length,
+        processing: state.processing,
+        currentPromptId: state.currentPromptId
+      }
+    });
     return true;
   }
   return false;
@@ -145,6 +160,8 @@ async function clearState() {
   state.currentIndex = 0;
   state.tabId = null;
   state.recoveryAttempts = 0;
+  state.processing = false;
+  state.currentPromptId = null;
 }
 
 // ============ TAB & CONNECTION HEALTH ============
@@ -204,12 +221,21 @@ async function attemptRecovery() {
   console.log('[Recovery] Attempting recovery...', {
     currentIndex: state.currentIndex,
     attempts: state.recoveryAttempts,
+    processing: state.processing,
   });
 
   if (!state.running || !state.tabId) {
     console.log('[Recovery] Not running or no tab, clearing state');
     await clearState();
     return false;
+  }
+  
+  // Don't recover if a prompt is already being processed - just update activity time
+  if (state.processing) {
+    console.log('[Recovery] Already processing a prompt, just refreshing activity time');
+    state.lastActivityTime = Date.now();
+    await saveState();
+    return true;
   }
 
   if (state.recoveryAttempts >= RECOVERY_CONFIG.maxRecoveryAttempts) {
@@ -416,8 +442,22 @@ function buildMessageText(text) {
 }
 
 async function sendNextPrompt() {
-  if (!state.running) return;
+  console.log('[SendNextPrompt] Called', { 
+    running: state.running, 
+    currentIndex: state.currentIndex, 
+    totalPrompts: state.prompts.length,
+    processing: state.processing 
+  });
+  
+  if (!state.running) {
+    console.log('[SendNextPrompt] Not running, returning early');
+    return;
+  }
   if (state.currentIndex >= state.prompts.length) {
+    console.log('[SendNextPrompt] All prompts done, completing automation', {
+      currentIndex: state.currentIndex,
+      totalPrompts: state.prompts.length
+    });
     state.running = false;
     await clearState();
     try {
@@ -491,9 +531,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "START_AUTOMATION": {
+          console.log('[StartAutomation] Received request', {
+            running: state.running,
+            processing: state.processing,
+            currentIndex: state.currentIndex,
+            promptsInRequest: message.prompts?.length
+          });
           // Prevent starting a new automation while one is already running
           if (state.running) {
-            console.log('[StartAutomation] Automation already running, ignoring new start request');
+            console.log('[StartAutomation] Automation already running, REJECTING new start request');
             sendResponse({ ok: false, error: "Automation is already running. Stop the current automation first." });
             return;
           }
@@ -540,12 +586,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "RESPONSE_COMPLETE": {
+          console.log('[ResponseComplete] Received', {
+            messagePromptId: message.promptId,
+            statePromptId: state.currentPromptId,
+            running: state.running,
+            processing: state.processing,
+            currentIndex: state.currentIndex,
+            totalPrompts: state.prompts.length,
+            stoppedByStopWord: message.stoppedByStopWord,
+            error: message.error
+          });
           sendResponse({ ok: true });
           if (!state.running || !state.processing) {
+            console.log('[ResponseComplete] Not running or not processing, ignoring', {
+              running: state.running,
+              processing: state.processing
+            });
             return;
           }
           if (message.promptId && message.promptId !== state.currentPromptId) {
-            console.log('[ResponseComplete] Stale prompt response, ignoring');
+            console.log('[ResponseComplete] Stale prompt response, ignoring', {
+              messagePromptId: message.promptId,
+              statePromptId: state.currentPromptId
+            });
             return;
           }
           state.processing = false;

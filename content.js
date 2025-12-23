@@ -745,8 +745,11 @@
       
       console.log('[PromptQueue] Completion detected, sending RESPONSE_COMPLETE', { promptId });
       try {
-        chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
-      } catch (_) {}
+        const resp = await chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
+        console.log('[PromptQueue] RESPONSE_COMPLETE sent, got response', { promptId, resp });
+      } catch (e) {
+        console.error('[PromptQueue] Failed to send RESPONSE_COMPLETE', { promptId, error: e?.message });
+      }
     } catch (e) {
       console.error('[PromptQueue] Error during processing', { 
         promptId, 
