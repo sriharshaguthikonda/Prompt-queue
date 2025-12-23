@@ -113,20 +113,23 @@ label {
 /* Inputs */
 textarea {
   width: 100%;
-  height: 120px;
+  min-height: 80px;
+  max-height: 60vh;
   box-sizing: border-box;
   resize: vertical;
+  overflow: auto;
   border-radius: 8px;
   padding: 8px;
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--text);
-  transition: all 0.3s ease;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 textarea:focus {
-  height: 250px;
+  border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+  outline: none;
 }
 
 input[type="text"],
@@ -299,20 +302,12 @@ button.secondary {
 }
 
 .prompts-left textarea {
-  height: 60px;
-}
-
-.prompts-left textarea:focus {
-  height: 200px;
+  min-height: 72px;
 }
 
 .prompts-right textarea {
-  height: 60px;
+  min-height: 72px;
   font-size: 12px;
-}
-
-.prompts-right textarea:focus {
-  height: 200px;
 }
 
 /* Preset Buttons */

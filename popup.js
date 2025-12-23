@@ -425,7 +425,8 @@ if (promptsTextarea) {
 
 const insertSeparatorBtn = document.getElementById('insertSeparatorBtn');
 if (insertSeparatorBtn && promptsTextarea) {
-  insertSeparatorBtn.addEventListener('click', () => {
+  insertSeparatorBtn.addEventListener('click', (e) => {
+    e.preventDefault();
     const separatorBlock = `${PROMPT_SEPARATOR}\n`;
     const { selectionStart, selectionEnd, value } = promptsTextarea;
     const before = value.slice(0, selectionStart);
@@ -436,9 +437,12 @@ if (insertSeparatorBtn && promptsTextarea) {
     const nextValue = `${before}${insertText}${after}`;
     const caretPos = before.length + insertText.length;
     promptsTextarea.value = nextValue;
-    promptsTextarea.focus();
-    promptsTextarea.setSelectionRange(caretPos, caretPos);
+    promptsTextarea.focus({ preventScroll: true });
+    requestAnimationFrame(() => {
+      promptsTextarea.setSelectionRange(caretPos, caretPos);
+    });
     updatePromptCount();
+    autoResizeTextarea(promptsTextarea);
   });
 }
 
