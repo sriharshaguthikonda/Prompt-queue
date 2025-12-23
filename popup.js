@@ -404,23 +404,32 @@ const updatePromptCount = () => {
   }
 };
 
-function autoResizeTextarea(el) {
+function autoResizeTextarea(el, { active = false } = {}) {
   if (!el) return;
   const maxHeight = Math.floor(window.innerHeight * 0.7);
-  const minHeight = 200;
+  const minHeight = 120;
+  const collapsed = 80;
+  el.classList.toggle('is-active', active);
+  if (!active && document.activeElement !== el) {
+    el.style.height = `${collapsed}px`;
+    return;
+  }
   el.style.height = 'auto';
   const nextHeight = Math.min(Math.max(minHeight, el.scrollHeight + 8), maxHeight);
   el.style.height = `${nextHeight}px`;
 }
 
 if (promptsTextarea) {
+  const handleActiveResize = () => autoResizeTextarea(promptsTextarea, { active: true });
   promptsTextarea.addEventListener('input', () => {
     updatePromptCount();
-    autoResizeTextarea(promptsTextarea);
+    handleActiveResize();
   });
+  promptsTextarea.addEventListener('focus', handleActiveResize);
+  promptsTextarea.addEventListener('blur', () => autoResizeTextarea(promptsTextarea, { active: false }));
   updatePromptCount();
-  autoResizeTextarea(promptsTextarea);
-  window.addEventListener('resize', () => autoResizeTextarea(promptsTextarea));
+  autoResizeTextarea(promptsTextarea, { active: false });
+  window.addEventListener('resize', handleActiveResize);
 }
 
 const insertSeparatorBtn = document.getElementById('insertSeparatorBtn');

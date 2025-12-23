@@ -113,19 +113,22 @@ label {
 /* Inputs */
 textarea {
   width: 100%;
-  height: 120px;
+  min-height: 72px;
+  height: var(--textarea-collapsed, 80px);
+  max-height: 45vh;
   box-sizing: border-box;
-  resize: vertical;
+  resize: none;
+  overflow: auto;
   border-radius: 8px;
   padding: 8px;
   border: 1px solid var(--border);
   background: var(--input-bg);
   color: var(--text);
-  transition: all 0.3s ease;
+  transition: height 0.18s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
-textarea:focus {
-  height: 250px;
+textarea:focus,
+textarea.is-active {
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
 }
 
@@ -292,27 +295,16 @@ button.secondary {
 
 .prompts-left {
   flex: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .prompts-right {
   flex: 1;
-}
-
-.prompts-left textarea {
-  height: 60px;
-}
-
-.prompts-left textarea:focus {
-  height: 200px;
-}
-
-.prompts-right textarea {
-  height: 60px;
-  font-size: 12px;
-}
-
-.prompts-right textarea:focus {
-  height: 200px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 /* Preset Buttons */
