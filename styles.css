@@ -265,9 +265,22 @@ button.secondary {
 
 /* Prompt Counter */
 .prompt-counter {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
-  margin-top: 4px;
+  margin-top: 6px;
+}
+
+.prompt-counter-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+#insertSeparatorBtn {
+  flex: 0 0 auto;
+  padding: 6px 10px;
 }
 
 /* Prompts Container */

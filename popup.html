@@ -29,7 +29,10 @@
             <label for="prompts"></label>
             <textarea id="prompts" placeholder="Paste prompts here, one per line...
 Prompts (one per line)"></textarea>
-            <div class="prompt-counter">0 prompts loaded</div>
+            <div class="prompt-counter-row">
+              <div class="prompt-counter">0 prompts loaded</div>
+              <button id="insertSeparatorBtn" class="preset-btn" type="button" title="Insert a multi-line separator">↵ Insert separator</button>
+            </div>
           </div>
           <div class="prompts-right">
             <div class="inline">
@@ -165,6 +168,6 @@ Prompts (one per line)"></textarea>
       </div>
     </div>
 
-    <script src="popup.js"></script>
+    <script type="module" src="popup.js"></script>
   </body>
-</html> 
+</html>

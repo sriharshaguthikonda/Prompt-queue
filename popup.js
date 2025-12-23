@@ -1,5 +1,5 @@
 import { applyConsolePatch } from './popup-console-patch.js';
-import { parsePrompts, setStatus, setProgress, showToast, showError, hideError, clearError, setButtonsDisabled, showHistoryLoading, secToMs, msToSec, applyTheme } from './popup-dom-utils.js';
+import { parsePrompts, setStatus, setProgress, showToast, showError, hideError, clearError, setButtonsDisabled, secToMs, PROMPT_SEPARATOR } from './popup-dom-utils.js';
 import { loadSettingsIntoUI, saveSettingsFromUI, initSettingsUI } from './popup-settings.js';
 import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, saveHistoryItem } from './popup-history.js';
 
@@ -18,7 +18,6 @@ async function refreshStatus() {
       setProgress(running ? currentIndex : total, total);
       setButtonsDisabled(running);
       if (running) {
-        // Show recovery status if attempting recovery
         if (recoveryAttempts > 0) {
           setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`, 'running');
         } else {
@@ -35,111 +34,7 @@ async function refreshStatus() {
   }
 }
 
-function applyTheme(theme) {
-  const body = document.body;
-  body.classList.remove('theme-dark', 'theme-light');
-  body.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark');
-  const sel = document.getElementById('themeSelect');
-  if (sel) sel.value = theme === 'light' ? 'light' : 'dark';
-}
-
-async function loadSettingsIntoUI() {
-  try {
-    const res = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-    if (res?.ok && res.settings) {
-      const s = res.settings;
-      applyTheme(s.theme || 'dark');
-      document.getElementById('maxWaitSec').value = msToSec(s.maxWaitMs);
-      document.getElementById('stableSec').value = msToSec(s.stableMs);
-      document.getElementById('pollSec').value = msToSec(s.pollIntervalMs);
-      document.getElementById('systemPrompt').value = s.systemPrompt || '';
-      document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
-      document.getElementById('enableMaxWaitTimeout').checked = s.enableMaxWaitTimeout !== false;
-      document.getElementById('enableStopWord').checked = s.enableStopWord === true;
-      document.getElementById('stopWord').value = s.stopWord || '';
-      document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
-      
-      // Show/hide stop word container based on checkbox
-      const stopWordContainer = document.getElementById('stopWordContainer');
-      if (s.enableStopWord === true) {
-        stopWordContainer.classList.remove('hidden');
-      } else {
-        stopWordContainer.classList.add('hidden');
-      }
-    }
-  } catch (e) {
-    console.error('[LoadSettings] Error:', e);
-  }
-}
-
-async function saveSettingsFromUI() {
-  try {
-    const maxWaitSec = Number(document.getElementById('maxWaitSec').value);
-    const stableSec = Number(document.getElementById('stableSec').value);
-    const pollSec = Number(document.getElementById('pollSec').value);
-    const settings = {
-      maxWaitMs: secToMs(maxWaitSec),
-      stableMs: secToMs(stableSec),
-      pollIntervalMs: secToMs(pollSec),
-      systemPrompt: document.getElementById('systemPrompt').value || '',
-      prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
-      enableMaxWaitTimeout: document.getElementById('enableMaxWaitTimeout').checked,
-      enableStopWord: document.getElementById('enableStopWord').checked,
-      stopWord: document.getElementById('stopWord').value || '',
-      stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
-    };
-    await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
-  } catch (e) {
-    console.error('[SaveSettings] Error:', e);
-  }
-}
-
-document.getElementById('themeSelect').addEventListener('change', async (e) => {
-  const val = e.target.value;
-  applyTheme(val);
-  try {
-    await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: { theme: val } });
-  } catch (e) {
-    console.error('[ThemeChange] Error:', e);
-  }
-});
-
-['maxWaitSec','stableSec','pollSec','systemPrompt','prependSystemPrompt','enableMaxWaitTimeout'].forEach((id) => {
-  const el = document.getElementById(id);
-  if (el) el.addEventListener('change', saveSettingsFromUI);
-});
-
-// Max wait timeout toggle
-const enableMaxWaitTimeoutCheckbox = document.getElementById('enableMaxWaitTimeout');
-if (enableMaxWaitTimeoutCheckbox) {
-  enableMaxWaitTimeoutCheckbox.addEventListener('change', saveSettingsFromUI);
-}
-
-// Stop word toggle and container
-const enableStopWordCheckbox = document.getElementById('enableStopWord');
-const stopWordContainer = document.getElementById('stopWordContainer');
-const stopWordInput = document.getElementById('stopWord');
-const stopWordCaseSensitiveCheckbox = document.getElementById('stopWordCaseSensitive');
-
-if (enableStopWordCheckbox) {
-  enableStopWordCheckbox.addEventListener('change', () => {
-    if (enableStopWordCheckbox.checked) {
-      stopWordContainer.classList.remove('hidden');
-      stopWordInput.focus();
-    } else {
-      stopWordContainer.classList.add('hidden');
-    }
-    saveSettingsFromUI();
-  });
-}
-
-if (stopWordInput) {
-  stopWordInput.addEventListener('input', saveSettingsFromUI);
-}
-
-if (stopWordCaseSensitiveCheckbox) {
-  stopWordCaseSensitiveCheckbox.addEventListener('change', saveSettingsFromUI);
-}
+initSettingsUI();
 
 document.getElementById('startBtn').addEventListener('click', async () => {
   try {
@@ -207,12 +102,9 @@ if (saveHistoryBtn) {
         return;
       }
       const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      await chrome.runtime.sendMessage({ 
-        type: 'SAVE_PROMPT_HISTORY', 
-        item: { prompts, settings: settings?.settings } 
-      });
+      await saveHistoryItem(prompts, settings?.settings);
       // Immediately refresh the history list
-      await loadHistoryIntoUI();
+      await loadHistoryIntoUI(updatePromptCount);
       showToast('✓ Saved to history', 'success');
     } catch (e) {
       console.error('[SaveHistoryBtn] Error:', e);
@@ -240,25 +132,19 @@ const exportBtn = document.getElementById('exportBtn');
 if (exportBtn) {
   exportBtn.addEventListener('click', async () => {
     try {
-      const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
-      if (res?.ok && res.history) {
-        const exportData = {
-          version: '1.0',
-          exportedAt: new Date().toISOString(),
-          history: res.history
-        };
-        const jsonString = JSON.stringify(exportData, null, 2);
-        const blob = new Blob([jsonString], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `prompt-queue-export-${Date.now()}.json`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-        showToast(`✓ Exported ${res.history.length} items`, 'success');
-      }
+      const exportData = await exportHistory();
+      if (!exportData) return;
+      const jsonString = JSON.stringify(exportData, null, 2);
+      const blob = new Blob([jsonString], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `prompt-queue-export-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`✓ Exported ${exportData.history.length} items`, 'success');
     } catch (e) {
       console.error('[ExportBtn] Error:', e);
       showToast('Export failed', 'error');
@@ -282,61 +168,13 @@ if (importBtn && importFile) {
       const text = await file.text();
       const importData = JSON.parse(text);
       
-      if (!importData.history || !Array.isArray(importData.history)) {
-        showToast('Invalid JSON format', 'error');
-        return;
-      }
-      
-      // Validate each item has required fields
-      const validItems = importData.history.filter(item => {
-        if (!item || typeof item !== 'object') return false;
-        if (!Array.isArray(item.prompts) || item.prompts.length === 0) return false;
-        return true;
-      });
-      
-      if (validItems.length === 0) {
-        showToast('No valid history items found', 'error');
-        return;
-      }
-      
-      const invalidCount = importData.history.length - validItems.length;
-      if (invalidCount > 0) {
-        console.warn(`[Import] Skipped ${invalidCount} invalid items`);
-      }
-      
-      // Create signature for deduplication
-      const makeSignature = (item) => JSON.stringify((item.prompts || []).map(p => p.trim()));
-      
-      // Get existing history
-      const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
-      const existingHistory = res?.history || [];
-      
-      // Build set of existing signatures for deduplication
-      const existingSignatures = new Set(existingHistory.map(makeSignature));
-      
-      // Filter out duplicates from imported items
-      const newItems = validItems.filter(item => !existingSignatures.has(makeSignature(item)));
-      
-      // Ensure imported items have savedAt timestamp
-      const itemsWithTimestamp = newItems.map(item => ({
-        ...item,
-        savedAt: item.savedAt || Date.now()
-      }));
-      
-      // Merge: new imports first, then existing
-      const mergedHistory = [...itemsWithTimestamp, ...existingHistory].slice(0, 50);
-      
-      // Save merged history
-      await chrome.storage.local.set({ aiTaskSequencerHistory: mergedHistory });
-      
-      // Reload UI
-      await loadHistoryIntoUI();
-      
-      const dupeCount = validItems.length - newItems.length;
-      let message = `✓ Imported ${newItems.length} item${newItems.length !== 1 ? 's' : ''}`;
-      if (dupeCount > 0) message += ` (${dupeCount} duplicate${dupeCount !== 1 ? 's' : ''} skipped)`;
-      if (invalidCount > 0) message += ` (${invalidCount} invalid skipped)`;
-      showToast(message, 'success');
+      const result = await importHistoryItems(importData);
+      await loadHistoryIntoUI(updatePromptCount);
+
+      let message = `✓ Imported ${result.imported} item${result.imported !== 1 ? 's' : ''}`;
+      if (result.duplicates > 0) message += ` (${result.duplicates} duplicate${result.duplicates !== 1 ? 's' : ''} skipped)`;
+      if (result.invalid > 0) message += ` (${result.invalid} invalid skipped)`;
+      showToast(message, result.imported > 0 ? 'success' : 'error');
     } catch (e) {
       console.error('[ImportFile] Error:', e);
       showToast(`Import failed: ${e.message}`, 'error');
@@ -345,99 +183,6 @@ if (importBtn && importFile) {
     // Reset file input
     importFile.value = '';
   });
-}
-
-function createHistoryRow(item, index) {
-  const wrapper = document.createElement('div');
-  wrapper.className = 'history-item';
-  const title = item.title || (item.prompts?.slice(0, 1)?.[0] || '').slice(0, 80);
-  const date = new Date(item.savedAt || Date.now()).toLocaleString();
-
-  const row = document.createElement('div');
-  row.className = 'history-row';
-
-  const left = document.createElement('div');
-  left.style.flex = '1';
-  
-  const titleEl = document.createElement('div');
-  titleEl.style.whiteSpace = 'nowrap';
-  titleEl.style.overflow = 'hidden';
-  titleEl.style.textOverflow = 'ellipsis';
-  titleEl.textContent = title;
-  titleEl.title = (item.prompts || []).join('\n');
-  
-  const dateEl = document.createElement('div');
-  dateEl.className = 'history-item-date';
-  dateEl.textContent = date;
-  
-  left.appendChild(titleEl);
-  left.appendChild(dateEl);
-
-  const ctrls = document.createElement('div');
-  ctrls.className = 'mini-controls';
-
-  const loadBtn = document.createElement('button');
-  loadBtn.textContent = 'Load';
-  loadBtn.addEventListener('click', async () => {
-    document.getElementById('prompts').value = (item.prompts || []).join('\n');
-    if (item.settings) {
-      await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: item.settings });
-      await loadSettingsIntoUI();
-    }
-    updatePromptCount();
-  });
-
-  const delBtn = document.createElement('button');
-  delBtn.textContent = 'Delete';
-  delBtn.addEventListener('click', async () => {
-    await chrome.runtime.sendMessage({ type: 'DELETE_PROMPT_HISTORY', index });
-    await loadHistoryIntoUI();
-  });
-
-  ctrls.appendChild(loadBtn);
-  ctrls.appendChild(delBtn);
-
-  row.appendChild(left);
-  row.appendChild(ctrls);
-  wrapper.appendChild(row);
-  return wrapper;
-}
-
-async function loadHistoryIntoUI() {
-  try {
-    const list = document.getElementById('history');
-    const countBadge = document.getElementById('historyCount');
-    const clearBtn = document.getElementById('clearHistoryBtn');
-    
-    if (!list) {
-      console.error('[LoadHistory] History list element not found');
-      return;
-    }
-    
-    showHistoryLoading(true);
-    
-    // Simulate loading delay for better UX
-    await new Promise(r => setTimeout(r, 300));
-    
-    const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
-    if (res?.ok) {
-      const history = res.history || [];
-      if (countBadge) {
-        countBadge.textContent = `${history.length} item${history.length !== 1 ? 's' : ''}`;
-      }
-      if (clearBtn) {
-        clearBtn.style.display = history.length > 0 ? 'block' : 'none';
-      }
-      history.forEach((item, idx) => {
-        list.appendChild(createHistoryRow(item, idx));
-      });
-    }
-    
-    showHistoryLoading(false);
-  } catch (e) {
-    console.error('[LoadHistory] Error:', e);
-    showHistoryLoading(false);
-  }
 }
 
 chrome.runtime.onMessage.addListener((message) => {
@@ -623,7 +368,7 @@ async function importSampleData(importData) {
 document.addEventListener('DOMContentLoaded', async () => {
   try {
     await loadSettingsIntoUI();
-    await loadHistoryIntoUI();
+    await loadHistoryIntoUI(updatePromptCount);
     await refreshStatus();
     startAutoRefresh();
     startCountdownTimer();
@@ -662,6 +407,25 @@ const updatePromptCount = () => {
 if (promptsTextarea) {
   promptsTextarea.addEventListener('input', updatePromptCount);
   updatePromptCount();
+}
+
+const insertSeparatorBtn = document.getElementById('insertSeparatorBtn');
+if (insertSeparatorBtn && promptsTextarea) {
+  insertSeparatorBtn.addEventListener('click', () => {
+    const separatorBlock = `${PROMPT_SEPARATOR}\n`;
+    const { selectionStart, selectionEnd, value } = promptsTextarea;
+    const before = value.slice(0, selectionStart);
+    const after = value.slice(selectionEnd);
+    const needsLeadingNewline = before && !before.endsWith('\n');
+    const needsTrailingNewline = after && !after.startsWith('\n');
+    const insertText = `${needsLeadingNewline ? '\n' : ''}${separatorBlock}${needsTrailingNewline ? '\n' : ''}`;
+    const nextValue = `${before}${insertText}${after}`;
+    const caretPos = before.length + insertText.length;
+    promptsTextarea.value = nextValue;
+    promptsTextarea.focus();
+    promptsTextarea.setSelectionRange(caretPos, caretPos);
+    updatePromptCount();
+  });
 }
 
 // Preset buttons
@@ -706,8 +470,8 @@ if (clearHistoryBtn) {
   clearHistoryBtn.addEventListener('click', async () => {
     if (confirm('Are you sure you want to clear all saved histories? This cannot be undone.')) {
       try {
-        await chrome.storage.local.set({ aiTaskSequencerHistory: [] });
-        await loadHistoryIntoUI();
+        await clearHistory();
+        await loadHistoryIntoUI(updatePromptCount);
         showToast('✓ History cleared', 'success');
       } catch (e) {
         console.error('[ClearHistory] Error:', e);

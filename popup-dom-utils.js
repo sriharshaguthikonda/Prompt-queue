@@ -1,8 +1,20 @@
 // DOM + UI helpers used by popup.js
 
+export const PROMPT_SEPARATOR = [
+  '---------------------------------------------------',
+  '------------------Next prompt------------------',
+  '---------------------------------------------------',
+].join('\n');
+
 export function parsePrompts(text) {
-  return text
-    .split(/\r?\n/)
+  if (typeof text !== 'string') return [];
+  // Prefer explicit separator blocks for multi-line prompts; fall back to per-line
+  const separatorChunks = text.split(PROMPT_SEPARATOR);
+  const chunks = separatorChunks.length > 1
+    ? separatorChunks
+    : text.split(/\r?\n/);
+
+  return chunks
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
