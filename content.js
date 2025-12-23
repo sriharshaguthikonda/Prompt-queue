@@ -246,6 +246,25 @@
     return text;
   }
 
+  function normalizeWhitespace(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  async function verifyPromptRendered({ text, promptId, attempts = 4, delayMs = 600 }) {
+    const target = normalizeWhitespace(text);
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const nodes = Array.from(document.querySelectorAll('div.whitespace-pre-wrap'));
+      const matchNode = nodes.find((node) => normalizeWhitespace(node.textContent).includes(target));
+      if (matchNode) {
+        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt, nodesChecked: nodes.length });
+        return true;
+      }
+      console.warn('[PromptQueue] Prompt render not found yet, retrying', { promptId, attempt, attempts, nodesChecked: nodes.length });
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+    throw new Error('Prompt text not found in chat after send');
+  }
+
   async function clickSend(btn, inputEl) {
     if (!btn) {
       inputEl?.focus();
@@ -704,6 +723,14 @@
 
       if (!streamStarted) {
         throw new Error('No active stream detected after sending prompt (after retries)');
+      }
+
+      // Verify the prompt text appears in the rendered chat (e.g., ChatGPT message bubble)
+      try {
+        await verifyPromptRendered({ text, promptId, attempts: 4, delayMs: 500 });
+      } catch (e) {
+        console.error('[PromptQueue] Prompt render verification failed', { promptId, error: e?.message });
+        throw e;
       }
 
       const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
