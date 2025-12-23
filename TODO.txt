@@ -30,6 +30,10 @@ CRITICAL ISSUES:
 [X] 3. Consolidate console patching
        - BY DESIGN: Each file runs in separate JS context (service worker, popup, page)
        - FIXED: Added explanatory comments and optimized code
+    
+[ ] 4. splitting files
+       - need testing
+       - FIXED: popup.js -> popup.js, popup-dom-utils.js
 
 ================================================================================
 MEDIUM PRIORITY:
