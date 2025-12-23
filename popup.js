@@ -434,6 +434,9 @@ if (promptsTextarea) {
 
 const insertSeparatorBtn = document.getElementById('insertSeparatorBtn');
 if (insertSeparatorBtn && promptsTextarea) {
+  // Prevent mousedown from stealing focus/selection before we insert
+  insertSeparatorBtn.addEventListener('mousedown', (e) => e.preventDefault());
+
   insertSeparatorBtn.addEventListener('click', (e) => {
     e.preventDefault();
     const separatorBlock = `${PROMPT_SEPARATOR}\n`;
