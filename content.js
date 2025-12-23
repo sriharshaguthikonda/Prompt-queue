@@ -165,29 +165,39 @@
   }
 
   function setProseMirrorText(el, text) {
-    el.focus();
+    el.focus({ preventScroll: true });
+    const selection = window.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    document.execCommand('delete', false, null);
+
+    const paragraphs = String(text || '')
+      .replace(/\r\n/g, '\n')
+      .split('\n')
+      .map((line) => line.length === 0 ? '<p><br></p>' : `<p>${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
+      .join('');
+
+    const insertHtmlOk = document.execCommand('insertHTML', false, paragraphs);
+    if (insertHtmlOk) return;
+
+    // Fallback: chunked insertText to avoid length limits
+    const chunks = [];
+    const maxChunk = 4000;
+    for (let i = 0; i < text.length; i += maxChunk) {
+      chunks.push(text.slice(i, i + maxChunk));
+    }
     try {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.execCommand('delete', false, null);
-      
-      const ok = document.execCommand('insertText', false, text);
-      if (ok) return;
-      
-      throw new Error('insertText returned false');
-    } catch (_) {
-      try {
-        const before = new InputEvent('beforeinput', { inputType: 'insertFromPaste', data: text, bubbles: true, cancelable: true });
-        el.dispatchEvent(before);
-        const input = new InputEvent('input', { data: text, bubbles: true, cancelable: true });
-        el.dispatchEvent(input);
-        el.textContent = text;
-      } catch (_) {
-        el.textContent = text;
+      for (const chunk of chunks) {
+        document.execCommand('insertText', false, chunk);
       }
+      return;
+    } catch (_) {
+      // Last resort: set textContent and dispatch events
+      el.textContent = text;
+      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
     }
   }
 
@@ -498,11 +508,12 @@
   
     // Wait for any currently processing prompt to complete
     if (currentPromptId !== null && currentPromptId !== promptId) {
-      console.warn('[PromptQueue] QUEUED: Waiting for current prompt to complete', { 
+      const queueMeta = { 
         newPromptId: promptId, 
         currentPromptId, 
         timestamp: Date.now() 
-      });
+      };
+      console.warn('[PromptQueue] QUEUED: Waiting for current prompt to complete', queueMeta, JSON.stringify(queueMeta));
       
       const enableQueueTimeout = options?.enableMaxWaitTimeout !== false;
       // When queue timeout is enabled, wait up to 30 seconds for current prompt to finish.
