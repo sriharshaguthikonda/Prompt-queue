@@ -16,7 +16,7 @@
           original(`${PREFIX} ${first}`, ...args.slice(1));
         } else {
           original(PREFIX, ...args);
-        // }
+        }
       };
     }
   });
