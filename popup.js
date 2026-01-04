@@ -5,6 +5,13 @@ import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, sav
 
 applyConsolePatch();
 
+const separatorInput = document.getElementById('separatorInput');
+const resolveSeparator = (raw) => {
+  if (!raw || typeof raw !== 'string') return PROMPT_SEPARATOR;
+  // Support literal "\n" sequences entered by the user
+  return raw.replace(/\\n/g, '\n');
+};
+
 async function getActiveTabId() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs?.[0]?.id;
@@ -47,7 +54,9 @@ document.getElementById('startBtn').addEventListener('click', async () => {
     }
     
     const textarea = document.getElementById('prompts');
-    const prompts = parsePrompts(textarea.value);
+    const separatorInput = document.getElementById('separatorInput');
+    const separator = resolveSeparator(separatorInput?.value);
+    const prompts = parsePrompts(textarea.value, separator);
     if (prompts.length === 0) {
       setStatus('Please enter at least one prompt.');
       return;
@@ -96,7 +105,9 @@ if (saveHistoryBtn) {
   saveHistoryBtn.addEventListener('click', async () => {
     try {
       const textarea = document.getElementById('prompts');
-      const prompts = parsePrompts(textarea.value);
+      const separatorInput = document.getElementById('separatorInput');
+      const separator = resolveSeparator(separatorInput?.value);
+      const prompts = parsePrompts(textarea.value, separator);
       if (prompts.length === 0) {
         showToast('No prompts to save', 'error');
         return;
@@ -397,7 +408,9 @@ document.getElementById('optionsHeader')?.addEventListener('click', () => {
 // Prompt counter
 const promptsTextarea = document.getElementById('prompts');
 const updatePromptCount = () => {
-  const prompts = parsePrompts(promptsTextarea.value);
+  if (!promptsTextarea) return;
+  const separator = resolveSeparator(separatorInput?.value);
+  const prompts = parsePrompts(promptsTextarea.value, separator);
   const counter = document.querySelector('.prompt-counter');
   if (counter) {
     counter.textContent = `${prompts.length} prompt${prompts.length !== 1 ? 's' : ''} loaded`;
@@ -432,6 +445,10 @@ if (promptsTextarea) {
   window.addEventListener('resize', handleActiveResize);
 }
 
+if (separatorInput) {
+  separatorInput.addEventListener('input', updatePromptCount);
+}
+
 const insertSeparatorBtn = document.getElementById('insertSeparatorBtn');
 if (insertSeparatorBtn && promptsTextarea) {
   // Prevent mousedown from stealing focus/selection before we insert
@@ -439,7 +456,7 @@ if (insertSeparatorBtn && promptsTextarea) {
 
   insertSeparatorBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    const separatorBlock = `${PROMPT_SEPARATOR}\n`;
+    const separatorBlock = `${resolveSeparator(separatorInput?.value)}\n`;
     const { selectionStart, selectionEnd, value } = promptsTextarea;
     const before = value.slice(0, selectionStart);
     const after = value.slice(selectionEnd);

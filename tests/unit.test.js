@@ -11,6 +11,21 @@ describe('Utility Functions', () => {
       expect(result).toEqual(['Hello world']);
     });
 
+    it('should honor custom separator', () => {
+      const custom = '===';
+      const text = `Prompt 1${custom}Prompt 2`;
+      const result = parsePrompts(text, custom);
+      expect(result).toEqual(['Prompt 1', 'Prompt 2']);
+    });
+
+    it('should treat literal \\n as newline when passed in', () => {
+      const sep = '\\n\\n';
+      const text = `Prompt 1${sep}Prompt 2`;
+      const resolved = sep.replace(/\\n/g, '\n');
+      const result = parsePrompts(text.replace(sep, resolved), resolved);
+      expect(result).toEqual(['Prompt 1', 'Prompt 2']);
+    });
+
     it('should parse multiple prompts', () => {
       const result = parsePrompts('Prompt 1\nPrompt 2\nPrompt 3');
       expect(result).toEqual(['Prompt 1', 'Prompt 2', 'Prompt 3']);

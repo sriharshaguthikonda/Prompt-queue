@@ -6,10 +6,13 @@ export const PROMPT_SEPARATOR = [
   '---------------------------------------------------',
 ].join('\n');
 
-export function parsePrompts(text) {
+export function parsePrompts(text, separator = PROMPT_SEPARATOR) {
   if (typeof text !== 'string') return [];
+  const chosenSeparator = typeof separator === 'string' && separator.length > 0
+    ? separator
+    : PROMPT_SEPARATOR;
   // Prefer explicit separator blocks for multi-line prompts; fall back to per-line
-  const separatorChunks = text.split(PROMPT_SEPARATOR);
+  const separatorChunks = text.split(chosenSeparator);
   const chunks = separatorChunks.length > 1
     ? separatorChunks
     : text.split(/\r?\n/);
