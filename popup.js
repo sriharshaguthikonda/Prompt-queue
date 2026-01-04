@@ -43,7 +43,7 @@ async function refreshStatus() {
 
 initSettingsUI();
 
-document.getElementById('startBtn').addEventListener('click', async () => {
+async function startAutomation() {
   try {
     // Check if automation is already running
     const statusRes = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
@@ -52,7 +52,7 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       setStatus(`Running prompt ${statusRes.status.currentIndex + 1} of ${statusRes.status.total}...`, 'running');
       return;
     }
-    
+
     const textarea = document.getElementById('prompts');
     const separatorInput = document.getElementById('separatorInput');
     const separator = resolveSeparator(separatorInput?.value);
@@ -82,10 +82,12 @@ document.getElementById('startBtn').addEventListener('click', async () => {
       showToast(res?.error || 'Failed to start', 'error');
     }
   } catch (e) {
-    console.error('[StartBtn] Error:', e);
+    console.error('[StartAutomation] Error:', e);
     setStatus(`Failed to start: ${e}`, 'error');
   }
-});
+}
+
+document.getElementById('startBtn').addEventListener('click', startAutomation);
 
 document.getElementById('stopBtn').addEventListener('click', async () => {
   try {
@@ -440,6 +442,14 @@ if (promptsTextarea) {
   });
   promptsTextarea.addEventListener('focus', handleActiveResize);
   promptsTextarea.addEventListener('blur', () => autoResizeTextarea(promptsTextarea, { active: false }));
+  promptsTextarea.addEventListener('keydown', (e) => {
+    const isEnter = e.key === 'Enter';
+    const withModifier = e.ctrlKey || e.metaKey;
+    if (isEnter && withModifier) {
+      e.preventDefault();
+      startAutomation();
+    }
+  });
   updatePromptCount();
   autoResizeTextarea(promptsTextarea, { active: false });
   window.addEventListener('resize', handleActiveResize);
