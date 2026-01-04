@@ -250,13 +250,40 @@
     return (text || '').replace(/\s+/g, ' ').trim();
   }
 
+  function fuzzyIncludes(haystack, needle) {
+    if (!haystack || !needle) return false;
+    const h = normalizeWhitespace(haystack).toLowerCase();
+    const n = normalizeWhitespace(needle).toLowerCase();
+    if (!h || !n) return false;
+    if (h.includes(n)) return true;
+    if (n.includes(h)) return true;
+    if (n.length > 60) {
+      const truncated = n.slice(0, 60);
+      return h.includes(truncated);
+    }
+    return false;
+  }
+
+  function findRenderedMessageMatch(targetText) {
+    const target = normalizeWhitespace(targetText);
+    if (!target) return null;
+    const candidates = Array.from(document.querySelectorAll('div.whitespace-pre-wrap'));
+    for (const el of candidates) {
+      const content = normalizeWhitespace(el.textContent || '');
+      if (fuzzyIncludes(content, target)) {
+        return { el, contentPreview: content.slice(0, 100) };
+      }
+    }
+    return null;
+  }
+
   async function verifyPromptRendered({ text, promptId, attempts = 4, delayMs = 600 }) {
     const target = normalizeWhitespace(text);
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const nodes = Array.from(document.querySelectorAll('div.whitespace-pre-wrap'));
-      const matchNode = nodes.find((node) => normalizeWhitespace(node.textContent).includes(target));
+      const matchNode = nodes.find((node) => fuzzyIncludes(node.textContent, target));
       if (matchNode) {
-        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt, nodesChecked: nodes.length });
+        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt, nodesChecked: nodes.length, contentPreview: normalizeWhitespace(matchNode.textContent).slice(0, 120) });
         return true;
       }
       console.warn('[PromptQueue] Prompt render not found yet, retrying', { promptId, attempt, attempts, nodesChecked: nodes.length });
@@ -609,7 +636,7 @@
 
     currentPromptId = promptId;
     automationAborted = false; // Reset abort flag for new prompt
-    console.log('[PromptQueue] Starting processing', { promptId, timestamp: Date.now() });
+    console.log('[PromptQueue] Starting processing', { promptId, timestamp: Date.now(), options });
     
     // Set a safety timeout to force cleanup if this prompt takes too long
     const enablePromptTimeout = options?.enableMaxWaitTimeout !== false;
@@ -697,6 +724,7 @@
         });
         throw new Error('Input field empty before sending');
       }
+      console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length, preview: finalNormalized.slice(0, 120) });
       
       console.log('[PromptQueue] Clicking send button', { promptId });
       await clickSend(sendBtn, inputEl);
@@ -715,7 +743,18 @@
         });
 
         if (!streamStarted && attempt < maxAttempts) {
-          console.warn('[PromptQueue] No active stream detected, re-attempting send', { promptId, attempt, maxAttempts });
+          const renderMatch = findRenderedMessageMatch(text);
+          if (renderMatch) {
+            console.log('[PromptQueue] Detected rendered message despite no stream signal; treating as sent', { 
+              promptId, 
+              attempt, 
+              maxAttempts, 
+              contentPreview: renderMatch.contentPreview 
+            });
+            streamStarted = true;
+            break;
+          }
+          console.warn('[PromptQueue] No active stream detected and no rendered message, re-attempting send', { promptId, attempt, maxAttempts });
           await new Promise((r) => setTimeout(r, 250));
           await clickSend(sendBtn, inputEl);
         }
@@ -724,10 +763,12 @@
       if (!streamStarted) {
         throw new Error('No active stream detected after sending prompt (after retries)');
       }
+      console.log('[PromptQueue] Stream detected or render found, proceeding to render verification', { promptId, streamStarted });
 
       // Verify the prompt text appears in the rendered chat (e.g., ChatGPT message bubble)
       try {
         await verifyPromptRendered({ text, promptId, attempts: 4, delayMs: 500 });
+        console.log('[PromptQueue] Render verification succeeded', { promptId });
       } catch (e) {
         console.error('[PromptQueue] Prompt render verification failed', { promptId, error: e?.message });
         throw e;
@@ -776,6 +817,7 @@
           } catch (_) {}
           return;
         }
+        console.log('[PromptQueue] Completion wait finished (no stop word)', { promptId });
       } catch (e) {
         console.error('[PromptQueue] waitForCompletion failed', { promptId, error: e?.message });
         throw e;

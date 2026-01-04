@@ -117,9 +117,11 @@ async function saveState() {
     tabId: state.tabId,
     options: state.options,
     lastActivityTime: state.lastActivityTime,
+    lastRecoveryTime: state.lastRecoveryTime,
     recoveryAttempts: state.recoveryAttempts,
     processing: state.processing,
     currentPromptId: state.currentPromptId,
+    promptStartTime: state.promptStartTime,
     savedAt: Date.now(),
   };
   await chrome.storage.local.set({ aiTaskSequencerState: persistentState });
@@ -131,13 +133,16 @@ async function loadState() {
     const oldState = { running: state.running, currentIndex: state.currentIndex, prompts: state.prompts.length };
     state.prompts = aiTaskSequencerState.prompts || [];
     state.currentIndex = aiTaskSequencerState.currentIndex || 0;
-    state.running = aiTaskSequencerState.running || false;
-    state.tabId = aiTaskSequencerState.tabId || null;
+    state.running = aiTaskSequencerState.running || state.running || false;
+    state.tabId = aiTaskSequencerState.tabId || state.tabId || null;
     state.options = aiTaskSequencerState.options || state.options;
-    state.lastActivityTime = aiTaskSequencerState.lastActivityTime || Date.now();
-    state.recoveryAttempts = aiTaskSequencerState.recoveryAttempts || 0;
-    state.processing = aiTaskSequencerState.processing || false;
-    state.currentPromptId = aiTaskSequencerState.currentPromptId || null;
+    state.lastActivityTime = aiTaskSequencerState.lastActivityTime || state.lastActivityTime || Date.now();
+    state.lastRecoveryTime = aiTaskSequencerState.lastRecoveryTime || state.lastRecoveryTime || 0;
+    state.recoveryAttempts = aiTaskSequencerState.recoveryAttempts || state.recoveryAttempts || 0;
+    // Prefer in-memory processing state if already true to avoid reverting to stale persisted false.
+    state.processing = state.processing || aiTaskSequencerState.processing || false;
+    state.currentPromptId = aiTaskSequencerState.currentPromptId || state.currentPromptId || null;
+    state.promptStartTime = aiTaskSequencerState.promptStartTime || state.promptStartTime || (state.processing ? state.lastActivityTime : 0);
     console.log('[LoadState] State loaded from storage', {
       oldState,
       newState: { 
@@ -145,7 +150,10 @@ async function loadState() {
         currentIndex: state.currentIndex, 
         prompts: state.prompts.length,
         processing: state.processing,
-        currentPromptId: state.currentPromptId
+        currentPromptId: state.currentPromptId,
+        promptStartTime: state.promptStartTime,
+        lastActivityTime: state.lastActivityTime,
+        lastRecoveryTime: state.lastRecoveryTime,
       }
     });
     return true;
@@ -305,8 +313,38 @@ async function healthCheck() {
   const now = Date.now();
   const timeSinceActivity = now - state.lastActivityTime;
   const timeSinceLastRecovery = now - state.lastRecoveryTime;
+  console.log('[Health] Tick', {
+    running: state.running,
+    processing: state.processing,
+    promptStartTime: state.promptStartTime,
+    timeSinceActivity,
+    timeSinceLastRecovery,
+    recoveryAttempts: state.recoveryAttempts,
+    staleThreshold: RECOVERY_CONFIG.staleThresholdMs,
+  });
+
+  // If we're actively processing a prompt and still within the per-prompt timeout window,
+  // treat the flow as healthy and refresh activity to avoid premature recovery.
+  if (state.processing && state.promptStartTime) {
+    const processingElapsed = now - state.promptStartTime;
+    const maxPerPrompt = state.options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs;
+    if (processingElapsed < maxPerPrompt) {
+      console.log('[Health] Processing in-flight prompt; refreshing activity and skipping recovery', {
+        processingElapsed,
+        maxPerPrompt,
+      });
+      state.lastActivityTime = now;
+      saveState(); // fire-and-forget; best effort to keep state fresh
+      return;
+    }
+    console.warn('[Health] Processing elapsed exceeded maxPerPrompt; recovery allowed', {
+      processingElapsed,
+      maxPerPrompt,
+    });
+  }
 
   if (timeSinceLastRecovery < RECOVERY_CONFIG.minRecoveryIntervalMs) {
+    console.log('[Health] Skipping recovery due to min interval guard', { timeSinceLastRecovery });
     return;
   }
 
@@ -379,9 +417,11 @@ async function sendToContent(tabId, message) {
   
   const ready = await ensureContentScriptReady(tabId);
   if (!ready) {
+    console.error('[SendToContent] Content script not ready', { tabId, messageType: message?.type });
     throw new Error('Could not establish connection to content script');
   }
 
+  console.log('[SendToContent] Sending message to content', { tabId, messageType: message?.type });
   return new Promise((resolve, reject) => {
     try {
       chrome.tabs.sendMessage(
@@ -389,9 +429,11 @@ async function sendToContent(tabId, message) {
         message,
         (response) => {
           if (chrome.runtime.lastError) {
-            console.error('[SendToContent] Error:', chrome.runtime.lastError);
-            reject(new Error(chrome.runtime.lastError.message));
+            const errMsg = chrome.runtime.lastError?.message || String(chrome.runtime.lastError);
+            console.error('[SendToContent] Error', { tabId, messageType: message?.type, error: errMsg });
+            reject(new Error(errMsg));
           } else {
+            console.log('[SendToContent] Response received from content', { tabId, messageType: message?.type, response });
             resolve(response);
           }
         }
@@ -471,6 +513,7 @@ async function sendNextPrompt() {
   state.promptStartTime = Date.now();
   state.processing = true;
   state.currentPromptId = Math.random();
+  console.log('[SendNextPrompt] Marking processing=true and saving state', { currentPromptId: state.currentPromptId, currentIndex: state.currentIndex });
   await saveState();
   
   try {
@@ -487,9 +530,10 @@ async function sendNextPrompt() {
       promptId: state.currentPromptId,
     });
   } catch (err) {
-    console.error("Error sending prompt to content:", err);
+    console.error("Error sending prompt to content:", err?.message || err);
     state.processing = false;
     state.lastActivityTime = Date.now() - RECOVERY_CONFIG.staleThresholdMs - 1000;
+    console.warn('[SendNextPrompt] Marking processing=false due to send error', { currentIndex: state.currentIndex, promptId: state.currentPromptId });
     await saveState();
     try {
       chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(err), status: getStatus() });
@@ -611,6 +655,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             });
             return;
           }
+          console.log('[ResponseComplete] Clearing processing and advancing index', {
+            currentIndex: state.currentIndex,
+            totalPrompts: state.prompts.length,
+            error: message.error
+          });
           state.processing = false;
           state.currentIndex += 1;
           state.lastActivityTime = Date.now();
