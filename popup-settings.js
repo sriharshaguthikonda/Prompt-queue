@@ -17,6 +17,8 @@ export async function loadSettingsIntoUI() {
       document.getElementById('enableStopWord').checked = s.enableStopWord === true;
       document.getElementById('stopWord').value = s.stopWord || '';
       document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
+      document.getElementById('openNewChatPerPrompt').checked = s.openNewChatPerPrompt === true;
+      document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
 
       const stopWordContainer = document.getElementById('stopWordContainer');
       if (s.enableStopWord === true) {
@@ -45,6 +47,8 @@ export async function saveSettingsFromUI() {
       enableStopWord: document.getElementById('enableStopWord').checked,
       stopWord: document.getElementById('stopWord').value || '',
       stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
+      openNewChatPerPrompt: document.getElementById('openNewChatPerPrompt').checked,
+      openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
     };
     await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
   } catch (e) {
@@ -82,6 +86,8 @@ export function initSettingsUI() {
   const stopWordContainer = document.getElementById('stopWordContainer');
   const stopWordInput = document.getElementById('stopWord');
   const stopWordCaseSensitiveCheckbox = document.getElementById('stopWordCaseSensitive');
+  const openNewChatPerPromptCheckbox = document.getElementById('openNewChatPerPrompt');
+  const openNewChatPerPromptUrlInput = document.getElementById('openNewChatPerPromptUrl');
 
   if (enableStopWordCheckbox) {
     enableStopWordCheckbox.addEventListener('change', () => {
@@ -101,5 +107,14 @@ export function initSettingsUI() {
 
   if (stopWordCaseSensitiveCheckbox) {
     stopWordCaseSensitiveCheckbox.addEventListener('change', saveSettingsFromUI);
+  }
+
+  if (openNewChatPerPromptCheckbox) {
+    openNewChatPerPromptCheckbox.addEventListener('change', saveSettingsFromUI);
+  }
+
+  if (openNewChatPerPromptUrlInput) {
+    openNewChatPerPromptUrlInput.addEventListener('change', saveSettingsFromUI);
+    openNewChatPerPromptUrlInput.addEventListener('blur', saveSettingsFromUI);
   }
 }

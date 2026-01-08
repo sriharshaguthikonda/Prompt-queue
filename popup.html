@@ -33,11 +33,6 @@ Prompts (one per line)"></textarea>
               <div class="prompt-counter">0 prompts loaded</div>
               <button id="insertSeparatorBtn" class="preset-btn" type="button" title="Insert a multi-line separator">↵ Insert separator</button>
             </div>
-            <div class="separator-row">
-              <label for="separatorInput">Separator</label>
-              <input id="separatorInput" type="text" placeholder="Default separator. Use \\n for newline" />
-              <div class="desc">Custom block used to split prompts. \\n will be converted to a newline.</div>
-            </div>
           </div>
           <div class="prompts-right">
             <div class="inline">
@@ -129,6 +124,20 @@ Prompts (one per line)"></textarea>
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">
         <input id="disableButtonsDuringAutomation" type="checkbox" checked />
         <label for="disableButtonsDuringAutomation">Disable buttons during automation</label>
+      </div>
+
+      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+        <input id="openNewChatPerPrompt" type="checkbox" />
+        <label for="openNewChatPerPrompt">Send each prompt in a new chat</label>
+      </div>
+
+      <div class="inline" style="margin-top: 8px; padding: 0 12px;">
+        <input 
+          id="openNewChatPerPromptUrl" 
+          type="text" 
+          placeholder="Custom new chat URL (optional, e.g., https://chatgpt.com/g/...)" 
+          style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+        />
       </div>
 
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">

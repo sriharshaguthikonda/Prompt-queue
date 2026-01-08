@@ -54,11 +54,13 @@ MEDIUM PRIORITY:
 LOW PRIORITY / ENHANCEMENTS:
 ================================================================================
 
-[ ] 7. Add keyboard shortcuts
+[x] 7. Add keyboard shortcuts
        - Ctrl+Enter to start automation
+
+[ ] 8. Add keyboard shortcuts
        - Escape to stop
 
-[ ] 8. Add Pause/Resume feature
+[ ] 9. Add Pause/Resume feature
        - Currently only Start/Stop
        - Pause would let users intervene mid-queue
 

@@ -39,6 +39,8 @@ const state = {
     systemPrompt: '',
     prependSystemPrompt: true,
     theme: 'dark',
+    openNewChatPerPrompt: false,
+    openNewChatPerPromptUrl: '',
   },
   lastActivityTime: Date.now(),
   recoveryAttempts: 0,
@@ -60,6 +62,8 @@ const DEFAULT_SETTINGS = {
   enableStopWord: false,
   stopWord: '',
   stopWordCaseSensitive: false,
+  openNewChatPerPrompt: false,
+  openNewChatPerPromptUrl: '',
 };
 
 const RECOVERY_CONFIG = {
@@ -82,6 +86,7 @@ function coerceNumber(v, min, max, fallback) {
 }
 
 function validateSettings(input = {}) {
+  const sanitizedUrl = sanitizeUrlOrEmpty(input.openNewChatPerPromptUrl);
   return {
     stableMs: coerceNumber(input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMs),
     maxWaitMs: coerceNumber(input.maxWaitMs, 5000, 86400000, DEFAULT_SETTINGS.maxWaitMs),
@@ -93,7 +98,24 @@ function validateSettings(input = {}) {
     enableStopWord: input.enableStopWord === true,
     stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
     stopWordCaseSensitive: input.stopWordCaseSensitive === true,
+    openNewChatPerPrompt: input.openNewChatPerPrompt === true,
+    openNewChatPerPromptUrl: sanitizedUrl,
   };
+}
+
+function sanitizeUrlOrEmpty(url) {
+  if (typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (!trimmed) return '';
+  try {
+    const u = new URL(trimmed);
+    if (u.protocol === 'http:' || u.protocol === 'https:') {
+      return u.toString();
+    }
+  } catch (_) {
+    return '';
+  }
+  return '';
 }
 
 function getStatus() {
@@ -409,6 +431,57 @@ function isSupportedUrl(url) {
   }
 }
 
+function detectSiteFromUrl(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname;
+    if ((/(^|\.)chatgpt\.com$/i.test(host)) || (/(^|\.)chat\.openai\.com$/i.test(host))) return 'chatgpt';
+    if ((/gemini\.google\.com$/i.test(host))) return 'gemini';
+    if ((/grok\.x\.ai$/i.test(host))) return 'grok';
+    if ((/claude\.ai$/i.test(host))) return 'claude';
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function baseUrlForSite(site) {
+  switch (site) {
+    case 'chatgpt':
+      return 'https://chatgpt.com/';
+    case 'gemini':
+      return 'https://gemini.google.com/app';
+    case 'grok':
+      return 'https://grok.x.ai/';
+    case 'claude':
+      return 'https://claude.ai/new';
+    default:
+      return null;
+  }
+}
+
+function waitForTabLoad(tabId) {
+  return new Promise((resolve) => {
+    chrome.tabs.get(tabId, (tab) => {
+      if (tab && tab.status === 'complete') {
+        resolve(true);
+        return;
+      }
+      const listener = (updatedTabId, changeInfo) => {
+        if (updatedTabId === tabId && changeInfo.status === 'complete') {
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve(true);
+        }
+      };
+      chrome.tabs.onUpdated.addListener(listener);
+      setTimeout(() => {
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve(false);
+      }, 20000);
+    });
+  });
+}
+
 async function sendToContent(tabId, message) {
   const tab = await chrome.tabs.get(tabId);
   if (!isSupportedUrl(tab?.url)) {
@@ -521,6 +594,19 @@ async function sendNextPrompt() {
   } catch (_) {}
 
   try {
+    if (state.options?.openNewChatPerPrompt) {
+      const tab = await chrome.tabs.get(state.tabId);
+      const site = detectSiteFromUrl(tab?.url);
+      const baseUrl = baseUrlForSite(site);
+      const targetUrl = state.options.openNewChatPerPromptUrl || baseUrl;
+      if (!targetUrl) {
+        throw new Error('Active tab not supported for new chat navigation.');
+      }
+      await chrome.tabs.update(state.tabId, { url: targetUrl });
+      await waitForTabLoad(state.tabId);
+      await ensureContentScriptReady(state.tabId);
+    }
+
     await sendToContent(state.tabId, { 
       type: "SEND_PROMPT", 
       text: promptText, 
@@ -555,6 +641,8 @@ function makeHistorySignature(item) {
       enableStopWord: item.settings?.enableStopWord === true,
       stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
       stopWordCaseSensitive: item.settings?.stopWordCaseSensitive === true,
+      openNewChatPerPrompt: item.settings?.openNewChatPerPrompt === true,
+      openNewChatPerPromptUrl: sanitizeUrlOrEmpty(item.settings?.openNewChatPerPromptUrl),
     },
   };
   return JSON.stringify(normalized);
