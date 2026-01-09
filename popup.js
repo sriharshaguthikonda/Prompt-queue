@@ -17,14 +17,40 @@ async function getActiveTabId() {
   return tabs?.[0]?.id;
 }
 
+const pauseBtn = document.getElementById('pauseBtn');
+const resumeBtn = document.getElementById('resumeBtn');
+
+function updateControlButtons(status = {}) {
+  const running = !!status.running;
+  const paused = !!status.paused;
+
+  const startBtn = document.getElementById('startBtn');
+  const stopBtn = document.getElementById('stopBtn');
+
+  if (startBtn) startBtn.disabled = running;
+  if (stopBtn) stopBtn.disabled = !running;
+
+  if (pauseBtn) {
+    pauseBtn.style.display = running && !paused ? 'inline-block' : 'none';
+    pauseBtn.disabled = !running || paused;
+  }
+  if (resumeBtn) {
+    resumeBtn.style.display = running && paused ? 'inline-block' : 'none';
+    resumeBtn.disabled = !running || !paused;
+  }
+}
+
 async function refreshStatus() {
   try {
     const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
     if (res?.ok && res.status) {
-      const { running, currentIndex, total, recoveryAttempts } = res.status;
+      const { running, paused, currentIndex, total, recoveryAttempts } = res.status;
       setProgress(running ? currentIndex : total, total);
-      setButtonsDisabled(running);
-      if (running) {
+      setButtonsDisabled(running && !paused);
+      updateControlButtons(res.status);
+      if (paused) {
+        setStatus(`Paused at prompt ${currentIndex + 1} of ${total}`, 'paused');
+      } else if (running) {
         if (recoveryAttempts > 0) {
           setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`, 'running');
         } else {
@@ -76,6 +102,7 @@ async function startAutomation() {
     if (res?.ok) {
       setStatus(`Running prompt 1 of ${prompts.length}...`, 'running');
       setProgress(0, prompts.length);
+      updateControlButtons({ running: true, paused: false });
       await chrome.runtime.sendMessage({ type: 'SAVE_PROMPT_HISTORY', item: { prompts, settings: currentSettings } });
     } else {
       setStatus(`Failed to start: ${res?.error || 'Unknown error'}`, 'error');
@@ -89,10 +116,45 @@ async function startAutomation() {
 
 document.getElementById('startBtn').addEventListener('click', startAutomation);
 
+if (pauseBtn) {
+  pauseBtn.addEventListener('click', async () => {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'PAUSE_AUTOMATION' });
+      if (res?.ok) {
+        setStatus('Paused', 'paused');
+        updateControlButtons({ running: true, paused: true });
+      } else {
+        showToast(res?.error || 'Failed to pause', 'error');
+      }
+    } catch (e) {
+      console.error('[PauseBtn] Error:', e);
+      showToast('Failed to pause', 'error');
+    }
+  });
+}
+
+if (resumeBtn) {
+  resumeBtn.addEventListener('click', async () => {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'RESUME_AUTOMATION' });
+      if (res?.ok) {
+        setStatus('Resuming...', 'running');
+        updateControlButtons({ running: true, paused: false });
+      } else {
+        showToast(res?.error || 'Failed to resume', 'error');
+      }
+    } catch (e) {
+      console.error('[ResumeBtn] Error:', e);
+      showToast('Failed to resume', 'error');
+    }
+  });
+}
+
 document.getElementById('stopBtn').addEventListener('click', async () => {
   try {
     await chrome.runtime.sendMessage({ type: 'STOP_AUTOMATION' });
     setStatus('Stopped');
+    updateControlButtons({ running: false, paused: false });
     // Refresh to clear any recovery status
     await refreshStatus();
   } catch (e) {
@@ -201,12 +263,15 @@ if (importBtn && importFile) {
 chrome.runtime.onMessage.addListener((message) => {
   try {
     if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
-      const { currentIndex, total, recoveryAttempts } = message.status;
+      const { currentIndex, total, recoveryAttempts, paused, running } = message.status;
       lastActivityTime = Date.now();
-      setButtonsDisabled(true);
+      setButtonsDisabled(running && !paused);
       clearError();
+      updateControlButtons(message.status);
       // Show recovery status if attempting recovery
-      if (recoveryAttempts > 0) {
+      if (paused) {
+        setStatus(`Paused at prompt ${currentIndex + 1} of ${total}`, 'paused');
+      } else if (recoveryAttempts > 0) {
         setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`, 'running');
       } else {
         setStatus(`Running prompt ${currentIndex + 1} of ${total}...`, 'running');
@@ -232,6 +297,7 @@ chrome.runtime.onMessage.addListener((message) => {
         : '✓ Automation complete!';
       showToast(toastMessage, 'success');
       stopCountdownTimer();
+      updateControlButtons({ running: false, paused: false });
     } else if (message?.type === 'AUTOMATION_ERROR') {
       setStatus(`Error: ${message.error}`, 'error');
       setButtonsDisabled(false);
@@ -244,6 +310,7 @@ chrome.runtime.onMessage.addListener((message) => {
       stopCountdownTimer();
       // Refresh status after error to show proper state
       setTimeout(refreshStatus, 1000);
+      updateControlButtons({ running: false, paused: false });
     }
   } catch (e) {
     console.error('[MessageListener] Error handling message:', e);
@@ -266,7 +333,7 @@ function startCountdownTimer() {
     
     try {
       const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
-      if (res?.ok && res.status?.running) {
+      if (res?.ok && res.status?.running && !res.status?.paused) {
         const stableMs =
           res.status.stableCountdownMs ||
           res.status.options?.stableMs ||

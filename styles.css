@@ -232,6 +232,11 @@ button.secondary {
   animation: pulse 2s infinite;
 }
 
+.status-paused {
+  background: rgba(234, 179, 8, 0.2);
+  color: #eab308;
+}
+
 .status-error {
   background: rgba(239, 68, 68, 0.2);
   color: #ef4444;
@@ -251,6 +256,10 @@ button.secondary {
 .status-dot.running {
   background: var(--accent);
   animation: pulse 2s infinite;
+}
+
+.status-dot.paused {
+  background: #eab308;
 }
 
 .status-dot.error {

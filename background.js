@@ -31,6 +31,7 @@ const state = {
   prompts: [],
   currentIndex: 0,
   running: false,
+  paused: false,
   tabId: null,
   options: {
     stableMs: undefined,
@@ -132,6 +133,7 @@ function sanitizeUrlOrEmpty(url) {
 function getStatus() {
   return {
     running: state.running,
+    paused: state.paused,
     total: state.prompts.length,
     currentIndex: state.currentIndex,
     tabId: state.tabId,
@@ -148,7 +150,7 @@ async function saveState() {
     prompts: state.prompts,
     currentIndex: state.currentIndex,
     running: state.running,
-    tabId: state.tabId,
+    paused: state.paused,
     options: state.options,
     lastActivityTime: state.lastActivityTime,
     lastRecoveryTime: state.lastRecoveryTime,
@@ -175,6 +177,7 @@ async function loadState() {
     state.lastRecoveryTime = aiTaskSequencerState.lastRecoveryTime || state.lastRecoveryTime || 0;
     state.recoveryAttempts = aiTaskSequencerState.recoveryAttempts || state.recoveryAttempts || 0;
     state.stableCountdownMs = aiTaskSequencerState.stableCountdownMs || state.stableCountdownMs || 0;
+    state.paused = aiTaskSequencerState.paused || false;
     // Prefer in-memory processing state if already true to avoid reverting to stale persisted false.
     state.processing = state.processing || aiTaskSequencerState.processing || false;
     state.currentPromptId = aiTaskSequencerState.currentPromptId || state.currentPromptId || null;
@@ -200,6 +203,7 @@ async function loadState() {
 async function clearState() {
   await chrome.storage.local.remove('aiTaskSequencerState');
   state.running = false;
+  state.paused = false;
   state.prompts = [];
   state.currentIndex = 0;
   state.tabId = null;
@@ -344,7 +348,7 @@ async function attemptRecovery() {
 }
 
 async function healthCheck() {
-  if (!state.running) return;
+  if (!state.running || state.paused) return;
 
   const now = Date.now();
   const timeSinceActivity = now - state.lastActivityTime;
@@ -547,6 +551,7 @@ async function startAutomation({ prompts, tabId, options }) {
   state.prompts = prompts;
   state.currentIndex = 0;
   state.running = true;
+  state.paused = false;
   state.tabId = tabId;
   state.lastActivityTime = Date.now();
   state.recoveryAttempts = 0;
@@ -570,9 +575,14 @@ function buildMessageText(text) {
   return text;
 }
 
+function isPaused() {
+  return state.paused === true;
+}
+
 async function sendNextPrompt() {
   console.log('[SendNextPrompt] Called', { 
     running: state.running, 
+    paused: state.paused,
     currentIndex: state.currentIndex, 
     totalPrompts: state.prompts.length,
     processing: state.processing 
@@ -580,6 +590,10 @@ async function sendNextPrompt() {
   
   if (!state.running) {
     console.log('[SendNextPrompt] Not running, returning early');
+    return;
+  }
+  if (isPaused()) {
+    console.log('[SendNextPrompt] Paused, deferring prompt send');
     return;
   }
   if (state.currentIndex >= state.prompts.length) {
@@ -727,7 +741,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case "STOP_AUTOMATION": {
           state.running = false;
+          state.paused = false;
           await clearState();
+          sendResponse({ ok: true });
+          return;
+        }
+        case "PAUSE_AUTOMATION": {
+          if (!state.running) {
+            sendResponse({ ok: false, error: "Automation not running" });
+            return;
+          }
+          state.paused = true;
+          await saveState();
+          chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
+          sendResponse({ ok: true });
+          return;
+        }
+        case "RESUME_AUTOMATION": {
+          if (!state.running) {
+            sendResponse({ ok: false, error: "Automation not running" });
+            return;
+          }
+          state.paused = false;
+          state.lastActivityTime = Date.now();
+          await saveState();
+          chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
+          if (!state.processing) {
+            await sendNextPrompt();
+          }
           sendResponse({ ok: true });
           return;
         }
@@ -787,6 +828,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
           } catch (_) {}
           
+          // If paused, do not advance until resumed
+          if (state.paused) {
+            console.log('[ResponseComplete] Paused; waiting for resume to send next prompt');
+            return;
+          }
+
           await new Promise(resolve => setTimeout(resolve, 500));
           try {
             await sendNextPrompt();

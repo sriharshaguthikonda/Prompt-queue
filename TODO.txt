@@ -70,17 +70,17 @@ LOW PRIORITY / ENHANCEMENTS:
 [ ] 10. Add estimated time remaining
         - Based on average response time per prompt
 
-[ ] 11. Multi-line prompt support
+[x] 11. Multi-line prompt support
         - Support delimiter-based multi-line prompts (e.g., --- separator)
 
 [ ] 12. Drag-and-drop prompt reordering
 
 [ ] 13. Response capture/export option
 
-[ ] 14. Rate limiting configuration
+[x] 14. Rate limiting configuration
         - Configurable delay between prompts
 
-[ ] 15. Create properly sized icons (16, 32, 48, 128px)
+[ ] 15. Create properly sized icons (16, 32, 48, 128px) if they dont exist and wire them 
 
 ================================================================================
 CODE QUALITY:
