@@ -450,6 +450,10 @@ async function importSampleData(importData) {
 // Start auto-refresh when popup opens
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    try {
+      chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
+    } catch (_) {}
+
     await loadSettingsIntoUI();
     await loadHistoryIntoUI(updatePromptCount);
     await refreshStatus();
@@ -654,8 +658,17 @@ if (errorPanel) {
 
 // Stop auto-refresh when popup closes
 window.addEventListener('unload', () => {
+  try {
+    chrome.runtime.sendMessage({ type: 'SIDE_PANEL_CLOSED' });
+  } catch (_) {}
   stopAutoRefresh();
   stopCountdownTimer();
+});
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === 'CLOSE_SIDE_PANEL') {
+    window.close();
+  }
 });
 
 // Initialization is handled by DOMContentLoaded event listener above

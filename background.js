@@ -23,8 +23,27 @@
 })();
 
 // Open side panel when extension icon is clicked
-chrome.action.onClicked.addListener((tab) => {
-  chrome.sidePanel.open({ tabId: tab.id });
+const openSidePanels = new Set();
+
+chrome.action.onClicked.addListener(async (tab) => {
+  const tabId = tab?.id;
+  if (!tabId) return;
+
+  // Toggle: if already open for this tab, ask panel to close itself
+  if (openSidePanels.has(tabId)) {
+    try {
+      chrome.runtime.sendMessage({ type: 'CLOSE_SIDE_PANEL', tabId });
+    } catch (_) {}
+    openSidePanels.delete(tabId);
+    return;
+  }
+
+  try {
+    await chrome.sidePanel.open({ tabId });
+    openSidePanels.add(tabId);
+  } catch (e) {
+    console.error('[SidePanel] Failed to open:', e);
+  }
 });
 
 const state = {
@@ -693,6 +712,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case "CONTENT_READY": {
           state.lastActivityTime = Date.now();
           await saveState();
+          return;
+        }
+        case "SIDE_PANEL_OPENED": {
+          if (sender?.tab?.id) {
+            openSidePanels.add(sender.tab.id);
+          }
+          return;
+        }
+        case "SIDE_PANEL_CLOSED": {
+          if (sender?.tab?.id) {
+            openSidePanels.delete(sender.tab.id);
+          } else if (message?.tabId) {
+            openSidePanels.delete(message.tabId);
+          }
           return;
         }
         case "START_AUTOMATION": {
