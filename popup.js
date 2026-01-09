@@ -267,8 +267,11 @@ function startCountdownTimer() {
     try {
       const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
       if (res?.ok && res.status?.running) {
-        const stableSecInput = document.getElementById('stableSec');
-        const stableMs = secToMs(Number(stableSecInput.value)) || 1200;
+        const stableMs =
+          res.status.stableCountdownMs ||
+          res.status.options?.stableMs ||
+          secToMs(Number(document.getElementById('stableMaxSec')?.value)) ||
+          1200;
         const countdownEl = document.getElementById('stableCountdown');
         const countdownValue = document.getElementById('countdownValue');
         
@@ -487,9 +490,9 @@ if (insertSeparatorBtn && promptsTextarea) {
 
 // Preset buttons
 const presets = {
-  fast: { maxWait: 60, stable: 3, poll: 0.5 },
-  balanced: { maxWait: 180, stable: 10, poll: 1.5 },
-  thorough: { maxWait: 300, stable: 15, poll: 2 }
+  fast: { maxWait: 60, stableMin: 2, stableMax: 4, poll: 0.5 },
+  balanced: { maxWait: 180, stableMin: 8, stableMax: 12, poll: 1.5 },
+  thorough: { maxWait: 300, stableMin: 12, stableMax: 18, poll: 2 }
 };
 
 document.querySelectorAll('.preset-btn[data-preset]').forEach(btn => {
@@ -498,7 +501,8 @@ document.querySelectorAll('.preset-btn[data-preset]').forEach(btn => {
     const config = presets[preset];
     if (config) {
       document.getElementById('maxWaitSec').value = config.maxWait;
-      document.getElementById('stableSec').value = config.stable;
+      document.getElementById('stableMinSec').value = config.stableMin;
+      document.getElementById('stableMaxSec').value = config.stableMax;
       document.getElementById('pollSec').value = config.poll;
       saveSettingsFromUI();
       

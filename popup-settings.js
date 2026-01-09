@@ -9,7 +9,8 @@ export async function loadSettingsIntoUI() {
       const s = res.settings;
       applyTheme(s.theme || 'dark');
       document.getElementById('maxWaitSec').value = msToSec(s.maxWaitMs);
-      document.getElementById('stableSec').value = msToSec(s.stableMs);
+      document.getElementById('stableMinSec').value = msToSec(s.stableMinMs ?? s.stableMs);
+      document.getElementById('stableMaxSec').value = msToSec(s.stableMaxMs ?? s.stableMs);
       document.getElementById('pollSec').value = msToSec(s.pollIntervalMs);
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
@@ -35,11 +36,15 @@ export async function loadSettingsIntoUI() {
 export async function saveSettingsFromUI() {
   try {
     const maxWaitSec = Number(document.getElementById('maxWaitSec').value);
-    const stableSec = Number(document.getElementById('stableSec').value);
+    const stableMinSec = Number(document.getElementById('stableMinSec').value);
+    const stableMaxSec = Number(document.getElementById('stableMaxSec').value);
+    const stableMinOrdered = Math.min(stableMinSec, stableMaxSec || stableMinSec);
+    const stableMaxOrdered = Math.max(stableMinSec || stableMaxSec, stableMaxSec || stableMinSec);
     const pollSec = Number(document.getElementById('pollSec').value);
     const settings = {
       maxWaitMs: secToMs(maxWaitSec),
-      stableMs: secToMs(stableSec),
+      stableMinMs: secToMs(stableMinOrdered),
+      stableMaxMs: secToMs(stableMaxOrdered),
       pollIntervalMs: secToMs(pollSec),
       systemPrompt: document.getElementById('systemPrompt').value || '',
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
@@ -72,7 +77,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });

@@ -81,7 +81,8 @@ describe('Popup E2E Tests', () => {
     beforeEach(() => {
       document.body.innerHTML = `
         <input id="maxWaitSec" type="number" value="180" />
-        <input id="stableSec" type="number" value="1.2" />
+        <input id="stableMinSec" type="number" value="1.2" />
+        <input id="stableMaxSec" type="number" value="2.4" />
         <input id="pollSec" type="number" value="0.3" />
         <input id="enableMaxWaitTimeout" type="checkbox" checked />
         <button class="preset-btn" data-preset="fast">⚡ Fast</button>
@@ -93,38 +94,47 @@ describe('Popup E2E Tests', () => {
     it('should apply Fast preset', () => {
       const fastBtn = document.querySelector('[data-preset="fast"]');
       const maxWait = document.getElementById('maxWaitSec');
-      const stable = document.getElementById('stableSec');
+      const stableMin = document.getElementById('stableMinSec');
+      const stableMax = document.getElementById('stableMaxSec');
       
       // Simulate preset click
       maxWait.value = '60';
-      stable.value = '0.5';
+      stableMin.value = '2';
+      stableMax.value = '4';
       
       expect(maxWait.value).toBe('60');
-      expect(stable.value).toBe('0.5');
+      expect(stableMin.value).toBe('2');
+      expect(stableMax.value).toBe('4');
     });
 
     it('should apply Balanced preset', () => {
       const balancedBtn = document.querySelector('[data-preset="balanced"]');
       const maxWait = document.getElementById('maxWaitSec');
-      const stable = document.getElementById('stableSec');
+      const stableMin = document.getElementById('stableMinSec');
+      const stableMax = document.getElementById('stableMaxSec');
       
       maxWait.value = '180';
-      stable.value = '1.2';
+      stableMin.value = '8';
+      stableMax.value = '12';
       
       expect(maxWait.value).toBe('180');
-      expect(stable.value).toBe('1.2');
+      expect(stableMin.value).toBe('8');
+      expect(stableMax.value).toBe('12');
     });
 
     it('should apply Thorough preset', () => {
       const thoroughBtn = document.querySelector('[data-preset="thorough"]');
       const maxWait = document.getElementById('maxWaitSec');
-      const stable = document.getElementById('stableSec');
+      const stableMin = document.getElementById('stableMinSec');
+      const stableMax = document.getElementById('stableMaxSec');
       
       maxWait.value = '300';
-      stable.value = '2';
+      stableMin.value = '12';
+      stableMax.value = '18';
       
       expect(maxWait.value).toBe('300');
-      expect(stable.value).toBe('2');
+      expect(stableMin.value).toBe('12');
+      expect(stableMax.value).toBe('18');
     });
 
     it('should toggle max wait timeout', () => {
@@ -141,16 +151,19 @@ describe('Popup E2E Tests', () => {
 
     it('should validate settings ranges', () => {
       const maxWait = document.getElementById('maxWaitSec');
-      const stable = document.getElementById('stableSec');
+      const stableMin = document.getElementById('stableMinSec');
+      const stableMax = document.getElementById('stableMaxSec');
       const poll = document.getElementById('pollSec');
       
       // Valid values
       maxWait.value = '180';
-      stable.value = '1.2';
+      stableMin.value = '1.2';
+      stableMax.value = '2';
       poll.value = '0.3';
       
       expect(Number(maxWait.value)).toBeGreaterThanOrEqual(5);
-      expect(Number(stable.value)).toBeGreaterThanOrEqual(0.2);
+      expect(Number(stableMin.value)).toBeGreaterThanOrEqual(0.2);
+      expect(Number(stableMax.value)).toBeGreaterThanOrEqual(Number(stableMin.value));
       expect(Number(poll.value)).toBeGreaterThanOrEqual(0.05);
     });
   });

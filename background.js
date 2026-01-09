@@ -34,6 +34,8 @@ const state = {
   tabId: null,
   options: {
     stableMs: undefined,
+    stableMinMs: undefined,
+    stableMaxMs: undefined,
     maxWaitMs: undefined,
     pollIntervalMs: undefined,
     systemPrompt: '',
@@ -53,6 +55,8 @@ const state = {
 
 const DEFAULT_SETTINGS = {
   stableMs: 10000,
+  stableMinMs: 10000,
+  stableMaxMs: 10000,
   maxWaitMs: 180000,
   pollIntervalMs: 1500,
   systemPrompt: '',
@@ -87,8 +91,15 @@ function coerceNumber(v, min, max, fallback) {
 
 function validateSettings(input = {}) {
   const sanitizedUrl = sanitizeUrlOrEmpty(input.openNewChatPerPromptUrl);
+  const rawStableMin = coerceNumber(input.stableMinMs ?? input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMinMs);
+  const rawStableMax = coerceNumber(input.stableMaxMs ?? input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMaxMs);
+  const stableMinMs = Math.min(rawStableMin, rawStableMax);
+  const stableMaxMs = Math.max(rawStableMin, rawStableMax);
+  const effectiveStableMs = coerceNumber(input.stableMs, stableMinMs, stableMaxMs, stableMaxMs);
   return {
-    stableMs: coerceNumber(input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMs),
+    stableMs: effectiveStableMs,
+    stableMinMs,
+    stableMaxMs,
     maxWaitMs: coerceNumber(input.maxWaitMs, 5000, 86400000, DEFAULT_SETTINGS.maxWaitMs),
     pollIntervalMs: coerceNumber(input.pollIntervalMs, 50, 5000, DEFAULT_SETTINGS.pollIntervalMs),
     systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
@@ -126,6 +137,7 @@ function getStatus() {
     tabId: state.tabId,
     options: state.options,
     recoveryAttempts: state.recoveryAttempts,
+    stableCountdownMs: state.stableCountdownMs,
   };
 }
 
@@ -145,6 +157,7 @@ async function saveState() {
     currentPromptId: state.currentPromptId,
     promptStartTime: state.promptStartTime,
     savedAt: Date.now(),
+    stableCountdownMs: state.stableCountdownMs,
   };
   await chrome.storage.local.set({ aiTaskSequencerState: persistentState });
 }
@@ -161,6 +174,7 @@ async function loadState() {
     state.lastActivityTime = aiTaskSequencerState.lastActivityTime || state.lastActivityTime || Date.now();
     state.lastRecoveryTime = aiTaskSequencerState.lastRecoveryTime || state.lastRecoveryTime || 0;
     state.recoveryAttempts = aiTaskSequencerState.recoveryAttempts || state.recoveryAttempts || 0;
+    state.stableCountdownMs = aiTaskSequencerState.stableCountdownMs || state.stableCountdownMs || 0;
     // Prefer in-memory processing state if already true to avoid reverting to stale persisted false.
     state.processing = state.processing || aiTaskSequencerState.processing || false;
     state.currentPromptId = aiTaskSequencerState.currentPromptId || state.currentPromptId || null;
@@ -590,6 +604,11 @@ async function sendNextPrompt() {
   await saveState();
   
   try {
+    const stableMin = state.options?.stableMinMs ?? DEFAULT_SETTINGS.stableMinMs;
+    const stableMax = state.options?.stableMaxMs ?? DEFAULT_SETTINGS.stableMaxMs;
+    const stableMs = Math.max(stableMin, Math.min(stableMax, Math.random() * (stableMax - stableMin) + stableMin));
+    state.options = { ...state.options, stableMs };
+    state.stableCountdownMs = stableMs;
     chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
   } catch (_) {}
 

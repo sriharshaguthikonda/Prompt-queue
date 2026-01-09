@@ -61,10 +61,14 @@ Prompts (one per line)"></textarea>
               <div class="desc">Upper limit per prompt. We stop waiting and move on once this time is reached.</div>
             </div>
             <div>
-              <label for="stableSec">Stable (seconds)</label>
-              <input id="stableSec" type="number" min="0.2" step="0.1" placeholder="1.2" />
+              <label for="stableMinSec">Stable (seconds) min</label>
+              <input id="stableMinSec" type="number" min="0.2" step="0.1" placeholder="1.2" />
+            </div>
+            <div>
+              <label for="stableMaxSec">Stable (seconds) max</label>
+              <input id="stableMaxSec" type="number" min="0.2" step="0.1" placeholder="2.5" />
               <div id="stableCountdown" class="desc" style="color: var(--accent); font-weight: 600; margin-top: 4px; display: none;">Countdown: <span id="countdownValue">0.0</span>s</div>
-              <div class="desc">How long the page must stay unchanged (no new tokens/DOM changes) to consider the answer finished.</div>
+              <div class="desc">Randomized per prompt between min and max; page must stay unchanged for that duration.</div>
             </div>
           </div>
           <div class="row">
