@@ -60,27 +60,27 @@ LOW PRIORITY / ENHANCEMENTS:
 [ ] 8. Add keyboard shortcuts
        - Escape to stop
 
-[ ] 9. Add Pause/Resume feature
+[x] 9. Add Pause/Resume feature
        - Currently only Start/Stop
        - Pause would let users intervene mid-queue
 
-[ ] 9. Show individual prompt progress
+[ ] 10. Show individual prompt progress
        - Display which specific prompt is running (truncated preview)
 
-[ ] 10. Add estimated time remaining
+[ ] 11. Add estimated time remaining
         - Based on average response time per prompt
 
-[x] 11. Multi-line prompt support
+[x] 12. Multi-line prompt support
         - Support delimiter-based multi-line prompts (e.g., --- separator)
 
-[ ] 12. Drag-and-drop prompt reordering
+[ ] 13. Drag-and-drop prompt reordering
 
-[ ] 13. Response capture/export option
+[ ] 14. Response capture/export option
 
-[x] 14. Rate limiting configuration
+[x] 15. Rate limiting configuration
         - Configurable delay between prompts
 
-[ ] 15. Create properly sized icons (16, 32, 48, 128px) if they dont exist and wire them 
+[x] 16. Create properly sized icons (16, 32, 48, 128px) if they dont exist and wire them 
 
 ================================================================================
 CODE QUALITY:

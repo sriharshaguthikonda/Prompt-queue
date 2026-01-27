@@ -104,6 +104,44 @@ Prompts (one per line)"></textarea>
       </div>
 
       <div class="section-title">Saved prompt histories</div>
+      
+      <div class="card">
+        <div class="collapsible-header" id="transcriptionHeader">
+          <span class="collapsible-toggle">▼</span>
+          <span class="section-title" style="margin: 0;">Transcription Monitor</span>
+        </div>
+        <div class="collapsible-content" id="transcriptionContent">
+          <div class="row">
+            <div>
+              <label for="transcriptionFolder">Transcription Folder</label>
+              <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                <input id="transcriptionFolder" type="text" placeholder="e.g., I:\Transcriptions" style="flex: 1;" />
+                <button id="browseFolderBtn" class="preset-btn" type="button">📁 Browse</button>
+              </div>
+              <div class="desc">Folder to monitor for new transcription JSON files</div>
+            </div>
+          </div>
+          
+          <div class="row">
+            <div>
+              <button id="startMonitoringBtn" class="preset-btn" style="background: #16a34a; color: white;">▶️ Start Monitoring</button>
+              <button id="stopMonitoringBtn" class="preset-btn" style="background: #dc2626; color: white; display: none;">⏹️ Stop Monitoring</button>
+            </div>
+            <div>
+              <span id="monitoringStatus" class="status-badge status-idle">
+                <span class="status-dot idle"></span>
+                <span>Not Monitoring</span>
+              </span>
+            </div>
+          </div>
+          
+          <div id="transcriptionInfo" class="desc" style="margin-top: 8px; display: none;">
+            <div>📁 Monitoring: <span id="currentFolder">-</span></div>
+            <div>📄 Files processed: <span id="processedCount">0</span></div>
+          </div>
+        </div>
+      </div>
+      
       <div class="card">
         <div class="history-header">
           <div class="history-buttons">

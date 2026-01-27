@@ -665,10 +665,137 @@ window.addEventListener('unload', () => {
   stopCountdownTimer();
 });
 
+// ============ TRANSCRIPTION MONITORING UI ============
+
+// Transcription monitoring elements
+const transcriptionFolder = document.getElementById('transcriptionFolder');
+const browseFolderBtn = document.getElementById('browseFolderBtn');
+const startMonitoringBtn = document.getElementById('startMonitoringBtn');
+const stopMonitoringBtn = document.getElementById('stopMonitoringBtn');
+const monitoringStatus = document.getElementById('monitoringStatus');
+const transcriptionInfo = document.getElementById('transcriptionInfo');
+const currentFolder = document.getElementById('currentFolder');
+const processedCount = document.getElementById('processedCount');
+
+// Load transcription state into UI
+async function loadTranscriptionState() {
+  try {
+    const response = await chrome.runtime.sendMessage({ type: 'GET_TRANSCRIPTION_STATE' });
+    if (response) {
+      updateTranscriptionUI(response.isEnabled, response.watchFolder);
+      
+      // Load folder path
+      const result = await chrome.storage.local.get(['transcriptionState']);
+      if (result.transcriptionState) {
+        transcriptionFolder.value = result.transcriptionState.watchFolder || '';
+        processedCount.textContent = result.transcriptionState.processedFiles?.length || 0;
+      }
+    }
+  } catch (error) {
+    console.error('Failed to load transcription state:', error);
+  }
+}
+
+// Update transcription monitoring UI
+function updateTranscriptionUI(isEnabled, folder) {
+  if (isEnabled) {
+    startMonitoringBtn.style.display = 'none';
+    stopMonitoringBtn.style.display = 'inline-block';
+    monitoringStatus.innerHTML = `
+      <span class="status-dot active"></span>
+      <span>Monitoring</span>
+    `;
+    monitoringStatus.className = 'status-badge status-running';
+    transcriptionInfo.style.display = 'block';
+    currentFolder.textContent = folder || '-';
+  } else {
+    startMonitoringBtn.style.display = 'inline-block';
+    stopMonitoringBtn.style.display = 'none';
+    monitoringStatus.innerHTML = `
+      <span class="status-dot idle"></span>
+      <span>Not Monitoring</span>
+    `;
+    monitoringStatus.className = 'status-badge status-idle';
+    transcriptionInfo.style.display = 'none';
+  }
+}
+
+// Start monitoring
+async function startMonitoring() {
+  const folder = transcriptionFolder.value.trim();
+  if (!folder) {
+    showToast('Please enter a folder path', 'error');
+    return;
+  }
+
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'START_TRANSCRIPTION_MONITORING',
+      folder: folder
+    });
+    
+    if (response.success) {
+      updateTranscriptionUI(true, folder);
+      showToast(`Started monitoring: ${folder}`, 'success', 3000);
+    } else {
+      showToast('Failed to start monitoring', 'error');
+    }
+  } catch (error) {
+    console.error('Failed to start monitoring:', error);
+    showToast('Error: Native host not available', 'error');
+  }
+}
+
+// Stop monitoring
+async function stopMonitoring() {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'STOP_TRANSCRIPTION_MONITORING'
+    });
+    
+    if (response.success) {
+      updateTranscriptionUI(false, '');
+      showToast('Stopped monitoring', 'success', 2000);
+    } else {
+      showToast('Failed to stop monitoring', 'error');
+    }
+  } catch (error) {
+    console.error('Failed to stop monitoring:', error);
+    showToast('Error stopping monitoring', 'error');
+  }
+}
+
+// Browse for folder (placeholder - Chrome extensions can't directly browse folders)
+function browseFolder() {
+  showToast('Please enter the folder path manually (e.g., I:\\Transcriptions)', 'info', 5000);
+}
+
+// Event listeners for transcription monitoring
+if (browseFolderBtn) {
+  browseFolderBtn.addEventListener('click', browseFolder);
+}
+
+if (startMonitoringBtn) {
+  startMonitoringBtn.addEventListener('click', startMonitoring);
+}
+
+if (stopMonitoringBtn) {
+  stopMonitoringBtn.addEventListener('click', stopMonitoring);
+}
+
+// Listen for prompts updated messages
 chrome.runtime.onMessage.addListener((message) => {
-  if (message?.type === 'CLOSE_SIDE_PANEL') {
+  if (message?.type === 'PROMPTS_UPDATED') {
+    // Reload prompts to show new transcription entries
+    loadStateIntoUI();
+  } else if (message?.type === 'CLOSE_SIDE_PANEL') {
     window.close();
   }
+});
+
+// Load transcription state on initialization
+document.addEventListener('DOMContentLoaded', () => {
+  loadTranscriptionState();
 });
 
 // Initialization is handled by DOMContentLoaded event listener above
