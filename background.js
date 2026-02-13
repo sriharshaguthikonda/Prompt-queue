@@ -84,7 +84,7 @@ const DEFAULT_SETTINGS = {
   theme: 'dark',
   enableMaxWaitTimeout: true,
   enableStopWord: false,
-  stopWord: '',
+  stopWord: 'Future section',
   stopWordCaseSensitive: false,
   openNewChatPerPrompt: false,
   openNewChatPerPromptUrl: '',
