@@ -456,6 +456,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadSettingsIntoUI();
     await loadHistoryIntoUI(updatePromptCount);
+    await loadStateIntoUI();
     await refreshStatus();
     startAutoRefresh();
     startCountdownTimer();
@@ -492,6 +493,19 @@ const updatePromptCount = () => {
     counter.textContent = `${prompts.length} prompt${prompts.length !== 1 ? 's' : ''} loaded`;
   }
 };
+
+async function loadStateIntoUI() {
+  try {
+    const { state: storedState } = await chrome.storage.local.get(['state']);
+    if (!storedState || !Array.isArray(storedState.prompts)) return;
+    if (!promptsTextarea) return;
+    promptsTextarea.value = storedState.prompts.join('\n');
+    updatePromptCount();
+    autoResizeTextarea(promptsTextarea, { active: false });
+  } catch (e) {
+    console.error('[LoadStateIntoUI] Error:', e);
+  }
+}
 
 function autoResizeTextarea(el, { active = false } = {}) {
   if (!el) return;
@@ -681,12 +695,18 @@ const processedCount = document.getElementById('processedCount');
 async function loadTranscriptionState() {
   try {
     const response = await chrome.runtime.sendMessage({ type: 'GET_TRANSCRIPTION_STATE' });
-    if (response) {
+    if (response?.success) {
       updateTranscriptionUI(response.isEnabled, response.watchFolder);
+      if (response.watchFolder) {
+        transcriptionFolder.value = response.watchFolder;
+      }
+      if (typeof response.processedCount === 'number') {
+        processedCount.textContent = response.processedCount;
+      }
       
       // Load folder path
       const result = await chrome.storage.local.get(['transcriptionState']);
-      if (result.transcriptionState) {
+      if (result.transcriptionState && !transcriptionFolder.value) {
         transcriptionFolder.value = result.transcriptionState.watchFolder || '';
         processedCount.textContent = result.transcriptionState.processedFiles?.length || 0;
       }
@@ -734,15 +754,15 @@ async function startMonitoring() {
       folder: folder
     });
     
-    if (response.success) {
+    if (response?.success) {
       updateTranscriptionUI(true, folder);
       showToast(`Started monitoring: ${folder}`, 'success', 3000);
     } else {
-      showToast('Failed to start monitoring', 'error');
+      showToast(response?.error || 'Failed to start monitoring', 'error');
     }
   } catch (error) {
     console.error('Failed to start monitoring:', error);
-    showToast('Error: Native host not available', 'error');
+    showToast(`Error: ${error?.message || error}`, 'error');
   }
 }
 
@@ -753,15 +773,15 @@ async function stopMonitoring() {
       type: 'STOP_TRANSCRIPTION_MONITORING'
     });
     
-    if (response.success) {
+    if (response?.success) {
       updateTranscriptionUI(false, '');
       showToast('Stopped monitoring', 'success', 2000);
     } else {
-      showToast('Failed to stop monitoring', 'error');
+      showToast(response?.error || 'Failed to stop monitoring', 'error');
     }
   } catch (error) {
     console.error('Failed to stop monitoring:', error);
-    showToast('Error stopping monitoring', 'error');
+    showToast(`Error: ${error?.message || error}`, 'error');
   }
 }
 

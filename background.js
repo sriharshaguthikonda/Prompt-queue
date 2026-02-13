@@ -924,6 +924,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: true, settings: state.options });
           return;
         }
+        case "START_TRANSCRIPTION_MONITORING": {
+          try {
+            await startTranscriptionMonitoring(message.folder);
+            sendResponse({ success: true });
+          } catch (e) {
+            console.error('[Transcription] Start failed:', e);
+            sendResponse({ success: false, error: String(e?.message || e) });
+          }
+          return;
+        }
+        case "STOP_TRANSCRIPTION_MONITORING": {
+          try {
+            await stopTranscriptionMonitoring();
+            sendResponse({ success: true });
+          } catch (e) {
+            console.error('[Transcription] Stop failed:', e);
+            sendResponse({ success: false, error: String(e?.message || e) });
+          }
+          return;
+        }
+        case "GET_TRANSCRIPTION_STATE": {
+          sendResponse({
+            success: true,
+            isEnabled: transcriptionState.isEnabled,
+            watchFolder: transcriptionState.watchFolder,
+            processedCount: transcriptionState.processedFiles.size
+          });
+          return;
+        }
         default:
           return;
       }
@@ -940,6 +969,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[Startup] Service worker started');
   const restored = await loadState();
+  await loadTranscriptionState();
+  if (transcriptionState.isEnabled && transcriptionState.watchFolder) {
+    startTranscriptionPolling();
+  }
   if (restored && state.running) {
     console.log('[Startup] Found running automation, attempting recovery');
     state.lastActivityTime = Date.now() - RECOVERY_CONFIG.staleThresholdMs - 1000;
@@ -950,6 +983,10 @@ chrome.runtime.onStartup.addListener(async () => {
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Install] Extension installed/updated');
   await loadState();
+  await loadTranscriptionState();
+  if (transcriptionState.isEnabled && transcriptionState.watchFolder) {
+    startTranscriptionPolling();
+  }
 });
 
 // ============ NOTIFICATIONS ============
@@ -1088,6 +1125,23 @@ async function checkForNewTranscriptionFiles() {
   }
 }
 
+async function verifyTranscriptionFolder(folder) {
+  if (!folder || typeof folder !== 'string' || !folder.trim()) {
+    throw new Error('Folder path is required.');
+  }
+  const response = await chrome.runtime.sendNativeMessage(
+    'com.aipromptqueue.transcription',
+    {
+      type: 'check_files',
+      folder: folder.trim(),
+      processedFiles: []
+    }
+  );
+  if (response?.type === 'error') {
+    throw new Error(response.message || 'Native host error');
+  }
+}
+
 // Process a new transcription file
 async function processTranscriptionFile(filePath) {
   try {
@@ -1182,17 +1236,9 @@ async function addTranscriptToQueue(text, filePath) {
             const currentSettings = state.options || {};
             console.log('[Transcription] Settings:', currentSettings);
             
-            // Start automation with the current prompts
-            const res = await startAutomation(stateData.prompts, tabId, currentSettings);
-            
-            console.log('[Transcription] START_AUTOMATION response:', res);
-            
-            if (res?.ok) {
-              transcriptionState.automationStarted = true;
-              console.log('[Transcription] Auto-started automation for new transcript');
-            } else {
-              console.error('[Transcription] Failed to start automation - response:', res);
-            }
+            await startAutomation({ prompts: stateData.prompts, tabId, options: currentSettings });
+            transcriptionState.automationStarted = true;
+            console.log('[Transcription] Auto-started automation for new transcript');
           } else {
             console.error('[Transcription] No active tab found');
           }
@@ -1210,10 +1256,13 @@ async function addTranscriptToQueue(text, filePath) {
 
 // Start transcription monitoring
 async function startTranscriptionMonitoring(folder) {
-  console.log('[Transcription] Starting monitoring for:', folder);
+  const normalizedFolder = typeof folder === 'string' ? folder.trim() : '';
+  console.log('[Transcription] Starting monitoring for:', normalizedFolder);
+  
+  await verifyTranscriptionFolder(normalizedFolder);
   
   transcriptionState.isEnabled = true;
-  transcriptionState.watchFolder = folder;
+  transcriptionState.watchFolder = normalizedFolder;
   transcriptionState.lastCheckTime = Date.now();
   transcriptionState.automationStarted = false; // Reset flag
   
@@ -1223,15 +1272,7 @@ async function startTranscriptionMonitoring(folder) {
   
   await saveTranscriptionState();
   
-  // Start checking every 5 seconds
-  if (transcriptionState.checkInterval) {
-    clearInterval(transcriptionState.checkInterval);
-  }
-  
-  transcriptionState.checkInterval = setInterval(checkForNewTranscriptionFiles, 5000);
-  
-  // Initial check
-  checkForNewTranscriptionFiles();
+  startTranscriptionPolling();
 }
 
 // Stop transcription monitoring
@@ -1249,25 +1290,15 @@ async function stopTranscriptionMonitoring() {
   await saveTranscriptionState();
 }
 
-// Handle transcription monitoring messages
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'START_TRANSCRIPTION_MONITORING') {
-    startTranscriptionMonitoring(message.folder);
-    sendResponse({ success: true });
-  } else if (message.type === 'STOP_TRANSCRIPTION_MONITORING') {
-    stopTranscriptionMonitoring();
-    sendResponse({ success: true });
-  } else if (message.type === 'GET_TRANSCRIPTION_STATE') {
-    sendResponse({
-      isEnabled: transcriptionState.isEnabled,
-      watchFolder: transcriptionState.watchFolder
-    });
+function startTranscriptionPolling() {
+  if (transcriptionState.checkInterval) {
+    clearInterval(transcriptionState.checkInterval);
   }
-});
 
-// Initialize transcription state on startup
-chrome.runtime.onInstalled.addListener(async () => {
-  console.log('[Install] Extension installed/updated');
-  await loadState();
-  await loadTranscriptionState();
-});
+  transcriptionState.checkInterval = setInterval(checkForNewTranscriptionFiles, 5000);
+
+  // Initial check
+  checkForNewTranscriptionFiles();
+}
+
+// Transcription monitoring messages handled in main message handler above.
