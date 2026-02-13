@@ -980,12 +980,35 @@ const transcriptionState = {
   watchFolder: '',
   processedFiles: new Set(),
   checkInterval: null,
-  lastCheckTime: 0
+  lastCheckTime: 0,
+  automationStarted: false,
+  stateFile: 'transcription_state.json'
 };
 
-// Load transcription state from storage
+// Load transcription state from local file
 async function loadTranscriptionState() {
   try {
+    // Try to read from native host
+    const response = await chrome.runtime.sendNativeMessage(
+      'com.aipromptqueue.transcription',
+      {
+        type: 'read_state_file',
+        stateFile: transcriptionState.stateFile
+      }
+    );
+    
+    if (response && response.type === 'file_content' && response.content) {
+      const stateData = JSON.parse(response.content);
+      transcriptionState.isEnabled = stateData.isEnabled || false;
+      transcriptionState.watchFolder = stateData.watchFolder || '';
+      transcriptionState.processedFiles = new Set(stateData.processedFiles || []);
+      transcriptionState.lastCheckTime = stateData.lastCheckTime || 0;
+      transcriptionState.automationStarted = stateData.automationStarted || false;
+      console.log('[Transcription] Loaded state from file:', stateData);
+    }
+  } catch (error) {
+    console.error('[Transcription] Failed to load state from file:', error);
+    // Fallback to Chrome storage
     const result = await chrome.storage.local.get(['transcriptionState']);
     if (result.transcriptionState) {
       transcriptionState.isEnabled = result.transcriptionState.isEnabled || false;
@@ -993,14 +1016,38 @@ async function loadTranscriptionState() {
       transcriptionState.processedFiles = new Set(result.transcriptionState.processedFiles || []);
       transcriptionState.lastCheckTime = result.transcriptionState.lastCheckTime || 0;
     }
-  } catch (error) {
-    console.error('[Transcription] Failed to load state:', error);
   }
 }
 
-// Save transcription state to storage
+// Save transcription state to local file
 async function saveTranscriptionState() {
   try {
+    const stateData = {
+      isEnabled: transcriptionState.isEnabled,
+      watchFolder: transcriptionState.watchFolder,
+      processedFiles: Array.from(transcriptionState.processedFiles),
+      lastCheckTime: transcriptionState.lastCheckTime,
+      automationStarted: transcriptionState.automationStarted
+    };
+    
+    // Save to local file via native host
+    const response = await chrome.runtime.sendNativeMessage(
+      'com.aipromptqueue.transcription',
+      {
+        type: 'save_state_file',
+        stateFile: transcriptionState.stateFile,
+        content: JSON.stringify(stateData, null, 2)
+      }
+    );
+    
+    if (response && response.type === 'success') {
+      console.log('[Transcription] Saved state to file');
+    } else {
+      throw new Error('Failed to save to file');
+    }
+  } catch (error) {
+    console.error('[Transcription] Failed to save state to file:', error);
+    // Fallback to Chrome storage
     await chrome.storage.local.set({
       transcriptionState: {
         isEnabled: transcriptionState.isEnabled,
@@ -1009,8 +1056,6 @@ async function saveTranscriptionState() {
         lastCheckTime: transcriptionState.lastCheckTime
       }
     });
-  } catch (error) {
-    console.error('[Transcription] Failed to save state:', error);
   }
 }
 
@@ -1048,6 +1093,12 @@ async function processTranscriptionFile(filePath) {
   try {
     console.log('[Transcription] Processing file:', filePath);
     
+    // Check if already processed to avoid duplicates
+    if (transcriptionState.processedFiles.has(filePath)) {
+      console.log('[Transcription] File already processed, skipping:', filePath);
+      return;
+    }
+    
     // Get file content from native host
     const response = await chrome.runtime.sendNativeMessage(
       'com.aipromptqueue.transcription',
@@ -1062,12 +1113,12 @@ async function processTranscriptionFile(filePath) {
       const transcriptText = transcriptionData.groq_response?.text || transcriptionData.text || '';
       
       if (transcriptText) {
-        // Add to prompt queue
-        await addTranscriptToQueue(transcriptText, filePath);
-        
-        // Mark as processed
+        // Mark as processed FIRST to avoid duplicates
         transcriptionState.processedFiles.add(filePath);
         await saveTranscriptionState();
+        
+        // Add to prompt queue
+        await addTranscriptToQueue(transcriptText, filePath);
         
         console.log('[Transcription] Added transcript to queue:', transcriptText.substring(0, 100) + '...');
         
@@ -1105,6 +1156,56 @@ async function addTranscriptToQueue(text, filePath) {
   try {
     chrome.runtime.sendMessage({ type: 'PROMPTS_UPDATED' });
   } catch (_) {}
+  
+  // Auto-start automation if not already running (only once per session)
+  if (!transcriptionState.automationStarted) {
+    try {
+      // Get status directly instead of message passing
+      await loadSettings();
+      const currentStatus = getStatus();
+      console.log('[Transcription] Current automation status:', currentStatus);
+      
+      if (!currentStatus.running) {
+        // Get current prompts from storage
+        const currentState = await chrome.storage.local.get(['state']);
+        const stateData = currentState.state || { prompts: [] };
+        console.log('[Transcription] Current prompts:', stateData.prompts);
+        
+        if (stateData.prompts.length > 0) {
+          // Get active tab
+          const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+          const tabId = tabs?.[0]?.id;
+          console.log('[Transcription] Active tab ID:', tabId);
+          
+          if (tabId) {
+            // Get current settings directly
+            const currentSettings = state.options || {};
+            console.log('[Transcription] Settings:', currentSettings);
+            
+            // Start automation with the current prompts
+            const res = await startAutomation(stateData.prompts, tabId, currentSettings);
+            
+            console.log('[Transcription] START_AUTOMATION response:', res);
+            
+            if (res?.ok) {
+              transcriptionState.automationStarted = true;
+              console.log('[Transcription] Auto-started automation for new transcript');
+            } else {
+              console.error('[Transcription] Failed to start automation - response:', res);
+            }
+          } else {
+            console.error('[Transcription] No active tab found');
+          }
+        } else {
+          console.log('[Transcription] No prompts in queue to automate');
+        }
+      } else {
+        console.log('[Transcription] Automation already running');
+      }
+    } catch (error) {
+      console.error('[Transcription] Failed to auto-start automation:', error);
+    }
+  }
 }
 
 // Start transcription monitoring
@@ -1114,6 +1215,11 @@ async function startTranscriptionMonitoring(folder) {
   transcriptionState.isEnabled = true;
   transcriptionState.watchFolder = folder;
   transcriptionState.lastCheckTime = Date.now();
+  transcriptionState.automationStarted = false; // Reset flag
+  
+  // Clear processed files to start fresh
+  transcriptionState.processedFiles.clear();
+  console.log('[Transcription] Cleared processed files list');
   
   await saveTranscriptionState();
   
@@ -1133,6 +1239,7 @@ async function stopTranscriptionMonitoring() {
   console.log('[Transcription] Stopping monitoring');
   
   transcriptionState.isEnabled = false;
+  transcriptionState.automationStarted = false; // Reset flag
   
   if (transcriptionState.checkInterval) {
     clearInterval(transcriptionState.checkInterval);

@@ -8,7 +8,8 @@ This feature allows the AI Prompt Queue extension to automatically monitor a fol
 - **Smart Detection**: Only processes files that contain transcription data (Groq response format)
 - **State Tracking**: Remembers which files have been processed to avoid duplicates
 - **Real-time Updates**: Automatically adds new transcriptions to your prompt queue
-- **Notifications**: Shows desktop notifications when new transcriptions are detected
+- **Desktop Notifications**: Shows desktop notifications when new transcriptions are detected
+- **Browser Support**: Works with both Chrome and Microsoft Edge
 
 ## Setup Instructions
 
@@ -26,16 +27,19 @@ The extension uses a Python native messaging host to access the file system.
    install_native_host.bat
    ```
 
-3. **Update Extension ID**:
-   - Open Chrome and go to `chrome://extensions`
-   - Find "AI Prompt Queue" and copy its ID
-   - Edit `native_host.json` and replace `YOUR_EXTENSION_ID` with the actual ID
+3. **Update Extension ID(s)**:
+   - **For Chrome**: Go to `chrome://extensions` and copy the extension ID
+   - **For Edge**: Go to `edge://extensions` and copy the extension ID
+   - Edit `native_host.json` and replace:
+     - `YOUR_EXTENSION_ID` with your Chrome extension ID
+     - `YOUR_EDGE_EXTENSION_ID` with your Edge extension ID
+   - **If you only use one browser**, you can remove the unused entry from `allowed_origins`
 
 ### 2. Enable the Extension
 
 1. **Load/Reload the Extension**:
-   - Go to `chrome://extensions`
-   - Click "Reload" for the AI Prompt Queue extension
+   - **Chrome**: Go to `chrome://extensions` and click "Reload"
+   - **Edge**: Go to `edge://extensions` and click "Reload"
 
 2. **Grant Permissions**:
    - The extension will request the necessary permissions automatically
@@ -43,7 +47,7 @@ The extension uses a Python native messaging host to access the file system.
 ### 3. Configure Monitoring
 
 1. **Open the Extension**:
-   - Click the extension icon in Chrome
+   - Click the extension icon in your browser
    - The side panel will open
 
 2. **Set Up Transcription Monitor**:
@@ -54,6 +58,20 @@ The extension uses a Python native messaging host to access the file system.
 3. **Test the Setup**:
    - Create a new JSON file in your transcription folder
    - The extension should detect it and add the transcript to your prompt queue
+
+## Browser-Specific Notes
+
+### Microsoft Edge
+- Uses registry path: `HKEY_CURRENT_USER\SOFTWARE\Microsoft\Edge\NativeMessagingHosts\`
+- Extension ID from `edge://extensions`
+- Fully compatible with Chrome extensions
+
+### Google Chrome
+- Uses registry path: `HKEY_CURRENT_USER\SOFTWARE\Google\Chrome\NativeMessagingHosts\`
+- Extension ID from `chrome://extensions`
+- Original target browser
+
+The installation script automatically registers the native host for **both browsers**.
 
 ## Usage
 

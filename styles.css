@@ -384,7 +384,9 @@ button.secondary {
 /* History */
 .history-list {
   max-height: 120px;
-  overflow: auto;
+  width: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: grid;
   gap: 6px;
 }
@@ -396,6 +398,7 @@ button.secondary {
   padding: 6px;
   font-size: 11px;
   color: var(--muted);
+  min-width: 0;
 }
 
 .history-row {
@@ -403,6 +406,8 @@ button.secondary {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .history-item-date {

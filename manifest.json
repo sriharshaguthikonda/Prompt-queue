@@ -10,7 +10,8 @@
     "tabs",
     "notifications",
     "sidePanel",
-    "offscreen"
+    "offscreen",
+    "nativeMessaging"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",

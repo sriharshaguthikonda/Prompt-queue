@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+
 """
 Native messaging host for AI Prompt Queue Chrome Extension
 Handles file system monitoring for transcription files
@@ -45,8 +45,12 @@ class TranscriptionMonitor:
             json_files = glob.glob(os.path.join(folder, "*.json"))
             new_files = []
             
+            # Convert processed_files to set for faster lookup
+            processed_set = set(processed_files)
+            
             for file_path in json_files:
-                if file_path not in processed_files:
+                # Only return files that haven't been processed
+                if file_path not in processed_set:
                     # Check if it's a transcription file by looking for groq_response
                     try:
                         with open(file_path, 'r', encoding='utf-8') as f:
@@ -83,6 +87,15 @@ class TranscriptionMonitor:
             file_path = message.get('filePath', '')
             return self.read_file_content(file_path)
             
+        elif msg_type == 'read_state_file':
+            state_file = message.get('stateFile', '')
+            return self.read_state_file(state_file)
+            
+        elif msg_type == 'save_state_file':
+            state_file = message.get('stateFile', '')
+            content = message.get('content', '')
+            return self.save_state_file(state_file, content)
+            
         elif msg_type == 'start_monitoring':
             self.watch_folder = message.get('folder', '')
             return {"type": "monitoring_started", "folder": self.watch_folder}
@@ -93,6 +106,43 @@ class TranscriptionMonitor:
             
         else:
             return {"type": "error", "message": f"Unknown message type: {msg_type}"}
+            
+    def read_state_file(self, state_file):
+        """Read the state file content"""
+        try:
+            # Get the directory where the script is located
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            state_path = os.path.join(script_dir, state_file)
+            
+            if os.path.exists(state_path):
+                with open(state_path, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                return {"type": "file_content", "content": content}
+            else:
+                # Return empty state if file doesn't exist
+                empty_state = {
+                    "isEnabled": False,
+                    "watchFolder": "",
+                    "processedFiles": [],
+                    "lastCheckTime": 0,
+                    "automationStarted": False
+                }
+                return {"type": "file_content", "content": json.dumps(empty_state)}
+        except Exception as e:
+            return {"type": "error", "message": str(e)}
+            
+    def save_state_file(self, state_file, content):
+        """Save content to the state file"""
+        try:
+            # Get the directory where the script is located
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            state_path = os.path.join(script_dir, state_file)
+            
+            with open(state_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            return {"type": "success", "message": "State saved successfully"}
+        except Exception as e:
+            return {"type": "error", "message": str(e)}
             
     def run(self):
         """Main message loop"""
