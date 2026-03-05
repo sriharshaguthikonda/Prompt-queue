@@ -15,6 +15,7 @@ export async function loadSettingsIntoUI() {
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
       document.getElementById('enableMaxWaitTimeout').checked = s.enableMaxWaitTimeout !== false;
+      document.getElementById('autoConfirmDialogs').checked = s.autoConfirmDialogs === true;
       document.getElementById('enableStopWord').checked = s.enableStopWord === true;
       document.getElementById('stopWord').value = s.stopWord || '';
       document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
@@ -49,6 +50,7 @@ export async function saveSettingsFromUI() {
       systemPrompt: document.getElementById('systemPrompt').value || '',
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
       enableMaxWaitTimeout: document.getElementById('enableMaxWaitTimeout').checked,
+      autoConfirmDialogs: document.getElementById('autoConfirmDialogs').checked,
       enableStopWord: document.getElementById('enableStopWord').checked,
       stopWord: document.getElementById('stopWord').value || '',
       stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
@@ -77,7 +79,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });

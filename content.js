@@ -28,6 +28,8 @@
 
   let currentPromptId = null; // Track per-prompt instead of global flag
   let automationAborted = false; // Signal to queued prompts to stop
+  let autoConfirmDialogs = false;
+  let lastConfirmClickAt = 0;
 
   const DEFAULTS = {
     stableMs: 10000,
@@ -163,6 +165,65 @@
     const opacity = parseFloat(getComputedStyle(btn).opacity || '1');
     return !disabled && opacity > 0.5;
   }
+
+  function isElementVisible(el) {
+    if (!el) return false;
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  function normalizeButtonText(text) {
+    return (text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function isConfirmButton(el) {
+    if (!el) return false;
+    const tag = el.tagName ? el.tagName.toLowerCase() : '';
+    if (tag !== 'button') return false;
+    const label = normalizeButtonText(el.innerText || el.textContent || el.getAttribute('aria-label'));
+    if (label !== 'confirm') return false;
+    if (!isButtonEnabled(el) || !isElementVisible(el)) return false;
+    return true;
+  }
+
+  function maybeClickConfirmButtons() {
+    if (!autoConfirmDialogs) return false;
+    const now = Date.now();
+    if (now - lastConfirmClickAt < 1000) return false;
+    const candidates = Array.from(document.querySelectorAll('button'));
+    const confirmButtons = candidates.filter(isConfirmButton);
+    if (confirmButtons.length === 0) return false;
+    const target = confirmButtons[0];
+    console.log('[AutoConfirm] Clicking confirm button', {
+      text: (target.innerText || target.textContent || '').trim(),
+      className: target.className
+    });
+    target.click();
+    lastConfirmClickAt = now;
+    return true;
+  }
+
+  function setAutoConfirmDialogs(enabled, source = 'unknown') {
+    const next = enabled === true;
+    if (autoConfirmDialogs === next) return;
+    autoConfirmDialogs = next;
+    console.log('[AutoConfirm] Updated setting', { enabled: autoConfirmDialogs, source });
+  }
+
+  async function refreshAutoConfirmSetting(source = 'init') {
+    try {
+      const res = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      if (res?.ok && res.settings) {
+        setAutoConfirmDialogs(res.settings.autoConfirmDialogs === true, source);
+      }
+    } catch (_) {}
+  }
+
+  setInterval(() => {
+    maybeClickConfirmButtons();
+  }, 1000);
 
   function setProseMirrorText(el, text) {
     el.focus({ preventScroll: true });
@@ -380,6 +441,7 @@
       }
 
       const interval = setInterval(() => {
+        maybeClickConfirmButtons();
         const elapsed = Date.now() - startTime;
         const stableFor = Date.now() - lastChange;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
@@ -449,6 +511,7 @@
       const site = detectSite();
 
       const checkStop = () => {
+        maybeClickConfirmButtons();
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
         const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
@@ -508,6 +571,7 @@
       console.log('[WaitForStreamStart] Starting', { site, effectiveMaxWaitMs, effectivePollMs, stopButtonSelector });
 
       const check = () => {
+        maybeClickConfirmButtons();
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
         const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
@@ -856,8 +920,17 @@
           return;
         }
 
+        if (message?.type === 'SETTINGS_UPDATED' && message.settings) {
+          setAutoConfirmDialogs(message.settings.autoConfirmDialogs === true, 'settings_updated');
+          sendResponse({ ok: true });
+          return;
+        }
+
         if (message?.type === 'SEND_PROMPT' && typeof message.text === 'string') {
           const promptId = message.promptId || Math.random();
+          if (message.options && typeof message.options.autoConfirmDialogs === 'boolean') {
+            setAutoConfirmDialogs(message.options.autoConfirmDialogs, 'send_prompt');
+          }
           console.log('[MessageListener] SEND_PROMPT received', { 
             promptId, 
             textLength: message.text?.length,
@@ -882,4 +955,5 @@
   });
 
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
+  refreshAutoConfirmSetting('content_ready');
 })();

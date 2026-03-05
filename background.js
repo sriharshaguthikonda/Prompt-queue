@@ -61,6 +61,7 @@ const state = {
     systemPrompt: '',
     prependSystemPrompt: true,
     theme: 'dark',
+    autoConfirmDialogs: false,
     openNewChatPerPrompt: false,
     openNewChatPerPromptUrl: '',
   },
@@ -82,6 +83,7 @@ const DEFAULT_SETTINGS = {
   systemPrompt: '',
   prependSystemPrompt: true,
   theme: 'dark',
+  autoConfirmDialogs: false,
   enableMaxWaitTimeout: true,
   enableStopWord: false,
   stopWord: 'Future section',
@@ -125,6 +127,7 @@ function validateSettings(input = {}) {
     systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
     prependSystemPrompt: input.prependSystemPrompt !== false,
     theme: input.theme === 'light' ? 'light' : 'dark',
+    autoConfirmDialogs: input.autoConfirmDialogs === true,
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
     enableStopWord: input.enableStopWord === true,
     stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
@@ -428,6 +431,33 @@ async function saveSettings(newSettings) {
   const merged = validateSettings({ ...state.options, ...newSettings });
   state.options = merged;
   await chrome.storage.sync.set({ aiTaskSequencerSettings: merged });
+  await broadcastSettingsUpdate();
+  await ensureAutoConfirmContentScript();
+}
+
+async function broadcastSettingsUpdate() {
+  try {
+    const tabs = await chrome.tabs.query({});
+    tabs.forEach((tab) => {
+      if (tab?.id && isSupportedUrl(tab.url)) {
+        chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_UPDATED', settings: state.options }, () => {
+          // Read lastError to avoid unchecked runtime errors
+          void chrome.runtime.lastError;
+        });
+      }
+    });
+  } catch (_) {}
+}
+
+async function ensureAutoConfirmContentScript() {
+  if (!state.options?.autoConfirmDialogs) return;
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs?.[0];
+    if (tab?.id && isSupportedUrl(tab.url)) {
+      await ensureContentScriptReady(tab.id);
+    }
+  } catch (_) {}
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -689,6 +719,7 @@ function makeHistorySignature(item) {
       systemPrompt: item.settings?.systemPrompt || '',
       prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
       theme: item.settings?.theme === 'light' ? 'light' : 'dark',
+      autoConfirmDialogs: item.settings?.autoConfirmDialogs === true,
       enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
       enableStopWord: item.settings?.enableStopWord === true,
       stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
@@ -1008,7 +1039,16 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// Tab listeners removed - they were no-ops wasting memory
+// Auto-inject content script when auto-confirm is enabled
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  (async () => {
+    await loadSettings();
+    if (!state.options?.autoConfirmDialogs) return;
+    if (!isSupportedUrl(tab?.url)) return;
+    await ensureContentScriptReady(tabId);
+  })();
+});
 
 // ============ TRANSCRIPTION MONITORING ============
 
