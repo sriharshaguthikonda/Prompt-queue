@@ -22,6 +22,118 @@ export function parsePrompts(text, separator = PROMPT_SEPARATOR) {
     .filter((s) => s.length > 0);
 }
 
+function flipCharCase(ch) {
+  if (ch >= 'a' && ch <= 'z') return ch.toUpperCase();
+  if (ch >= 'A' && ch <= 'Z') return ch.toLowerCase();
+  return ch;
+}
+
+function replaceWithNearbyKey(ch) {
+  const keyMap = {
+    a: 's', b: 'v', c: 'x', d: 's', e: 'w', f: 'd', g: 'f', h: 'g', i: 'u', j: 'h',
+    k: 'j', l: 'k', m: 'n', n: 'b', o: 'i', p: 'o', q: 'w', r: 'e', s: 'a', t: 'r',
+    u: 'y', v: 'c', w: 'q', x: 'z', y: 't', z: 'x'
+  };
+  const lower = ch.toLowerCase();
+  const mapped = keyMap[lower] || lower;
+  return ch === lower ? mapped : mapped.toUpperCase();
+}
+
+function letterIndexes(chars) {
+  const indexes = [];
+  for (let i = 0; i < chars.length; i += 1) {
+    if (/[A-Za-z]/.test(chars[i])) indexes.push(i);
+  }
+  return indexes;
+}
+
+function makeTypoVariant(text, seed = 1) {
+  const chars = Array.from(text);
+  if (chars.length === 0) return text;
+
+  const letters = letterIndexes(chars);
+  if (letters.length === 0) {
+    return `${text}.`;
+  }
+
+  const pick = letters[(seed * 7) % letters.length];
+  const op = seed % 5;
+
+  // 0: duplicate char (double key)
+  if (op === 0) {
+    chars.splice(pick, 0, chars[pick]);
+    return chars.join('');
+  }
+
+  // 1: drop char
+  if (op === 1 && chars.length > 1) {
+    chars.splice(pick, 1);
+    return chars.join('');
+  }
+
+  // 2: swap adjacent chars
+  if (op === 2 && pick < chars.length - 1 && /[A-Za-z]/.test(chars[pick + 1])) {
+    const temp = chars[pick];
+    chars[pick] = chars[pick + 1];
+    chars[pick + 1] = temp;
+    return chars.join('');
+  }
+
+  // 3: nearby keyboard replacement
+  if (op === 3) {
+    chars[pick] = replaceWithNearbyKey(chars[pick]);
+    return chars.join('');
+  }
+
+  // 4: wrong capitalization
+  chars[pick] = flipCharCase(chars[pick]);
+  return chars.join('');
+}
+
+export function applyTypoVariantsToExactDuplicates(prompts = []) {
+  if (!Array.isArray(prompts) || prompts.length === 0) {
+    return { prompts: [], changed: 0 };
+  }
+
+  const counts = new Map();
+  const used = new Map();
+  const out = [];
+  let changed = 0;
+
+  for (const prompt of prompts) {
+    const base = typeof prompt === 'string' ? prompt : String(prompt ?? '');
+    const currentCount = counts.get(base) || 0;
+
+    if (currentCount === 0) {
+      counts.set(base, 1);
+      used.set(base, new Set([base]));
+      out.push(base);
+      continue;
+    }
+
+    const usedSet = used.get(base) || new Set([base]);
+    let candidate = base;
+    let attempt = 0;
+
+    while ((candidate === base || usedSet.has(candidate)) && attempt < 10) {
+      candidate = makeTypoVariant(base, currentCount + attempt + 1);
+      attempt += 1;
+    }
+
+    if (candidate === base || usedSet.has(candidate)) {
+      candidate = `${base}${base.endsWith('.') ? ',' : '.'}`;
+    }
+
+    usedSet.add(candidate);
+    used.set(base, usedSet);
+    counts.set(base, currentCount + 1);
+    out.push(candidate);
+    changed += 1;
+  }
+
+  return { prompts: out, changed };
+}
+
 export function applyTheme(theme) {
   const body = document.body;
   body.classList.remove('theme-dark', 'theme-light');

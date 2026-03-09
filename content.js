@@ -188,6 +188,11 @@
     return true;
   }
 
+  function isConfirmDialogVisible() {
+    const candidates = Array.from(document.querySelectorAll('button'));
+    return candidates.some(isConfirmButton);
+  }
+
   function maybeClickConfirmButtons() {
     if (!autoConfirmDialogs) return false;
     const now = Date.now();
@@ -372,7 +377,8 @@
     const loadingShimmer = document.querySelector('.loading-shimmer');
     const thinkingIndicator = document.querySelector('[class*="thinking"], [data-testid*="thinking"]');
     const stopPresent = document.querySelector('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
-    return !!loadingShimmer || !!thinkingIndicator || !!stopPresent;
+    const confirmVisible = isConfirmDialogVisible();
+    return !!loadingShimmer || !!thinkingIndicator || !!stopPresent || confirmVisible;
   }
 
   function checkForStopWord(stopWord, caseSensitive) {

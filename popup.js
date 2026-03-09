@@ -1,5 +1,5 @@
 import { applyConsolePatch } from './popup-console-patch.js';
-import { parsePrompts, setStatus, setProgress, showToast, showError, hideError, clearError, setButtonsDisabled, secToMs, PROMPT_SEPARATOR } from './popup-dom-utils.js';
+import { parsePrompts, applyTypoVariantsToExactDuplicates, setStatus, setProgress, showToast, showError, hideError, clearError, setButtonsDisabled, secToMs, PROMPT_SEPARATOR } from './popup-dom-utils.js';
 import { loadSettingsIntoUI, saveSettingsFromUI, initSettingsUI } from './popup-settings.js';
 import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, saveHistoryItem } from './popup-history.js';
 
@@ -82,10 +82,15 @@ async function startAutomation() {
     const textarea = document.getElementById('prompts');
     const separatorInput = document.getElementById('separatorInput');
     const separator = resolveSeparator(separatorInput?.value);
-    const prompts = parsePrompts(textarea.value, separator);
+    const parsedPrompts = parsePrompts(textarea.value, separator);
+    const duplicateAdjusted = applyTypoVariantsToExactDuplicates(parsedPrompts);
+    const prompts = duplicateAdjusted.prompts;
     if (prompts.length === 0) {
       setStatus('Please enter at least one prompt.');
       return;
+    }
+    if (duplicateAdjusted.changed > 0) {
+      showToast(`Adjusted ${duplicateAdjusted.changed} duplicate prompt(s) with typo-like variations`, 'info', 4000);
     }
     const tabId = await getActiveTabId();
     if (!tabId) {
@@ -171,10 +176,15 @@ if (saveHistoryBtn) {
       const textarea = document.getElementById('prompts');
       const separatorInput = document.getElementById('separatorInput');
       const separator = resolveSeparator(separatorInput?.value);
-      const prompts = parsePrompts(textarea.value, separator);
+      const parsedPrompts = parsePrompts(textarea.value, separator);
+      const duplicateAdjusted = applyTypoVariantsToExactDuplicates(parsedPrompts);
+      const prompts = duplicateAdjusted.prompts;
       if (prompts.length === 0) {
         showToast('No prompts to save', 'error');
         return;
+      }
+      if (duplicateAdjusted.changed > 0) {
+        showToast(`Adjusted ${duplicateAdjusted.changed} duplicate prompt(s) before save`, 'info', 3500);
       }
       const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
       await saveHistoryItem(prompts, settings?.settings);
