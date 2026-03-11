@@ -405,10 +405,10 @@
     return (!!sendBtn || !!regenPresent) && !isThinking;
   }
 
-  function countElementsBySelector(selector) {
+  function getElementsBySelector(selector) {
     if (!selector || typeof selector !== 'string') return null;
     try {
-      return document.querySelectorAll(selector).length;
+      return Array.from(document.querySelectorAll(selector));
     } catch (e) {
       console.warn('[WatchGate] Invalid selector', { selector, error: e?.message });
       return null;
@@ -422,11 +422,14 @@
     const selector = (options?.watchedElementSelector || DEFAULTS.watchedElementSelector || '').trim();
     if (!selector) return { enabled: false };
 
-    const baselineCount = countElementsBySelector(selector);
-    if (baselineCount === null) return { enabled: false };
+    const baselineElements = getElementsBySelector(selector);
+    if (!baselineElements) return { enabled: false };
+
+    const baselineCount = baselineElements.length;
+    const baselineElementSet = new Set(baselineElements);
 
     console.log('[WatchGate] Baseline captured', { selector, baselineCount });
-    return { enabled: true, selector, baselineCount };
+    return { enabled: true, selector, baselineCount, baselineElementSet };
   }
 
   function isGeminiDone() {
@@ -471,7 +474,6 @@
         observer.observe(document.body, { childList: true, subtree: true, characterData: true });
       }
 
-      let watchTimeoutLogged = false;
       const interval = setInterval(() => {
         maybeClickConfirmButtons();
         const elapsed = Date.now() - startTime;
@@ -500,13 +502,17 @@
 
         let watchGateSatisfied = true;
         if (watchGate?.enabled) {
-          const currentCount = countElementsBySelector(watchGate.selector);
-          watchGateSatisfied = currentCount !== null && currentCount > watchGate.baselineCount;
+          const currentElements = getElementsBySelector(watchGate.selector);
+          const currentCount = currentElements ? currentElements.length : null;
+          const hasNewElement = !!currentElements && currentElements.some((el) => !watchGate.baselineElementSet.has(el));
+          watchGateSatisfied = currentCount !== null && (currentCount > watchGate.baselineCount || hasNewElement);
+
           if (!watchGateSatisfied && elapsed % 5000 < effectivePollMs) {
             console.log('[WatchGate] Waiting for new watched element', {
               selector: watchGate.selector,
               baselineCount: watchGate.baselineCount,
-              currentCount
+              currentCount,
+              hasNewElement
             });
           }
         }
@@ -526,11 +532,10 @@
         }
         if (enableTimeout && elapsed > effectiveMaxWaitMs) {
           if (watchGate?.enabled && !watchGateSatisfied) {
-            if (!watchTimeoutLogged) {
-              console.warn('[WatchGate] Max wait reached but gate is not satisfied; continuing to wait for watched element');
-              watchTimeoutLogged = true;
-            }
-            return;
+            console.warn('[WatchGate] Max wait reached and gate is not satisfied; proceeding due timeout', {
+              selector: watchGate.selector,
+              baselineCount: watchGate.baselineCount
+            });
           }
           console.warn('[WaitForCompletion] Max wait timeout reached (timeout enabled)', { 
             completionId, 
