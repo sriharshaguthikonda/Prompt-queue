@@ -35,6 +35,7 @@
     stableMs: 10000,
     maxWaitMs: 180000,
     pollIntervalMs: 1500,
+    watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   };
 
   function detectSite() {
@@ -404,6 +405,30 @@
     return (!!sendBtn || !!regenPresent) && !isThinking;
   }
 
+  function countElementsBySelector(selector) {
+    if (!selector || typeof selector !== 'string') return null;
+    try {
+      return document.querySelectorAll(selector).length;
+    } catch (e) {
+      console.warn('[WatchGate] Invalid selector', { selector, error: e?.message });
+      return null;
+    }
+  }
+
+  function buildWatchGate(options) {
+    const enabled = options?.enableWatchedElementGate === true;
+    if (!enabled) return { enabled: false };
+
+    const selector = (options?.watchedElementSelector || DEFAULTS.watchedElementSelector || '').trim();
+    if (!selector) return { enabled: false };
+
+    const baselineCount = countElementsBySelector(selector);
+    if (baselineCount === null) return { enabled: false };
+
+    console.log('[WatchGate] Baseline captured', { selector, baselineCount });
+    return { enabled: true, selector, baselineCount };
+  }
+
   function isGeminiDone() {
     const stop = document.querySelector('button[aria-label*="Stop"], button[data-tooltip*="Stop"]');
     const spinner = document.querySelector('[aria-label*="Loading"], [role="progressbar"]');
@@ -422,7 +447,7 @@
     return !stop && !spinner;
   }
 
-  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, stopWord, stopWordCaseSensitive }) {
+  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, stopWord, stopWordCaseSensitive, watchGate }) {
     const site = detectSite();
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
@@ -446,6 +471,7 @@
         observer.observe(document.body, { childList: true, subtree: true, characterData: true });
       }
 
+      let watchTimeoutLogged = false;
       const interval = setInterval(() => {
         maybeClickConfirmButtons();
         const elapsed = Date.now() - startTime;
@@ -472,26 +498,47 @@
           canSend = isClaudeDone();
         }
 
-        if (stableFor >= effectiveStableMs && !stopBtnPresent && canSend) {
+        let watchGateSatisfied = true;
+        if (watchGate?.enabled) {
+          const currentCount = countElementsBySelector(watchGate.selector);
+          watchGateSatisfied = currentCount !== null && currentCount > watchGate.baselineCount;
+          if (!watchGateSatisfied && elapsed % 5000 < effectivePollMs) {
+            console.log('[WatchGate] Waiting for new watched element', {
+              selector: watchGate.selector,
+              baselineCount: watchGate.baselineCount,
+              currentCount
+            });
+          }
+        }
+
+        if (stableFor >= effectiveStableMs && !stopBtnPresent && canSend && watchGateSatisfied) {
           console.log('[WaitForCompletion] Completion condition met', { 
             completionId, 
             elapsed, 
             stableFor, 
             stopBtnPresent, 
-            canSend 
+            canSend,
+            watchGateSatisfied
           });
           cleanup();
           resolve();
           return;
         }
         if (enableTimeout && elapsed > effectiveMaxWaitMs) {
+          if (watchGate?.enabled && !watchGateSatisfied) {
+            if (!watchTimeoutLogged) {
+              console.warn('[WatchGate] Max wait reached but gate is not satisfied; continuing to wait for watched element');
+              watchTimeoutLogged = true;
+            }
+            return;
+          }
           console.warn('[WaitForCompletion] Max wait timeout reached (timeout enabled)', { 
             completionId, 
             elapsed, 
             effectiveMaxWaitMs, 
             stableFor, 
             stopBtnPresent, 
-            canSend 
+            canSend
           });
           cleanup();
           resolve();
@@ -756,6 +803,8 @@
 
       if (!inputEl) throw new Error('Could not find chat input on this page.');
 
+      const watchGate = buildWatchGate(options);
+
       // Wait for any active streaming/processing to complete before sending
       console.log('[PromptQueue] Waiting for streams to stop', { promptId, enableTimeout: false });
       try {
@@ -846,10 +895,10 @@
 
       const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
       const effectiveStopWord = options?.enableStopWord ? options?.stopWord : null;
-      console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, enableStopWord: options?.enableStopWord, stopWord: effectiveStopWord });
+      console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, enableStopWord: options?.enableStopWord, stopWord: effectiveStopWord, watchGate });
       try {
         let result;
-        if (enableCompletionTimeout) {
+        if (enableCompletionTimeout && !watchGate?.enabled) {
           result = await Promise.race([
             waitForCompletion({
               sendButton: sendBtn,
@@ -861,6 +910,7 @@
               enableMaxWaitTimeout: enableCompletionTimeout,
               stopWord: effectiveStopWord,
               stopWordCaseSensitive: options?.stopWordCaseSensitive,
+              watchGate,
             }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('waitForCompletion timeout')), (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 5000))
           ]);
@@ -875,6 +925,7 @@
             enableMaxWaitTimeout: enableCompletionTimeout,
             stopWord: effectiveStopWord,
             stopWordCaseSensitive: options?.stopWordCaseSensitive,
+            watchGate,
           });
         }
 

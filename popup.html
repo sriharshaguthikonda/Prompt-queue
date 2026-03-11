@@ -92,6 +92,25 @@ Prompts (one per line)"></textarea>
         </div>
         <div class="desc">Automatically clicks “Confirm” when it appears, even outside automation.</div>
 
+        <div class="inline" style="margin-top: 12px;">
+          <input id="enableWatchedElementGate" type="checkbox" />
+          <label for="enableWatchedElementGate">Wait for new watched element before next prompt</label>
+        </div>
+        <div class="desc">Only continues after a new matching element appears in the response.</div>
+
+        <div id="watchedElementContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
+          <input
+            id="watchedElementSelector"
+            type="text"
+            placeholder="CSS selector (e.g., button[data-testid='copy-turn-action-button'])"
+            class="stop-word-input"
+            style="width: 100%; padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+          />
+          <div class="history-buttons" style="margin-bottom: 0;">
+            <button id="useChatgptActionSelector" class="preset-btn" type="button">Use ChatGPT action buttons</button>
+          </div>
+        </div>
+
         <div class="progress" aria-hidden="true"><div id="progressBar" class="bar"></div></div>
 
         <div class="controls">

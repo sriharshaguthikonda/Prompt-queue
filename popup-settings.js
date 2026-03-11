@@ -16,6 +16,8 @@ export async function loadSettingsIntoUI() {
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
       document.getElementById('enableMaxWaitTimeout').checked = s.enableMaxWaitTimeout !== false;
       document.getElementById('autoConfirmDialogs').checked = s.autoConfirmDialogs === true;
+      document.getElementById('enableWatchedElementGate').checked = s.enableWatchedElementGate === true;
+      document.getElementById('watchedElementSelector').value = s.watchedElementSelector || '';
       document.getElementById('enableStopWord').checked = s.enableStopWord === true;
       document.getElementById('stopWord').value = s.stopWord || '';
       document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
@@ -23,10 +25,16 @@ export async function loadSettingsIntoUI() {
       document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
 
       const stopWordContainer = document.getElementById('stopWordContainer');
+      const watchedElementContainer = document.getElementById('watchedElementContainer');
       if (s.enableStopWord === true) {
         stopWordContainer.classList.remove('hidden');
       } else {
         stopWordContainer.classList.add('hidden');
+      }
+      if (s.enableWatchedElementGate === true) {
+        watchedElementContainer.classList.remove('hidden');
+      } else {
+        watchedElementContainer.classList.add('hidden');
       }
     }
   } catch (e) {
@@ -51,6 +59,8 @@ export async function saveSettingsFromUI() {
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
       enableMaxWaitTimeout: document.getElementById('enableMaxWaitTimeout').checked,
       autoConfirmDialogs: document.getElementById('autoConfirmDialogs').checked,
+      enableWatchedElementGate: document.getElementById('enableWatchedElementGate').checked,
+      watchedElementSelector: (document.getElementById('watchedElementSelector').value || '').trim(),
       enableStopWord: document.getElementById('enableStopWord').checked,
       stopWord: document.getElementById('stopWord').value || '',
       stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
@@ -79,7 +89,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });
@@ -93,6 +103,10 @@ export function initSettingsUI() {
   const stopWordContainer = document.getElementById('stopWordContainer');
   const stopWordInput = document.getElementById('stopWord');
   const stopWordCaseSensitiveCheckbox = document.getElementById('stopWordCaseSensitive');
+  const enableWatchedElementGateCheckbox = document.getElementById('enableWatchedElementGate');
+  const watchedElementContainer = document.getElementById('watchedElementContainer');
+  const watchedElementSelectorInput = document.getElementById('watchedElementSelector');
+  const useChatgptActionSelectorBtn = document.getElementById('useChatgptActionSelector');
   const openNewChatPerPromptCheckbox = document.getElementById('openNewChatPerPrompt');
   const openNewChatPerPromptUrlInput = document.getElementById('openNewChatPerPromptUrl');
 
@@ -114,6 +128,33 @@ export function initSettingsUI() {
 
   if (stopWordCaseSensitiveCheckbox) {
     stopWordCaseSensitiveCheckbox.addEventListener('change', saveSettingsFromUI);
+  }
+
+  if (enableWatchedElementGateCheckbox) {
+    enableWatchedElementGateCheckbox.addEventListener('change', () => {
+      if (enableWatchedElementGateCheckbox.checked) {
+        watchedElementContainer.classList.remove('hidden');
+        watchedElementSelectorInput.focus();
+      } else {
+        watchedElementContainer.classList.add('hidden');
+      }
+      saveSettingsFromUI();
+    });
+  }
+
+  if (watchedElementSelectorInput) {
+    watchedElementSelectorInput.addEventListener('input', saveSettingsFromUI);
+  }
+
+  if (useChatgptActionSelectorBtn) {
+    useChatgptActionSelectorBtn.addEventListener('click', () => {
+      watchedElementSelectorInput.value = 'button[data-testid="copy-turn-action-button"]';
+      if (enableWatchedElementGateCheckbox && !enableWatchedElementGateCheckbox.checked) {
+        enableWatchedElementGateCheckbox.checked = true;
+        watchedElementContainer.classList.remove('hidden');
+      }
+      saveSettingsFromUI();
+    });
   }
 
   if (openNewChatPerPromptCheckbox) {

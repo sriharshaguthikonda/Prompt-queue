@@ -62,6 +62,8 @@ const state = {
     prependSystemPrompt: true,
     theme: 'dark',
     autoConfirmDialogs: false,
+    enableWatchedElementGate: false,
+    watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
     openNewChatPerPrompt: false,
     openNewChatPerPromptUrl: '',
   },
@@ -84,6 +86,8 @@ const DEFAULT_SETTINGS = {
   prependSystemPrompt: true,
   theme: 'dark',
   autoConfirmDialogs: false,
+  enableWatchedElementGate: false,
+  watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   enableMaxWaitTimeout: true,
   enableStopWord: false,
   stopWord: 'Future section',
@@ -128,6 +132,10 @@ function validateSettings(input = {}) {
     prependSystemPrompt: input.prependSystemPrompt !== false,
     theme: input.theme === 'light' ? 'light' : 'dark',
     autoConfirmDialogs: input.autoConfirmDialogs === true,
+    enableWatchedElementGate: input.enableWatchedElementGate === true,
+    watchedElementSelector: typeof input.watchedElementSelector === 'string'
+      ? input.watchedElementSelector.trim()
+      : DEFAULT_SETTINGS.watchedElementSelector,
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
     enableStopWord: input.enableStopWord === true,
     stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
@@ -720,6 +728,10 @@ function makeHistorySignature(item) {
       prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
       theme: item.settings?.theme === 'light' ? 'light' : 'dark',
       autoConfirmDialogs: item.settings?.autoConfirmDialogs === true,
+      enableWatchedElementGate: item.settings?.enableWatchedElementGate === true,
+      watchedElementSelector: typeof item.settings?.watchedElementSelector === 'string'
+        ? item.settings.watchedElementSelector.trim()
+        : DEFAULT_SETTINGS.watchedElementSelector,
       enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
       enableStopWord: item.settings?.enableStopWord === true,
       stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
