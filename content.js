@@ -397,14 +397,91 @@
     return null;
   }
 
+  function hasActiveToolStatusInTailTurns(tailTurns) {
+    if (!tailTurns || tailTurns.length === 0) return false;
+    const activePatterns = [
+      /\btalking to\b/i,
+      /\bwants to talk to\b/i,
+      /\brunning\b/i,
+      /\bprocessing\b/i,
+    ];
+    const inactivePatterns = [
+      /\btalked to\b/i,
+      /\bstopped talking to\b/i,
+      /\byou allowed this action\b/i,
+      /\byou denied this action\b/i,
+    ];
+
+    for (const turn of tailTurns) {
+      if (!turn) continue;
+      const loadingInTurn = findElementInTailTurns('.loading-shimmer', [turn]);
+      if (loadingInTurn) return true;
+
+      let statusNodes = [];
+      try {
+        statusNodes = Array.from(turn.querySelectorAll('[class*="tool-message"] .text-start, [class*="tool-message"] button, [class*="tool-message"] .loading-shimmer'));
+      } catch (_) {
+        statusNodes = [];
+      }
+
+      for (const node of statusNodes) {
+        if (!node || !isElementVisible(node)) continue;
+        const text = normalizeButtonText(node.textContent || node.innerText || '');
+        if (!text) continue;
+        if (inactivePatterns.some((pattern) => pattern.test(text))) continue;
+        if (activePatterns.some((pattern) => pattern.test(text))) return true;
+      }
+    }
+    return false;
+  }
+
   function isChatGPTThinking() {
     // Ignore stale indicators in older turns; only tail turns can block sending.
     const tailTurns = getTailConversationTurns(2);
     const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
     const thinkingIndicator = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
+    const activeToolStatus = hasActiveToolStatusInTailTurns(tailTurns);
     const stopPresent = document.querySelector('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
     const confirmVisible = isConfirmDialogVisible();
-    return !!loadingShimmer || !!thinkingIndicator || !!stopPresent || confirmVisible;
+    return !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible;
+  }
+
+  function waitForChatGPTSendWindow({ sendButton, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      let readySince = null;
+
+      const check = () => {
+        maybeClickConfirmButtons();
+        const elapsed = Date.now() - start;
+        const busy = isChatGPTThinking();
+        const directReady = sendButton ? isButtonEnabled(sendButton) : false;
+        const canSend = directReady || isChatGPTReadyToSend();
+
+        if (!busy && canSend) {
+          if (readySince === null) {
+            readySince = Date.now();
+          } else if (Date.now() - readySince >= quietWindowMs) {
+            console.log('[PreSendGuard] Quiet send window reached', { elapsed, quietWindowMs });
+            resolve();
+            return;
+          }
+        } else {
+          if (readySince !== null) {
+            console.log('[PreSendGuard] Busy signal returned; resetting quiet window', { elapsed, busy, canSend });
+          }
+          readySince = null;
+        }
+
+        if (elapsed >= maxWaitMs) {
+          reject(new Error('ChatGPT did not reach a stable send window before timeout'));
+          return;
+        }
+        setTimeout(check, pollMs);
+      };
+
+      check();
+    });
   }
 
   function checkForStopWord(stopWord, caseSensitive) {
@@ -874,6 +951,17 @@
         throw new Error('Input field empty before sending');
       }
       console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length, preview: finalNormalized.slice(0, 120) });
+
+      if (site === 'chatgpt') {
+        const preSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
+        console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', { promptId, preSendMaxWaitMs });
+        await waitForChatGPTSendWindow({
+          sendButton: sendBtn,
+          maxWaitMs: preSendMaxWaitMs,
+          quietWindowMs: 1200,
+          pollMs: 250,
+        });
+      }
       
       console.log('[PromptQueue] Clicking send button', { promptId });
       await clickSend(sendBtn, inputEl);
@@ -905,6 +993,20 @@
           }
           console.warn('[PromptQueue] No active stream detected and no rendered message, re-attempting send', { promptId, attempt, maxAttempts });
           await new Promise((r) => setTimeout(r, 250));
+          if (site === 'chatgpt') {
+            const retryPreSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
+            console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window before retry', {
+              promptId,
+              attempt,
+              retryPreSendMaxWaitMs,
+            });
+            await waitForChatGPTSendWindow({
+              sendButton: sendBtn,
+              maxWaitMs: retryPreSendMaxWaitMs,
+              quietWindowMs: 1200,
+              pollMs: 250,
+            });
+          }
           await clickSend(sendBtn, inputEl);
         }
       }
