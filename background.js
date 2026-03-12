@@ -64,6 +64,7 @@ const state = {
     autoConfirmDialogs: false,
     enableWatchedElementGate: false,
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
+    refreshTabBeforeEachPrompt: false,
     openNewChatPerPrompt: false,
     openNewChatPerPromptUrl: '',
   },
@@ -88,6 +89,7 @@ const DEFAULT_SETTINGS = {
   autoConfirmDialogs: false,
   enableWatchedElementGate: false,
   watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
+  refreshTabBeforeEachPrompt: false,
   enableMaxWaitTimeout: true,
   enableStopWord: false,
   stopWord: 'Future section',
@@ -136,6 +138,7 @@ function validateSettings(input = {}) {
     watchedElementSelector: typeof input.watchedElementSelector === 'string'
       ? input.watchedElementSelector.trim()
       : DEFAULT_SETTINGS.watchedElementSelector,
+    refreshTabBeforeEachPrompt: input.refreshTabBeforeEachPrompt === true,
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
     enableStopWord: input.enableStopWord === true,
     stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
@@ -557,6 +560,44 @@ function waitForTabLoad(tabId) {
   });
 }
 
+async function refreshTabInBackgroundBeforeSend(tabId) {
+  const before = await chrome.tabs.get(tabId);
+  if (!isSupportedUrl(before?.url)) {
+    throw new Error('Target tab not supported for refresh. Open ChatGPT/Gemini/Grok/Claude and try again.');
+  }
+
+  console.log('[BackgroundRefresh] Reloading tab before send', {
+    tabId,
+    url: before.url,
+    active: before.active,
+    status: before.status,
+    discarded: before.discarded === true,
+  });
+
+  await chrome.tabs.reload(tabId);
+  const loaded = await waitForTabLoad(tabId);
+  if (!loaded) {
+    throw new Error('Timed out waiting for background tab reload.');
+  }
+
+  // Give the SPA one beat to hydrate after "complete".
+  await new Promise((r) => setTimeout(r, 1200));
+
+  const ready = await ensureContentScriptReady(tabId);
+  if (!ready) {
+    throw new Error('Content script not ready after background refresh.');
+  }
+
+  const after = await chrome.tabs.get(tabId);
+  console.log('[BackgroundRefresh] Reload complete', {
+    tabId,
+    url: after?.url,
+    active: after?.active,
+    status: after?.status,
+    discarded: after?.discarded === true,
+  });
+}
+
 async function sendToContent(tabId, message) {
   const tab = await chrome.tabs.get(tabId);
   if (!isSupportedUrl(tab?.url)) {
@@ -695,6 +736,8 @@ async function sendNextPrompt() {
       await chrome.tabs.update(state.tabId, { url: targetUrl });
       await waitForTabLoad(state.tabId);
       await ensureContentScriptReady(state.tabId);
+    } else if (state.options?.refreshTabBeforeEachPrompt) {
+      await refreshTabInBackgroundBeforeSend(state.tabId);
     }
 
     await sendToContent(state.tabId, { 
@@ -732,6 +775,7 @@ function makeHistorySignature(item) {
       watchedElementSelector: typeof item.settings?.watchedElementSelector === 'string'
         ? item.settings.watchedElementSelector.trim()
         : DEFAULT_SETTINGS.watchedElementSelector,
+      refreshTabBeforeEachPrompt: item.settings?.refreshTabBeforeEachPrompt === true,
       enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
       enableStopWord: item.settings?.enableStopWord === true,
       stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',

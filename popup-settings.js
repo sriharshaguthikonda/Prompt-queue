@@ -21,6 +21,7 @@ export async function loadSettingsIntoUI() {
       document.getElementById('enableStopWord').checked = s.enableStopWord === true;
       document.getElementById('stopWord').value = s.stopWord || '';
       document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
+      document.getElementById('refreshTabBeforeEachPrompt').checked = s.refreshTabBeforeEachPrompt === true;
       document.getElementById('openNewChatPerPrompt').checked = s.openNewChatPerPrompt === true;
       document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
 
@@ -64,6 +65,7 @@ export async function saveSettingsFromUI() {
       enableStopWord: document.getElementById('enableStopWord').checked,
       stopWord: document.getElementById('stopWord').value || '',
       stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
+      refreshTabBeforeEachPrompt: document.getElementById('refreshTabBeforeEachPrompt').checked,
       openNewChatPerPrompt: document.getElementById('openNewChatPerPrompt').checked,
       openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
     };
@@ -89,7 +91,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });
