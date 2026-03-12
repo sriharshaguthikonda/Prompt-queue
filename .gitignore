@@ -1,0 +1,11 @@
+# OS/editor artifacts
+.DS_Store
+
+# Local native host manifest (machine-specific path + extension IDs)
+native_host.json
+
+# Local runtime state and ad-hoc transcript files
+transcription_state.json
+Elderly Abuse.json
+New recording 165.json
+Plab 2 Feedback v5 - Hypertension Follow-up Case.html

@@ -146,7 +146,8 @@ Or simple format:
 ## Files Created
 
 - `native_host.py` - Python native messaging host
-- `native_host.json` - Native host configuration (auto-generated)
+- `native_host.example.json` - Sanitized template checked into the repo
+- `native_host.json` - Local native host configuration (auto-generated, gitignored)
 - `install_native_host.bat` - Installation script
 - Registry entries for native messaging (auto-created)
 

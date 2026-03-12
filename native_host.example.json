@@ -1,0 +1,10 @@
+{
+  "name": "com.aipromptqueue.transcription",
+  "description": "AI Prompt Queue Transcription Monitor",
+  "path": "C:\\path\\to\\Prompt-queue\\run_host.bat",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://YOUR_CHROME_EXTENSION_ID/",
+    "chrome-extension://YOUR_EDGE_EXTENSION_ID/"
+  ]
+}
