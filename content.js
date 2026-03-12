@@ -373,10 +373,35 @@
     btn.click();
   }
 
+  function getTailConversationTurns(maxTurns = 2) {
+    const turns = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id]'));
+    if (turns.length === 0) return [];
+    return turns.slice(Math.max(0, turns.length - maxTurns));
+  }
+
+  function findElementInTailTurns(selector, tailTurns) {
+    let matches = [];
+    try {
+      matches = Array.from(document.querySelectorAll(selector));
+    } catch (_) {
+      return null;
+    }
+    if (matches.length === 0) return null;
+    if (!tailTurns || tailTurns.length === 0) return matches[matches.length - 1] || null;
+    for (let i = matches.length - 1; i >= 0; i -= 1) {
+      const candidate = matches[i];
+      if (tailTurns.some((turn) => turn.contains(candidate))) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
   function isChatGPTThinking() {
-    // Detect ChatGPT thinking/loading state
-    const loadingShimmer = document.querySelector('.loading-shimmer');
-    const thinkingIndicator = document.querySelector('[class*="thinking"], [data-testid*="thinking"]');
+    // Ignore stale indicators in older turns; only tail turns can block sending.
+    const tailTurns = getTailConversationTurns(2);
+    const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
+    const thinkingIndicator = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
     const stopPresent = document.querySelector('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
     const confirmVisible = isConfirmDialogVisible();
     return !!loadingShimmer || !!thinkingIndicator || !!stopPresent || confirmVisible;
