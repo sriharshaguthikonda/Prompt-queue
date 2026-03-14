@@ -206,6 +206,12 @@ Prompts (one per line)"></textarea>
       <div class="desc" style="padding: 0 12px;">Reloads the current chat tab before each send without switching to it.</div>
 
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+        <input id="parallelOneTabPerPrompt" type="checkbox" />
+        <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
+      </div>
+      <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt with 2-5s jitter between launches.</div>
+
+      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
         <input id="openNewChatPerPrompt" type="checkbox" />
         <label for="openNewChatPerPrompt">Send each prompt in a new chat</label>
       </div>

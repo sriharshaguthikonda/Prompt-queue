@@ -40,22 +40,55 @@ function updateControlButtons(status = {}) {
   }
 }
 
+function getRunningStatusText(status = {}) {
+  const {
+    mode = 'sequential',
+    paused,
+    currentIndex = 0,
+    total = 0,
+    recoveryAttempts = 0,
+    parallelLaunched = 0,
+    parallelCompleted = 0,
+    parallelFailed = 0,
+    parallelActive = 0,
+  } = status;
+
+  if (mode === 'parallel') {
+    if (paused) {
+      return `Paused launches - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, failed ${parallelFailed}`;
+    }
+    return `Parallel running - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, failed ${parallelFailed}`;
+  }
+
+  if (paused) {
+    return `Paused at prompt ${currentIndex + 1} of ${total}`;
+  }
+  if (recoveryAttempts > 0) {
+    return `Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`;
+  }
+  return `Running prompt ${currentIndex + 1} of ${total}...`;
+}
+
+function getProgressPosition(status = {}) {
+  if (status.mode === 'parallel') {
+    const completed = Number(status.parallelCompleted || 0);
+    const failed = Number(status.parallelFailed || 0);
+    return completed + failed;
+  }
+  return Number(status.currentIndex || 0);
+}
+
 async function refreshStatus() {
   try {
     const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
     if (res?.ok && res.status) {
-      const { running, paused, currentIndex, total, recoveryAttempts } = res.status;
-      setProgress(running ? currentIndex : total, total);
+      const { running, paused, total, currentIndex } = res.status;
+      const progressPos = getProgressPosition(res.status);
+      setProgress(running ? progressPos : total, total);
       setButtonsDisabled(running && !paused);
       updateControlButtons(res.status);
-      if (paused) {
-        setStatus(`Paused at prompt ${currentIndex + 1} of ${total}`, 'paused');
-      } else if (running) {
-        if (recoveryAttempts > 0) {
-          setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`, 'running');
-        } else {
-          setStatus(`Running prompt ${currentIndex + 1} of ${total}...`, 'running');
-        }
+      if (running) {
+        setStatus(getRunningStatusText(res.status), res.status.paused ? 'paused' : 'running');
       } else if (total > 0 && currentIndex >= total) {
         setStatus('Complete', 'idle');
       } else {
@@ -75,7 +108,7 @@ async function startAutomation() {
     const statusRes = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
     if (statusRes?.ok && statusRes.status?.running) {
       showToast('Automation is already running. Stop it first.', 'error');
-      setStatus(`Running prompt ${statusRes.status.currentIndex + 1} of ${statusRes.status.total}...`, 'running');
+      setStatus(getRunningStatusText(statusRes.status), statusRes.status.paused ? 'paused' : 'running');
       return;
     }
 
@@ -105,8 +138,11 @@ async function startAutomation() {
     const currentSettings = settingsRes?.settings || {};
     const res = await chrome.runtime.sendMessage({ type: 'START_AUTOMATION', prompts, tabId, options: currentSettings });
     if (res?.ok) {
-      setStatus(`Running prompt 1 of ${prompts.length}...`, 'running');
-      setProgress(0, prompts.length);
+      const initialStatus = currentSettings.parallelOneTabPerPrompt === true
+        ? { mode: 'parallel', running: true, paused: false, total: prompts.length, parallelLaunched: 0, parallelCompleted: 0, parallelFailed: 0, parallelActive: 0 }
+        : { mode: 'sequential', running: true, paused: false, currentIndex: 0, total: prompts.length };
+      setStatus(getRunningStatusText(initialStatus), 'running');
+      setProgress(getProgressPosition(initialStatus), prompts.length);
       updateControlButtons({ running: true, paused: false });
       await chrome.runtime.sendMessage({ type: 'SAVE_PROMPT_HISTORY', item: { prompts, settings: currentSettings } });
     } else {
@@ -273,30 +309,28 @@ if (importBtn && importFile) {
 chrome.runtime.onMessage.addListener((message) => {
   try {
     if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
-      const { currentIndex, total, recoveryAttempts, paused, running } = message.status;
+      const { total, paused, running } = message.status;
       lastActivityTime = Date.now();
       setButtonsDisabled(running && !paused);
       clearError();
       updateControlButtons(message.status);
-      // Show recovery status if attempting recovery
-      if (paused) {
-        setStatus(`Paused at prompt ${currentIndex + 1} of ${total}`, 'paused');
-      } else if (recoveryAttempts > 0) {
-        setStatus(`Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`, 'running');
-      } else {
-        setStatus(`Running prompt ${currentIndex + 1} of ${total}...`, 'running');
-      }
-      setProgress(currentIndex, total);
+      setStatus(getRunningStatusText(message.status), paused ? 'paused' : 'running');
+      setProgress(getProgressPosition(message.status), total);
     } else if (message?.type === 'AUTOMATION_COMPLETE') {
       const reason = message.reason;
       const status = message.status;
       if (reason === 'stoppedByStopWord') {
         setStatus('Stopped by stop phrase', 'idle');
+      } else if (reason === 'completedWithErrors') {
+        setStatus('Complete with errors', 'error');
       } else {
         setStatus('Complete', 'idle');
       }
       if (status?.total && typeof status.currentIndex === 'number') {
-        setProgress(status.currentIndex, status.total);
+        const progressPos = status.mode === 'parallel'
+          ? Number(status.parallelCompleted || 0) + Number(status.parallelFailed || 0)
+          : status.currentIndex;
+        setProgress(progressPos, status.total);
       } else {
         setProgress(1, 1);
       }
@@ -304,8 +338,11 @@ chrome.runtime.onMessage.addListener((message) => {
       clearError();
       const toastMessage = reason === 'stoppedByStopWord'
         ? '✓ Automation stopped by stop phrase'
-        : '✓ Automation complete!';
-      showToast(toastMessage, 'success');
+        : reason === 'completedWithErrors'
+          ? 'Finished with some failed prompts'
+          : '✓ Automation complete!';
+      const toastKind = reason === 'completedWithErrors' ? 'info' : 'success';
+      showToast(toastMessage, toastKind);
       stopCountdownTimer();
       updateControlButtons({ running: false, paused: false });
     } else if (message?.type === 'AUTOMATION_ERROR') {
