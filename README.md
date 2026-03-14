@@ -51,6 +51,36 @@ If you have more ideas to improve efficiency with these AI products, open an iss
 5. Click Start Automation
 6. Watch progress and status; a notification appears when done
 
+## Parallel fan-out mode (one tab per prompt)
+Use this mode when you want to launch multiple prompts concurrently.
+
+### Setup
+1. Open a supported site in the active tab.
+2. In extension options, enable **Parallel: open one tab per prompt (max 10)**.
+3. Optional: set **Custom new chat URL**.
+   - If provided, all spawned tabs use this URL.
+   - If empty, the extension reuses the active tab URL.
+4. Start automation with up to 10 prompts.
+
+### Expected behavior
+- One inactive background tab is opened per prompt.
+- Tab launches are staggered with a random jitter between 2 and 5 seconds.
+- Each tab receives exactly one prompt.
+- Tabs remain open after completion.
+
+### Cap and precedence
+- Hard cap in v1: 10 prompts/tabs.
+- If parallel mode is ON, the sequential **Send each prompt in a new chat** flow is ignored for that run.
+
+### Pause/Resume semantics
+- Pause stops only new tab launches.
+- Already launched tabs continue processing.
+- Resume restarts only the launch loop.
+
+### Stop semantics
+- Stop cancels pending tab launches and ends the current session state.
+- Already launched tabs are not force-stopped.
+
 ## Prompt history
 - Click Save current as history to store the current prompts + settings
 - The list shows recent histories (deduplicated)

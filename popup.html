@@ -210,6 +210,17 @@ Prompts (one per line)"></textarea>
         <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
       </div>
       <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt with 2-5s jitter between launches.</div>
+      <div class="parallel-walkthrough" style="margin: 8px 12px 0;">
+        <div class="parallel-walkthrough-title">Parallel mode quick guide</div>
+        <ol>
+          <li>Turn this on and keep prompts at 10 or fewer.</li>
+          <li>Optional: set a custom URL below. If empty, active tab URL is reused.</li>
+          <li>Start automation. Each prompt gets its own background tab with 2-5s launch jitter.</li>
+          <li>Pause/Resume affects only new launches; already launched tabs keep running.</li>
+          <li>Stop cancels pending launches only; launched tabs are left open.</li>
+        </ol>
+        <div class="parallel-walkthrough-caveat">When parallel mode is ON, “Send each prompt in a new chat” is ignored for that run.</div>
+      </div>
 
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">
         <input id="openNewChatPerPrompt" type="checkbox" />
