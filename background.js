@@ -79,6 +79,9 @@ const state = {
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
     refreshTabBeforeEachPrompt: false,
     parallelOneTabPerPrompt: false,
+    enableRetryOnFailure: true,
+    maxRetriesPerPrompt: 2,
+    retryDelayMs: 2000,
     openNewChatPerPrompt: false,
     openNewChatPerPromptUrl: '',
   },
@@ -88,9 +91,11 @@ const state = {
   promptStartTime: 0,
   lastRecoveryTime: 0,
   currentPromptId: null,
+  currentRetryCount: 0,
   stableCountdownMs: 0,
   parallel: null,
 };
+let sequentialRetryTimer = null;
 
 const DEFAULT_SETTINGS = {
   stableMs: 10000,
@@ -108,6 +113,9 @@ const DEFAULT_SETTINGS = {
   watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   refreshTabBeforeEachPrompt: false,
   parallelOneTabPerPrompt: false,
+  enableRetryOnFailure: true,
+  maxRetriesPerPrompt: 2,
+  retryDelayMs: 2000,
   enableMaxWaitTimeout: true,
   enableStopWord: false,
   stopWord: 'Future section',
@@ -160,6 +168,9 @@ function validateSettings(input = {}) {
       : DEFAULT_SETTINGS.watchedElementSelector,
     refreshTabBeforeEachPrompt: input.refreshTabBeforeEachPrompt === true,
     parallelOneTabPerPrompt: input.parallelOneTabPerPrompt === true,
+    enableRetryOnFailure: input.enableRetryOnFailure !== false,
+    maxRetriesPerPrompt: coerceNumber(input.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
+    retryDelayMs: coerceNumber(input.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
     enableStopWord: input.enableStopWord === true,
     stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
@@ -195,6 +206,7 @@ function getStatus() {
     tabId: state.tabId,
     options: state.options,
     recoveryAttempts: state.recoveryAttempts,
+    currentRetryCount: state.currentRetryCount || 0,
     stableCountdownMs: state.stableCountdownMs,
     parallelLaunched: parallel.launched || 0,
     parallelCompleted: parallel.completed || 0,
@@ -236,6 +248,7 @@ async function saveState() {
     recoveryAttempts: state.recoveryAttempts,
     processing: state.processing,
     currentPromptId: state.currentPromptId,
+    currentRetryCount: state.currentRetryCount,
     promptStartTime: state.promptStartTime,
     savedAt: Date.now(),
     stableCountdownMs: state.stableCountdownMs,
@@ -262,6 +275,7 @@ async function loadState() {
     // Prefer in-memory processing state if already true to avoid reverting to stale persisted false.
     state.processing = state.processing || aiTaskSequencerState.processing || false;
     state.currentPromptId = aiTaskSequencerState.currentPromptId || state.currentPromptId || null;
+    state.currentRetryCount = aiTaskSequencerState.currentRetryCount || state.currentRetryCount || 0;
     state.promptStartTime = aiTaskSequencerState.promptStartTime || state.promptStartTime || (state.processing ? state.lastActivityTime : 0);
     if (state.mode === 'parallel') {
       const restoredParallel = aiTaskSequencerState.parallel || {};
@@ -283,6 +297,7 @@ async function loadState() {
         mode: state.mode,
         processing: state.processing,
         currentPromptId: state.currentPromptId,
+        currentRetryCount: state.currentRetryCount,
         promptStartTime: state.promptStartTime,
         lastActivityTime: state.lastActivityTime,
         lastRecoveryTime: state.lastRecoveryTime,
@@ -295,6 +310,10 @@ async function loadState() {
 
 async function clearState() {
   await chrome.storage.local.remove('aiTaskSequencerState');
+  if (sequentialRetryTimer) {
+    clearTimeout(sequentialRetryTimer);
+    sequentialRetryTimer = null;
+  }
   state.mode = 'sequential';
   state.running = false;
   state.paused = false;
@@ -304,6 +323,7 @@ async function clearState() {
   state.recoveryAttempts = 0;
   state.processing = false;
   state.currentPromptId = null;
+  state.currentRetryCount = 0;
   state.promptStartTime = 0;
   state.stableCountdownMs = 0;
   state.parallel = null;
@@ -694,6 +714,17 @@ async function waitWhileParallelPaused(token) {
   }
 }
 
+function getRetryPolicy(options = state.options) {
+  const enabled = options?.enableRetryOnFailure === true;
+  const maxRetries = Number.isFinite(Number(options?.maxRetriesPerPrompt))
+    ? Math.max(0, Number(options.maxRetriesPerPrompt))
+    : DEFAULT_SETTINGS.maxRetriesPerPrompt;
+  const retryDelayMs = Number.isFinite(Number(options?.retryDelayMs))
+    ? Math.max(0, Number(options.retryDelayMs))
+    : DEFAULT_SETTINGS.retryDelayMs;
+  return { enabled, maxRetries, retryDelayMs };
+}
+
 async function waitForParallelTabLoaded(tabId, launchToken, workerId) {
   let attempt = 0;
   while (shouldContinueParallelLaunch(launchToken)) {
@@ -807,6 +838,112 @@ function getParallelDispatchOptions() {
   };
 }
 
+async function scheduleSequentialRetry(errorMessage, source) {
+  if (!state.running || state.mode === 'parallel') return false;
+  const retryPolicy = getRetryPolicy(state.options);
+  if (!retryPolicy.enabled || retryPolicy.maxRetries <= 0) return false;
+  if (state.currentRetryCount >= retryPolicy.maxRetries) return false;
+
+  state.currentRetryCount += 1;
+  state.processing = false;
+  state.promptStartTime = 0;
+  state.currentPromptId = null;
+  state.lastActivityTime = Date.now();
+  await saveState();
+  try {
+    chrome.runtime.sendMessage({ type: 'AUTOMATION_PROGRESS', status: getStatus() });
+  } catch (_) {}
+
+  console.warn('[Retry][Sequential] Scheduling retry', {
+    source,
+    promptIndex: state.currentIndex,
+    retryAttempt: state.currentRetryCount,
+    maxRetries: retryPolicy.maxRetries,
+    retryDelayMs: retryPolicy.retryDelayMs,
+    error: errorMessage,
+  });
+
+  if (sequentialRetryTimer) {
+    clearTimeout(sequentialRetryTimer);
+  }
+  sequentialRetryTimer = setTimeout(() => {
+    sequentialRetryTimer = null;
+    (async () => {
+      if (!state.running || state.mode !== 'sequential') return;
+      if (state.paused) return;
+      try {
+        await sendNextPrompt();
+      } catch (retryErr) {
+        console.error('[Retry][Sequential] Retry send failed', {
+          promptIndex: state.currentIndex,
+          retryAttempt: state.currentRetryCount,
+          error: retryErr?.message || String(retryErr),
+        });
+      }
+    })();
+  }, retryPolicy.retryDelayMs);
+
+  return true;
+}
+
+async function scheduleParallelPromptRetry(workerId, promptIndex, errorMessage, source) {
+  if (state.mode !== 'parallel' || !state.running || !state.parallel) return false;
+  const worker = state.parallel.workersById?.[workerId];
+  if (!worker || worker.status === 'completed' || worker.status === 'failed') return false;
+
+  const retryPolicy = getRetryPolicy(state.options);
+  if (!retryPolicy.enabled || retryPolicy.maxRetries <= 0) return false;
+
+  worker.promptRetryCounts = worker.promptRetryCounts || {};
+  const currentRetries = worker.promptRetryCounts[promptIndex] || 0;
+  if (currentRetries >= retryPolicy.maxRetries) return false;
+
+  const nextRetryAttempt = currentRetries + 1;
+  worker.promptRetryCounts[promptIndex] = nextRetryAttempt;
+  worker.status = 'retrying';
+  worker.lastRetryError = errorMessage || null;
+  state.lastActivityTime = Date.now();
+  await saveState();
+  await emitParallelProgress();
+
+  console.warn('[Retry][Parallel] Scheduling retry', {
+    source,
+    workerId,
+    workerIndex: worker.index,
+    tabId: worker.tabId,
+    promptIndex,
+    retryAttempt: nextRetryAttempt,
+    maxRetries: retryPolicy.maxRetries,
+    retryDelayMs: retryPolicy.retryDelayMs,
+    error: errorMessage,
+  });
+
+  setTimeout(() => {
+    (async () => {
+      if (!state.running || state.mode !== 'parallel' || !state.parallel) return;
+      const liveWorker = state.parallel.workersById?.[workerId];
+      if (!liveWorker || liveWorker.status === 'completed' || liveWorker.status === 'failed') return;
+      if (liveWorker.inFlightPromptId) return;
+      if (liveWorker.nextPromptIndex !== promptIndex) return;
+
+      liveWorker.status = 'running';
+      state.lastActivityTime = Date.now();
+      await saveState();
+      await emitParallelProgress();
+      await dispatchParallelWorkerPrompt(workerId);
+    })().catch(async (retryErr) => {
+      console.error('[Retry][Parallel] Retry dispatch failed', {
+        workerId,
+        promptIndex,
+        error: retryErr?.message || String(retryErr),
+      });
+      await markParallelWorkerFailed(workerId, String(retryErr?.message || retryErr));
+    });
+  }, retryPolicy.retryDelayMs);
+
+  return true;
+}
+
 async function maybeFinalizeParallelRun(reason) {
   if (state.mode !== 'parallel' || !state.parallel || !state.running) return false;
   const total = state.prompts.length;
@@ -905,13 +1042,17 @@ async function dispatchParallelWorkerPrompt(workerId) {
   } catch (err) {
     delete state.parallel.workersByPromptId[promptId];
     worker.inFlightPromptId = null;
+    const dispatchError = String(err?.message || err);
     console.error('[Parallel] Failed to dispatch prompt to worker tab', {
       workerId,
       tabId: worker.tabId,
       promptIndex,
-      error: err?.message || String(err),
+      error: dispatchError,
     });
-    await markParallelWorkerFailed(workerId, String(err?.message || err));
+    const retried = await scheduleParallelPromptRetry(workerId, promptIndex, dispatchError, 'dispatchParallelWorkerPrompt');
+    if (!retried) {
+      await markParallelWorkerFailed(workerId, dispatchError);
+    }
     return false;
   }
 }
@@ -938,6 +1079,7 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
       prompts: promptGroups[index],
       nextPromptIndex: 0,
       inFlightPromptId: null,
+      promptRetryCounts: {},
       status: 'launching',
       error: null,
       isActive: false,
@@ -1049,6 +1191,10 @@ async function sendToContent(tabId, message) {
 // ============ AUTOMATION LOGIC ============
 
 async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
+  if (sequentialRetryTimer) {
+    clearTimeout(sequentialRetryTimer);
+    sequentialRetryTimer = null;
+  }
   await loadSettings();
   if (options) {
     await saveSettings(options);
@@ -1076,6 +1222,7 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
   state.recoveryAttempts = 0;
   state.processing = false;
   state.currentPromptId = null;
+  state.currentRetryCount = 0;
   state.promptStartTime = 0;
   state.stableCountdownMs = 0;
   state.parallel = useParallel ? createEmptyParallelState() : null;
@@ -1140,6 +1287,7 @@ async function sendNextPrompt() {
     paused: state.paused,
     currentIndex: state.currentIndex, 
     totalPrompts: state.prompts.length,
+    currentRetryCount: state.currentRetryCount,
     processing: state.processing 
   });
   
@@ -1173,7 +1321,11 @@ async function sendNextPrompt() {
   state.promptStartTime = Date.now();
   state.processing = true;
   state.currentPromptId = Math.random();
-  console.log('[SendNextPrompt] Marking processing=true and saving state', { currentPromptId: state.currentPromptId, currentIndex: state.currentIndex });
+  console.log('[SendNextPrompt] Marking processing=true and saving state', {
+    currentPromptId: state.currentPromptId,
+    currentIndex: state.currentIndex,
+    currentRetryCount: state.currentRetryCount,
+  });
   await saveState();
   
   try {
@@ -1210,13 +1362,22 @@ async function sendNextPrompt() {
       promptId: state.currentPromptId,
     });
   } catch (err) {
-    console.error("Error sending prompt to content:", err?.message || err);
+    const sendError = String(err?.message || err);
+    console.error("Error sending prompt to content:", sendError);
+    const retried = await scheduleSequentialRetry(sendError, 'sendNextPrompt');
+    if (retried) {
+      return;
+    }
     state.processing = false;
     state.lastActivityTime = Date.now() - RECOVERY_CONFIG.staleThresholdMs - 1000;
-    console.warn('[SendNextPrompt] Marking processing=false due to send error', { currentIndex: state.currentIndex, promptId: state.currentPromptId });
+    console.warn('[SendNextPrompt] Marking processing=false due to send error', {
+      currentIndex: state.currentIndex,
+      promptId: state.currentPromptId,
+      retryCount: state.currentRetryCount,
+    });
     await saveState();
     try {
-      chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(err), status: getStatus() });
+      chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: sendError, status: getStatus() });
     } catch (_) {}
   }
 }
@@ -1240,6 +1401,9 @@ function makeHistorySignature(item) {
         : DEFAULT_SETTINGS.watchedElementSelector,
       refreshTabBeforeEachPrompt: item.settings?.refreshTabBeforeEachPrompt === true,
       parallelOneTabPerPrompt: item.settings?.parallelOneTabPerPrompt === true,
+      enableRetryOnFailure: item.settings?.enableRetryOnFailure !== false,
+      maxRetriesPerPrompt: coerceNumber(item.settings?.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
+      retryDelayMs: coerceNumber(item.settings?.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
       enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
       enableStopWord: item.settings?.enableStopWord === true,
       stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
@@ -1465,12 +1629,34 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             worker.inFlightPromptId = null;
             delete state.parallel.workersByPromptId[promptId];
+            if (worker.promptRetryCounts && Number.isFinite(promptRef.promptIndex)) {
+              delete worker.promptRetryCounts[Number(promptRef.promptIndex)];
+            }
 
-            const hasError = !!message.error || message.stoppedByStopWord === true;
+            const hasStopWord = message.stoppedByStopWord === true;
+            const hasError = !!message.error || hasStopWord;
             if (hasError) {
+              const failedPromptIndex = Number.isFinite(promptRef.promptIndex)
+                ? Number(promptRef.promptIndex)
+                : Math.max(0, (worker.nextPromptIndex || 1) - 1);
+              const errorMessage = message.error || (hasStopWord ? 'Stopped by stop phrase' : 'Unknown error');
+
+              if (!hasStopWord) {
+                worker.nextPromptIndex = failedPromptIndex;
+                const retried = await scheduleParallelPromptRetry(
+                  worker.workerId,
+                  failedPromptIndex,
+                  errorMessage,
+                  'RESPONSE_COMPLETE',
+                );
+                if (retried) {
+                  return;
+                }
+              }
+
               await finalizeParallelWorker(worker.workerId, {
                 failed: true,
-                errorMessage: message.error || (message.stoppedByStopWord ? 'Stopped by stop phrase' : 'Unknown error'),
+                errorMessage,
               });
               return;
             }
@@ -1507,9 +1693,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             error: message.error
           });
           state.processing = false;
-          state.currentIndex += 1;
+          state.promptStartTime = 0;
           state.lastActivityTime = Date.now();
           state.recoveryAttempts = 0;
+
+          if (message.error) {
+            const retried = await scheduleSequentialRetry(String(message.error), 'RESPONSE_COMPLETE');
+            if (retried) {
+              return;
+            }
+          }
+
+          state.currentRetryCount = 0;
+          state.currentIndex += 1;
 
           if (message.stoppedByStopWord) {
             console.log('[ResponseComplete] Stopped by stop phrase, ending automation');

@@ -84,6 +84,21 @@ Prompts (one per line)"></textarea>
               <div class="desc">How often we check for changes. Smaller values can finish a bit sooner but cost more CPU.</div>
             </div>
           </div>
+          <div class="inline" style="margin-top: 10px;">
+            <input id="enableRetryOnFailure" type="checkbox" checked />
+            <label for="enableRetryOnFailure">Retry failed prompts/tabs</label>
+          </div>
+          <div class="row">
+            <div>
+              <label for="maxRetriesPerPrompt">Max retries</label>
+              <input id="maxRetriesPerPrompt" type="number" min="0" max="10" step="1" placeholder="2" />
+            </div>
+            <div>
+              <label for="retryDelaySec">Retry delay (seconds)</label>
+              <input id="retryDelaySec" type="number" min="0" step="0.5" placeholder="2" />
+            </div>
+          </div>
+          <div class="desc">Retries apply to failed prompt sends and failed prompt completions. Set Max retries to 0 to disable retries.</div>
         </div>
 
         <div class="inline" style="margin-top: 12px;">

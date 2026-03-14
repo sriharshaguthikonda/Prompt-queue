@@ -12,6 +12,9 @@ export async function loadSettingsIntoUI() {
       document.getElementById('stableMinSec').value = msToSec(s.stableMinMs ?? s.stableMs);
       document.getElementById('stableMaxSec').value = msToSec(s.stableMaxMs ?? s.stableMs);
       document.getElementById('pollSec').value = msToSec(s.pollIntervalMs);
+      document.getElementById('enableRetryOnFailure').checked = s.enableRetryOnFailure !== false;
+      document.getElementById('maxRetriesPerPrompt').value = Number.isFinite(Number(s.maxRetriesPerPrompt)) ? Number(s.maxRetriesPerPrompt) : 2;
+      document.getElementById('retryDelaySec').value = msToSec(s.retryDelayMs);
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
       document.getElementById('appendPromptText').value = s.appendPromptText || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
@@ -59,6 +62,9 @@ export async function saveSettingsFromUI() {
       stableMinMs: secToMs(stableMinOrdered),
       stableMaxMs: secToMs(stableMaxOrdered),
       pollIntervalMs: secToMs(pollSec),
+      enableRetryOnFailure: document.getElementById('enableRetryOnFailure').checked,
+      maxRetriesPerPrompt: Number(document.getElementById('maxRetriesPerPrompt').value),
+      retryDelayMs: secToMs(Number(document.getElementById('retryDelaySec').value)),
       systemPrompt: document.getElementById('systemPrompt').value || '',
       appendPromptText: document.getElementById('appendPromptText').value || '',
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
@@ -97,7 +103,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'appendPromptText', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'enableRetryOnFailure', 'maxRetriesPerPrompt', 'retryDelaySec', 'systemPrompt', 'appendPromptText', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });

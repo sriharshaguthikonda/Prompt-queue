@@ -79,6 +79,8 @@ function getRunningStatusText(status = {}) {
     currentIndex = 0,
     total = 0,
     recoveryAttempts = 0,
+    currentRetryCount = 0,
+    options = {},
     parallelLaunched = 0,
     parallelCompleted = 0,
     parallelFailed = 0,
@@ -97,6 +99,10 @@ function getRunningStatusText(status = {}) {
   }
   if (recoveryAttempts > 0) {
     return `Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`;
+  }
+  if (currentRetryCount > 0) {
+    const maxRetries = Number(options?.maxRetriesPerPrompt || 0);
+    return `Retrying prompt ${currentIndex + 1} of ${total} (${currentRetryCount}/${maxRetries || '?'})`;
   }
   return `Running prompt ${currentIndex + 1} of ${total}...`;
 }
