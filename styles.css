@@ -727,6 +727,11 @@ button:disabled:hover {
   font-size: 10px;
 }
 
+.parallel-walkthrough-controls {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .stop-word-input {
   font-size: 12px !important;
   padding: 8px !important;

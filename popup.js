@@ -19,6 +19,42 @@ async function getActiveTabId() {
 
 const pauseBtn = document.getElementById('pauseBtn');
 const resumeBtn = document.getElementById('resumeBtn');
+const parallelWalkthrough = document.getElementById('parallelWalkthrough');
+const toggleParallelWalkthroughBtn = document.getElementById('toggleParallelWalkthroughBtn');
+const PARALLEL_WALKTHROUGH_VISIBILITY_KEY = 'parallelWalkthroughVisible';
+
+function setParallelWalkthroughVisibility(visible) {
+  if (!parallelWalkthrough || !toggleParallelWalkthroughBtn) return;
+  parallelWalkthrough.hidden = !visible;
+  toggleParallelWalkthroughBtn.textContent = visible ? 'Hide guide' : 'Show guide';
+}
+
+async function loadParallelWalkthroughVisibility() {
+  if (!parallelWalkthrough || !toggleParallelWalkthroughBtn) return;
+  let visible = true;
+  try {
+    const result = await chrome.storage.local.get([PARALLEL_WALKTHROUGH_VISIBILITY_KEY]);
+    if (typeof result?.[PARALLEL_WALKTHROUGH_VISIBILITY_KEY] === 'boolean') {
+      visible = result[PARALLEL_WALKTHROUGH_VISIBILITY_KEY];
+    }
+  } catch (e) {
+    console.error('[ParallelWalkthrough] Failed to load visibility:', e);
+  }
+  setParallelWalkthroughVisibility(visible);
+}
+
+if (toggleParallelWalkthroughBtn && parallelWalkthrough) {
+  toggleParallelWalkthroughBtn.addEventListener('click', async () => {
+    const currentlyVisible = !parallelWalkthrough.hidden;
+    const nextVisible = !currentlyVisible;
+    setParallelWalkthroughVisibility(nextVisible);
+    try {
+      await chrome.storage.local.set({ [PARALLEL_WALKTHROUGH_VISIBILITY_KEY]: nextVisible });
+    } catch (e) {
+      console.error('[ParallelWalkthrough] Failed to save visibility:', e);
+    }
+  });
+}
 
 function updateControlButtons(status = {}) {
   const running = !!status.running;
@@ -501,6 +537,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
     } catch (_) {}
 
+    await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
     await loadHistoryIntoUI(updatePromptCount);
     await loadStateIntoUI();

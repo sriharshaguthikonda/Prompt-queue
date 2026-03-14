@@ -210,7 +210,10 @@ Prompts (one per line)"></textarea>
         <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
       </div>
       <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt with 2-5s jitter between launches.</div>
-      <div class="parallel-walkthrough" style="margin: 8px 12px 0;">
+      <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
+        <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
+      </div>
+      <div id="parallelWalkthrough" class="parallel-walkthrough" style="margin: 8px 12px 0;">
         <div class="parallel-walkthrough-title">Parallel mode quick guide</div>
         <ol>
           <li>Turn this on and keep prompts at 10 or fewer.</li>
