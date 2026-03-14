@@ -211,7 +211,7 @@ Prompts (one per line)"></textarea>
         <input id="parallelOneTabPerPrompt" type="checkbox" />
         <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
       </div>
-      <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt or per <code>(new tab)</code> set with 2-5s jitter.</div>
+      <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt or per <code>(new tab)</code> set, then immediately moves to the next tab once launch is ready.</div>
       <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
         <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
       </div>
@@ -221,7 +221,7 @@ Prompts (one per line)"></textarea>
           <li>Turn this on and keep prompts at 10 or fewer.</li>
           <li>Optional: use <code>(new tab)</code> lines to split prompts into tab sets.</li>
           <li>Optional: set a custom URL below. If empty, active tab URL is reused.</li>
-          <li>Start automation. Each tab set gets one background tab with 2-5s launch jitter.</li>
+          <li>Start automation. Each tab set gets one background tab; next launch starts as soon as the previous tab accepts its first prompt.</li>
           <li>Pause/Resume affects only new launches; already launched tabs keep running.</li>
           <li>Stop cancels pending launches only; launched tabs are left open.</li>
         </ol>

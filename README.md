@@ -67,7 +67,7 @@ Use this mode when you want to launch multiple prompts concurrently.
 - One inactive background tab is opened per prompt group:
   - no `(new tab)` tags: one tab per prompt
   - with `(new tab)` tags: one tab per group between tags
-- Tab launches are staggered with a random jitter between 2 and 5 seconds.
+- Tab launches are sequential by launch-readiness (next tab starts as soon as the previous tab is loaded and accepts its first prompt).
 - Tabs are launched in true fan-out mode (no waiting for earlier tab completion before launching later tabs).
 - Each tab processes its own prompt group sequentially.
 - Tabs remain open after completion.

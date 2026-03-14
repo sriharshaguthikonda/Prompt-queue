@@ -421,10 +421,11 @@ chrome.runtime.onMessage.addListener((message) => {
     } else if (message?.type === 'AUTOMATION_COMPLETE') {
       const reason = message.reason;
       const status = message.status;
+      const lastFailureError = status?.parallelLastFailure?.error;
       if (reason === 'stoppedByStopWord') {
         setStatus('Stopped by stop phrase', 'idle');
       } else if (reason === 'completedWithErrors') {
-        setStatus('Complete with errors', 'error');
+        setStatus(lastFailureError ? `Complete with errors: ${lastFailureError}` : 'Complete with errors', 'error');
       } else {
         setStatus('Complete', 'idle');
       }
@@ -441,7 +442,7 @@ chrome.runtime.onMessage.addListener((message) => {
       const toastMessage = reason === 'stoppedByStopWord'
         ? '✓ Automation stopped by stop phrase'
         : reason === 'completedWithErrors'
-          ? 'Finished with some failed prompts'
+          ? (lastFailureError ? `Finished with failures. Last error: ${lastFailureError}` : 'Finished with some failed prompts')
           : '✓ Automation complete!';
       const toastKind = reason === 'completedWithErrors' ? 'info' : 'success';
       showToast(toastMessage, toastKind);

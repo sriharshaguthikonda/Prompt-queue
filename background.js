@@ -108,8 +108,6 @@ const DEFAULT_SETTINGS = {
 
 const PARALLEL_CONFIG = {
   maxTabs: 10,
-  launchJitterMinMs: 2000,
-  launchJitterMaxMs: 5000,
   launchPausePollMs: 250,
 };
 
@@ -197,6 +195,7 @@ function getStatus() {
     parallelCompleted: parallel.completed || 0,
     parallelFailed: parallel.failed || 0,
     parallelActive: parallel.active || 0,
+    parallelLastFailure: parallel.lastFailure || null,
   };
 }
 
@@ -212,6 +211,7 @@ function createEmptyParallelState() {
     completed: 0,
     failed: 0,
     active: 0,
+    lastFailure: null,
     workersById: {},
     workersByPromptId: {},
   };
@@ -666,12 +666,6 @@ async function refreshTabInBackgroundBeforeSend(tabId) {
   });
 }
 
-function randomIntInclusive(min, max) {
-  const lo = Math.ceil(min);
-  const hi = Math.floor(max);
-  return Math.floor(Math.random() * (hi - lo + 1)) + lo;
-}
-
 function buildParallelPromptId(workerIndex, promptIndex) {
   return `parallel_${Date.now()}_${workerIndex}_${promptIndex}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -815,6 +809,28 @@ async function emitParallelProgress() {
   } catch (_) {}
 }
 
+async function getParallelTabSnapshot(tabId) {
+  if (!tabId) return { tabExists: false };
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    return {
+      tabExists: true,
+      tabId,
+      url: tab?.url || null,
+      title: tab?.title || null,
+      status: tab?.status || null,
+      discarded: tab?.discarded === true,
+      active: tab?.active === true,
+    };
+  } catch (err) {
+    return {
+      tabExists: false,
+      tabId,
+      tabError: String(err?.message || err),
+    };
+  }
+}
+
 function getParallelDispatchOptions() {
   return {
     ...state.options,
@@ -851,8 +867,9 @@ async function finalizeParallelWorker(workerId, { failed, errorMessage } = {}) {
     worker.inFlightPromptId = null;
   }
 
+  const resolvedError = failed ? (errorMessage || 'Unknown parallel worker failure') : null;
   worker.status = failed ? 'failed' : 'completed';
-  worker.error = failed ? (errorMessage || 'Unknown parallel worker failure') : null;
+  worker.error = resolvedError;
 
   if (worker.isActive && state.parallel.active > 0) {
     state.parallel.active = Math.max(0, state.parallel.active - 1);
@@ -861,6 +878,18 @@ async function finalizeParallelWorker(workerId, { failed, errorMessage } = {}) {
 
   if (failed) {
     state.parallel.failed += 1;
+    const failureSnapshot = {
+      workerId: worker.workerId,
+      workerIndex: worker.index,
+      tabId: worker.tabId || null,
+      nextPromptIndex: worker.nextPromptIndex,
+      error: resolvedError,
+      at: Date.now(),
+      tab: await getParallelTabSnapshot(worker.tabId),
+    };
+    worker.failure = failureSnapshot;
+    state.parallel.lastFailure = failureSnapshot;
+    console.error('[Parallel] Worker failed', failureSnapshot);
   } else {
     state.parallel.completed += 1;
   }
@@ -933,21 +962,6 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
     if (!shouldContinueParallelLaunch(launchToken)) break;
     await waitWhileParallelPaused(launchToken);
     if (!shouldContinueParallelLaunch(launchToken)) break;
-
-    if (index > 0) {
-      const jitterMs = randomIntInclusive(PARALLEL_CONFIG.launchJitterMinMs, PARALLEL_CONFIG.launchJitterMaxMs);
-      console.log('[Parallel] Launch jitter before next tab', { index, jitterMs });
-      const jitterStart = Date.now();
-      while (Date.now() - jitterStart < jitterMs) {
-        if (!shouldContinueParallelLaunch(launchToken)) break;
-        if (state.paused) {
-          await waitWhileParallelPaused(launchToken);
-          if (!shouldContinueParallelLaunch(launchToken)) break;
-        }
-        await new Promise((resolve) => setTimeout(resolve, 250));
-      }
-      if (!shouldContinueParallelLaunch(launchToken)) break;
-    }
 
     const workerId = buildParallelWorkerId(index);
     const worker = {
@@ -1115,8 +1129,7 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
       tabs: parallelPromptGroups.length,
       maxTabs: PARALLEL_CONFIG.maxTabs,
       launchUrl,
-      jitterMinMs: PARALLEL_CONFIG.launchJitterMinMs,
-      jitterMaxMs: PARALLEL_CONFIG.launchJitterMaxMs,
+      launchStrategy: 'launch next tab immediately after current tab accepts first prompt',
     });
     await runParallelFanoutLaunch({ promptGroups: parallelPromptGroups, launchUrl });
     return;
@@ -1421,9 +1434,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
             const promptId = message.promptId ? String(message.promptId) : '';
-            const promptRef = promptId ? state.parallel.workersByPromptId?.[promptId] : null;
+            let promptRef = promptId ? state.parallel.workersByPromptId?.[promptId] : null;
+            const senderTabId = sender?.tab?.id || null;
+            if (!promptRef && senderTabId) {
+              const fallbackWorker = Object.values(state.parallel.workersById || {}).find((candidate) => (
+                candidate?.tabId === senderTabId &&
+                candidate?.status !== 'completed' &&
+                candidate?.status !== 'failed' &&
+                !!candidate?.inFlightPromptId
+              ));
+              if (fallbackWorker) {
+                promptRef = {
+                  workerId: fallbackWorker.workerId,
+                  promptIndex: Math.max(0, (fallbackWorker.nextPromptIndex || 1) - 1),
+                  recoveredFromSenderTab: true,
+                };
+                if (promptId) {
+                  state.parallel.workersByPromptId[promptId] = promptRef;
+                }
+                console.warn('[ResponseComplete][Parallel] Recovered prompt mapping via sender tab', {
+                  promptId,
+                  senderTabId,
+                  workerId: fallbackWorker.workerId,
+                  inFlightPromptId: fallbackWorker.inFlightPromptId,
+                });
+              }
+            }
             if (!promptRef) {
-              console.log('[ResponseComplete][Parallel] Unknown promptId, ignoring', { promptId });
+              const pendingPromptIds = Object.keys(state.parallel.workersByPromptId || {});
+              console.log('[ResponseComplete][Parallel] Unknown promptId, ignoring', {
+                promptId,
+                senderTabId,
+                pendingPromptIds,
+                workerCount: Object.keys(state.parallel.workersById || {}).length,
+              });
               return;
             }
             const worker = state.parallel.workersById?.[promptRef.workerId];
