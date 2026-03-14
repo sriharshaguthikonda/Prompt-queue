@@ -733,6 +733,82 @@ async function waitWhileParallelPaused(token) {
   }
 }
 
+async function waitForParallelTabLoaded(tabId, launchToken, workerId) {
+  let attempt = 0;
+  while (shouldContinueParallelLaunch(launchToken)) {
+    attempt += 1;
+    const loaded = await waitForTabLoad(tabId);
+    if (loaded) {
+      return true;
+    }
+
+    let tab;
+    try {
+      tab = await chrome.tabs.get(tabId);
+    } catch {
+      throw new Error('Parallel tab was closed before it finished loading.');
+    }
+    if (!isSupportedUrl(tab?.url)) {
+      throw new Error('Parallel tab navigated to an unsupported URL before loading.');
+    }
+
+    console.warn('[Parallel] Tab load timed out, waiting and retrying', {
+      workerId,
+      tabId,
+      attempt,
+      status: tab?.status,
+      url: tab?.url,
+    });
+
+    await waitWhileParallelPaused(launchToken);
+    if (!shouldContinueParallelLaunch(launchToken)) break;
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  return false;
+}
+
+async function waitForParallelContentScriptReady(tabId, launchToken, workerId) {
+  let attempt = 0;
+  while (shouldContinueParallelLaunch(launchToken)) {
+    attempt += 1;
+    try {
+      const ready = await ensureContentScriptReady(tabId);
+      if (ready) {
+        return true;
+      }
+      console.warn('[Parallel] Content script not ready yet, retrying', { workerId, tabId, attempt });
+    } catch (err) {
+      const message = String(err?.message || err || '');
+      if (/blocked/i.test(message)) {
+        throw new Error(`Content script injection blocked: ${message}`);
+      }
+
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        if (!isSupportedUrl(tab?.url)) {
+          throw new Error('Parallel tab navigated to an unsupported URL while preparing content script.');
+        }
+      } catch (tabErr) {
+        throw new Error('Parallel tab was closed while preparing content script.');
+      }
+
+      console.warn('[Parallel] Content script preparation failed, retrying', {
+        workerId,
+        tabId,
+        attempt,
+        error: message,
+      });
+    }
+
+    await waitWhileParallelPaused(launchToken);
+    if (!shouldContinueParallelLaunch(launchToken)) break;
+    await new Promise((resolve) => setTimeout(resolve, 800));
+  }
+
+  return false;
+}
+
 async function emitParallelProgress() {
   try {
     chrome.runtime.sendMessage({ type: 'AUTOMATION_PROGRESS', status: getStatus() });
@@ -904,14 +980,14 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
         throw new Error('Failed to create parallel tab');
       }
 
-      const loaded = await waitForTabLoad(createdTabId);
+      const loaded = await waitForParallelTabLoaded(createdTabId, launchToken, workerId);
       if (!loaded) {
-        throw new Error('Timed out waiting for parallel tab load');
+        throw new Error('Parallel launch canceled while waiting for tab load');
       }
 
-      const ready = await ensureContentScriptReady(createdTabId);
+      const ready = await waitForParallelContentScriptReady(createdTabId, launchToken, workerId);
       if (!ready) {
-        throw new Error('Could not establish connection to parallel content script');
+        throw new Error('Parallel launch canceled while waiting for content script readiness');
       }
 
       worker.status = 'running';
@@ -921,6 +997,15 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
       await saveState();
       await dispatchParallelWorkerPrompt(workerId);
     } catch (err) {
+      if (!shouldContinueParallelLaunch(launchToken)) {
+        console.log('[Parallel] Launch canceled while preparing worker', {
+          workerId,
+          index,
+          tabId: createdTabId,
+          error: err?.message || String(err),
+        });
+        break;
+      }
       console.error('[Parallel] Worker launch/send failed', {
         workerId,
         index,
