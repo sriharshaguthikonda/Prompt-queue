@@ -60,6 +60,7 @@ const state = {
     maxWaitMs: undefined,
     pollIntervalMs: undefined,
     systemPrompt: '',
+    appendPromptText: '',
     prependSystemPrompt: true,
     appendSystemPrompt: false,
     theme: 'dark',
@@ -88,6 +89,7 @@ const DEFAULT_SETTINGS = {
   maxWaitMs: 180000,
   pollIntervalMs: 1500,
   systemPrompt: '',
+  appendPromptText: '',
   prependSystemPrompt: true,
   appendSystemPrompt: false,
   theme: 'dark',
@@ -144,6 +146,7 @@ function validateSettings(input = {}) {
     maxWaitMs: coerceNumber(input.maxWaitMs, 5000, 86400000, DEFAULT_SETTINGS.maxWaitMs),
     pollIntervalMs: coerceNumber(input.pollIntervalMs, 50, 5000, DEFAULT_SETTINGS.pollIntervalMs),
     systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
+    appendPromptText: typeof input.appendPromptText === 'string' ? input.appendPromptText : DEFAULT_SETTINGS.appendPromptText,
     prependSystemPrompt: input.prependSystemPrompt !== false,
     appendSystemPrompt: input.appendSystemPrompt === true,
     theme: input.theme === 'light' ? 'light' : 'dark',
@@ -943,15 +946,24 @@ async function startAutomation({ prompts, tabId, options }) {
 }
 
 function buildMessageText(text) {
-  const { systemPrompt, prependSystemPrompt, appendSystemPrompt } = state.options;
-  if (!systemPrompt) return text;
+  const {
+    systemPrompt,
+    appendPromptText,
+    prependSystemPrompt,
+    appendSystemPrompt,
+  } = state.options;
 
+  const prependText = typeof systemPrompt === 'string' ? systemPrompt.trim() : '';
+  const explicitAppendText = typeof appendPromptText === 'string' ? appendPromptText.trim() : '';
+  const appendText = explicitAppendText || prependText;
+
+  if (!prependText && !appendText) return text;
   let out = text;
-  if (prependSystemPrompt) {
-    out = `${systemPrompt}\n\n${out}`;
+  if (prependSystemPrompt && prependText) {
+    out = `${prependText}\n\n${out}`;
   }
-  if (appendSystemPrompt) {
-    out = `${out}\n\n${systemPrompt}`;
+  if (appendSystemPrompt && appendText) {
+    out = `${out}\n\n${appendText}`;
   }
   return out;
 }
@@ -1056,6 +1068,7 @@ function makeHistorySignature(item) {
       maxWaitMs: item.settings?.maxWaitMs || undefined,
       pollIntervalMs: item.settings?.pollIntervalMs || undefined,
       systemPrompt: item.settings?.systemPrompt || '',
+      appendPromptText: item.settings?.appendPromptText || '',
       prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
       appendSystemPrompt: item.settings?.appendSystemPrompt === true,
       theme: item.settings?.theme === 'light' ? 'light' : 'dark',

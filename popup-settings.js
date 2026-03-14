@@ -13,6 +13,7 @@ export async function loadSettingsIntoUI() {
       document.getElementById('stableMaxSec').value = msToSec(s.stableMaxMs ?? s.stableMs);
       document.getElementById('pollSec').value = msToSec(s.pollIntervalMs);
       document.getElementById('systemPrompt').value = s.systemPrompt || '';
+      document.getElementById('appendPromptText').value = s.appendPromptText || '';
       document.getElementById('prependSystemPrompt').checked = s.prependSystemPrompt !== false;
       document.getElementById('appendSystemPrompt').checked = s.appendSystemPrompt === true;
       document.getElementById('enableMaxWaitTimeout').checked = s.enableMaxWaitTimeout !== false;
@@ -59,6 +60,7 @@ export async function saveSettingsFromUI() {
       stableMaxMs: secToMs(stableMaxOrdered),
       pollIntervalMs: secToMs(pollSec),
       systemPrompt: document.getElementById('systemPrompt').value || '',
+      appendPromptText: document.getElementById('appendPromptText').value || '',
       prependSystemPrompt: document.getElementById('prependSystemPrompt').checked,
       appendSystemPrompt: document.getElementById('appendSystemPrompt').checked,
       enableMaxWaitTimeout: document.getElementById('enableMaxWaitTimeout').checked,
@@ -95,7 +97,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'systemPrompt', 'appendPromptText', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });
