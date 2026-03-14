@@ -118,11 +118,13 @@ const DEFAULT_SETTINGS = {
   retryDelayMs: 2000,
   enableMaxWaitTimeout: true,
   enableStopWord: false,
-  stopWord: 'Future section',
+  stopWord: 'end of feedback',
   stopWordCaseSensitive: false,
   openNewChatPerPrompt: false,
   openNewChatPerPromptUrl: '',
 };
+
+const SETTINGS_STORAGE_KEY = 'aiTaskSequencerSettings';
 
 const RECOVERY_CONFIG = {
   maxRecoveryAttempts: 3,
@@ -526,15 +528,34 @@ setInterval(healthCheck, RECOVERY_CONFIG.healthCheckIntervalMs);
 // ============ SETTINGS ============
 
 async function loadSettings() {
-  const { aiTaskSequencerSettings } = await chrome.storage.sync.get('aiTaskSequencerSettings');
-  const merged = validateSettings({ ...DEFAULT_SETTINGS, ...(aiTaskSequencerSettings || {}) });
+  let rawSettings = null;
+  try {
+    const localResult = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
+    rawSettings = localResult?.[SETTINGS_STORAGE_KEY] || null;
+    if (!rawSettings) {
+      // One-time fallback for older builds that stored settings in sync.
+      const syncResult = await chrome.storage.sync.get(SETTINGS_STORAGE_KEY);
+      rawSettings = syncResult?.[SETTINGS_STORAGE_KEY] || null;
+      if (rawSettings) {
+        await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: rawSettings });
+      }
+    }
+  } catch (e) {
+    console.warn('[LoadSettings] Failed to read settings storage, using defaults:', e?.message || e);
+  }
+  const merged = validateSettings({ ...DEFAULT_SETTINGS, ...(rawSettings || {}) });
   state.options = merged;
 }
 
 async function saveSettings(newSettings) {
   const merged = validateSettings({ ...state.options, ...newSettings });
   state.options = merged;
-  await chrome.storage.sync.set({ aiTaskSequencerSettings: merged });
+  try {
+    await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: merged });
+  } catch (e) {
+    console.error('[SaveSettings] Failed to persist settings:', e);
+    throw e;
+  }
   await broadcastSettingsUpdate();
   await ensureAutoConfirmContentScript();
 }
@@ -565,8 +586,8 @@ async function ensureAutoConfirmContentScript() {
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync' && changes.aiTaskSequencerSettings) {
-    const next = validateSettings({ ...state.options, ...(changes.aiTaskSequencerSettings.newValue || {}) });
+  if (area === 'local' && changes[SETTINGS_STORAGE_KEY]) {
+    const next = validateSettings({ ...state.options, ...(changes[SETTINGS_STORAGE_KEY].newValue || {}) });
     state.options = next;
   }
 });
@@ -1018,8 +1039,15 @@ async function dispatchParallelWorkerPrompt(workerId) {
   if (worker.nextPromptIndex >= worker.prompts.length) return false;
 
   const promptIndex = worker.nextPromptIndex;
-  const promptText = buildMessageText(worker.prompts[promptIndex]);
+  const basePromptText = worker.prompts[promptIndex];
+  const promptText = buildMessageText(basePromptText);
   const promptId = buildParallelPromptId(worker.index, promptIndex);
+  console.log('[Parallel] Built prompt payload', {
+    workerId,
+    promptIndex,
+    baseLength: typeof basePromptText === 'string' ? basePromptText.length : 0,
+    finalLength: typeof promptText === 'string' ? promptText.length : 0,
+  });
   worker.inFlightPromptId = promptId;
   worker.status = 'running';
   state.parallel.workersByPromptId[promptId] = { workerId, promptIndex };
@@ -1263,14 +1291,24 @@ function buildMessageText(text) {
 
   const prependText = typeof systemPrompt === 'string' ? systemPrompt.trim() : '';
   const explicitAppendText = typeof appendPromptText === 'string' ? appendPromptText.trim() : '';
-  const appendText = explicitAppendText || prependText;
+  const appendText = explicitAppendText;
+  const shouldAppend = appendText.length > 0;
+
+  console.log('[BuildMessageText] Applying prompt wrappers', {
+    prependEnabled: prependSystemPrompt === true,
+    appendEnabled: appendSystemPrompt === true,
+    appendEffective: shouldAppend,
+    prependLength: prependText.length,
+    appendLength: appendText.length,
+    baseLength: typeof text === 'string' ? text.length : 0,
+  });
 
   if (!prependText && !appendText) return text;
   let out = text;
   if (prependSystemPrompt && prependText) {
     out = `${prependText}\n\n${out}`;
   }
-  if (appendSystemPrompt && appendText) {
+  if (shouldAppend) {
     out = `${out}\n\n${appendText}`;
   }
   return out;
@@ -1316,7 +1354,13 @@ async function sendNextPrompt() {
     return;
   }
 
-  const promptText = buildMessageText(state.prompts[state.currentIndex]);
+  const basePromptText = state.prompts[state.currentIndex];
+  const promptText = buildMessageText(basePromptText);
+  console.log('[SendNextPrompt] Built prompt payload', {
+    currentIndex: state.currentIndex,
+    baseLength: typeof basePromptText === 'string' ? basePromptText.length : 0,
+    finalLength: typeof promptText === 'string' ? promptText.length : 0,
+  });
   state.lastActivityTime = Date.now();
   state.promptStartTime = Date.now();
   state.processing = true;

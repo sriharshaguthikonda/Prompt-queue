@@ -170,9 +170,19 @@ async function startAutomation() {
     setStatus('Starting...');
     hideError(); // Clear any previous error
     // Get current settings and include them in START_AUTOMATION to avoid race conditions
-    await saveSettingsFromUI();
-    const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-    const currentSettings = settingsRes?.settings || {};
+    const uiSettings = await saveSettingsFromUI();
+    let currentSettings = { ...(uiSettings || {}) };
+    if (!uiSettings) {
+      const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      currentSettings = { ...(settingsRes?.settings || {}) };
+    }
+    const appendText = typeof currentSettings.appendPromptText === 'string'
+      ? currentSettings.appendPromptText.trim()
+      : '';
+    if (appendText && currentSettings.appendSystemPrompt !== true) {
+      currentSettings.appendSystemPrompt = true;
+      showToast('Append text found; auto-enabling append for this run.', 'info', 3000);
+    }
     const parallelTabCount = launchPlan.tabPromptGroups.length;
     if (currentSettings.parallelOneTabPerPrompt === true && launchPlan.hasTabMarkers) {
       showToast(`Detected ${parallelTabCount} tab group(s) using ${NEW_TAB_MARKER}`, 'info', 3000);
@@ -553,6 +563,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
+    refreshWrapperPromptTextareaHeights();
     await loadHistoryIntoUI(updatePromptCount);
     await loadStateIntoUI();
     await refreshStatus();
@@ -610,18 +621,22 @@ async function loadStateIntoUI() {
   }
 }
 
-function autoResizeTextarea(el, { active = false } = {}) {
+function autoResizeTextarea(el, {
+  active = false,
+  maxViewportRatio = 0.7,
+  minHeight = 120,
+  collapsedHeight = 80,
+  padding = 8,
+} = {}) {
   if (!el) return;
-  const maxHeight = Math.floor(window.innerHeight * 0.7);
-  const minHeight = 120;
-  const collapsed = 80;
+  const maxHeight = Math.floor(window.innerHeight * maxViewportRatio);
   el.classList.toggle('is-active', active);
   if (!active && document.activeElement !== el) {
-    el.style.height = `${collapsed}px`;
+    el.style.height = `${collapsedHeight}px`;
     return;
   }
   el.style.height = 'auto';
-  const nextHeight = Math.min(Math.max(minHeight, el.scrollHeight + 8), maxHeight);
+  const nextHeight = Math.min(Math.max(minHeight, el.scrollHeight + padding), maxHeight);
   el.style.height = `${nextHeight}px`;
 }
 
@@ -645,6 +660,45 @@ if (promptsTextarea) {
   autoResizeTextarea(promptsTextarea, { active: false });
   window.addEventListener('resize', handleActiveResize);
 }
+
+const wrapperPromptTextareas = ['systemPrompt', 'appendPromptText']
+  .map((id) => document.getElementById(id))
+  .filter(Boolean);
+
+function refreshWrapperPromptTextareaHeights() {
+  wrapperPromptTextareas.forEach((el) => {
+    autoResizeTextarea(el, {
+      active: document.activeElement === el,
+      maxViewportRatio: 0.45,
+      minHeight: 120,
+      collapsedHeight: 72,
+      padding: 6,
+    });
+  });
+}
+
+wrapperPromptTextareas.forEach((el) => {
+  const resizeActive = () => autoResizeTextarea(el, {
+    active: true,
+    maxViewportRatio: 0.45,
+    minHeight: 120,
+    collapsedHeight: 72,
+    padding: 6,
+  });
+  const resizeInactive = () => autoResizeTextarea(el, {
+    active: false,
+    maxViewportRatio: 0.45,
+    minHeight: 72,
+    collapsedHeight: 72,
+    padding: 6,
+  });
+  el.addEventListener('input', resizeActive);
+  el.addEventListener('focus', resizeActive);
+  el.addEventListener('blur', resizeInactive);
+});
+
+window.addEventListener('resize', refreshWrapperPromptTextareaHeights);
+refreshWrapperPromptTextareaHeights();
 
 if (separatorInput) {
   separatorInput.addEventListener('input', updatePromptCount);

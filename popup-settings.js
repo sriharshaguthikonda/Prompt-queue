@@ -50,6 +50,7 @@ export async function loadSettingsIntoUI() {
 }
 
 export async function saveSettingsFromUI() {
+  let settings = null;
   try {
     const maxWaitSec = Number(document.getElementById('maxWaitSec').value);
     const stableMinSec = Number(document.getElementById('stableMinSec').value);
@@ -57,7 +58,7 @@ export async function saveSettingsFromUI() {
     const stableMinOrdered = Math.min(stableMinSec, stableMaxSec || stableMinSec);
     const stableMaxOrdered = Math.max(stableMinSec || stableMaxSec, stableMaxSec || stableMinSec);
     const pollSec = Number(document.getElementById('pollSec').value);
-    const settings = {
+    settings = {
       maxWaitMs: secToMs(maxWaitSec),
       stableMinMs: secToMs(stableMinOrdered),
       stableMaxMs: secToMs(stableMaxOrdered),
@@ -82,8 +83,10 @@ export async function saveSettingsFromUI() {
       openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
     };
     await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
+    return settings;
   } catch (e) {
     console.error('[SaveSettings] Error:', e);
+    return settings;
   }
 }
 
