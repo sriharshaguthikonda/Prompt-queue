@@ -60,6 +60,7 @@ const state = {
     pollIntervalMs: undefined,
     systemPrompt: '',
     prependSystemPrompt: true,
+    appendSystemPrompt: false,
     theme: 'dark',
     autoConfirmDialogs: false,
     enableWatchedElementGate: false,
@@ -85,6 +86,7 @@ const DEFAULT_SETTINGS = {
   pollIntervalMs: 1500,
   systemPrompt: '',
   prependSystemPrompt: true,
+  appendSystemPrompt: false,
   theme: 'dark',
   autoConfirmDialogs: false,
   enableWatchedElementGate: false,
@@ -132,6 +134,7 @@ function validateSettings(input = {}) {
     pollIntervalMs: coerceNumber(input.pollIntervalMs, 50, 5000, DEFAULT_SETTINGS.pollIntervalMs),
     systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
     prependSystemPrompt: input.prependSystemPrompt !== false,
+    appendSystemPrompt: input.appendSystemPrompt === true,
     theme: input.theme === 'light' ? 'light' : 'dark',
     autoConfirmDialogs: input.autoConfirmDialogs === true,
     enableWatchedElementGate: input.enableWatchedElementGate === true,
@@ -666,11 +669,17 @@ async function startAutomation({ prompts, tabId, options }) {
 }
 
 function buildMessageText(text) {
-  const { systemPrompt, prependSystemPrompt } = state.options;
-  if (systemPrompt && prependSystemPrompt) {
-    return `${systemPrompt}\n\n${text}`;
+  const { systemPrompt, prependSystemPrompt, appendSystemPrompt } = state.options;
+  if (!systemPrompt) return text;
+
+  let out = text;
+  if (prependSystemPrompt) {
+    out = `${systemPrompt}\n\n${out}`;
   }
-  return text;
+  if (appendSystemPrompt) {
+    out = `${out}\n\n${systemPrompt}`;
+  }
+  return out;
 }
 
 function isPaused() {
@@ -769,6 +778,7 @@ function makeHistorySignature(item) {
       pollIntervalMs: item.settings?.pollIntervalMs || undefined,
       systemPrompt: item.settings?.systemPrompt || '',
       prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
+      appendSystemPrompt: item.settings?.appendSystemPrompt === true,
       theme: item.settings?.theme === 'light' ? 'light' : 'dark',
       autoConfirmDialogs: item.settings?.autoConfirmDialogs === true,
       enableWatchedElementGate: item.settings?.enableWatchedElementGate === true,
