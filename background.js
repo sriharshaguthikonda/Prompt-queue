@@ -212,6 +212,7 @@ function createEmptyParallelState() {
     completed: 0,
     failed: 0,
     active: 0,
+    workersById: {},
     workersByPromptId: {},
   };
 }
@@ -257,9 +258,17 @@ async function loadState() {
     state.processing = state.processing || aiTaskSequencerState.processing || false;
     state.currentPromptId = aiTaskSequencerState.currentPromptId || state.currentPromptId || null;
     state.promptStartTime = aiTaskSequencerState.promptStartTime || state.promptStartTime || (state.processing ? state.lastActivityTime : 0);
-    state.parallel = state.mode === 'parallel'
-      ? (aiTaskSequencerState.parallel || createEmptyParallelState())
-      : null;
+    if (state.mode === 'parallel') {
+      const restoredParallel = aiTaskSequencerState.parallel || {};
+      state.parallel = {
+        ...createEmptyParallelState(),
+        ...restoredParallel,
+        workersById: restoredParallel.workersById || {},
+        workersByPromptId: restoredParallel.workersByPromptId || {},
+      };
+    } else {
+      state.parallel = null;
+    }
     console.log('[LoadState] State loaded from storage', {
       oldState,
       newState: { 
@@ -663,8 +672,12 @@ function randomIntInclusive(min, max) {
   return Math.floor(Math.random() * (hi - lo + 1)) + lo;
 }
 
-function buildParallelPromptId(index) {
-  return `parallel_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
+function buildParallelPromptId(workerIndex, promptIndex) {
+  return `parallel_${Date.now()}_${workerIndex}_${promptIndex}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildParallelWorkerId(index) {
+  return `worker_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
 function resolveParallelLaunchUrl(baseTabUrl, options) {
@@ -678,6 +691,30 @@ function resolveParallelLaunchUrl(baseTabUrl, options) {
 
 function shouldUseParallelMode(options) {
   return options?.parallelOneTabPerPrompt === true;
+}
+
+function sanitizeParallelPromptGroups(rawGroups) {
+  if (!Array.isArray(rawGroups)) return [];
+  const sanitized = [];
+  for (const group of rawGroups) {
+    if (!Array.isArray(group)) continue;
+    const normalizedGroup = group
+      .filter((prompt) => typeof prompt === 'string')
+      .map((prompt) => prompt.trim())
+      .filter((prompt) => prompt.length > 0);
+    if (normalizedGroup.length > 0) {
+      sanitized.push(normalizedGroup);
+    }
+  }
+  return sanitized;
+}
+
+function resolveParallelPromptGroups(prompts, rawGroups) {
+  const explicitGroups = sanitizeParallelPromptGroups(rawGroups);
+  if (explicitGroups.length > 0) {
+    return explicitGroups;
+  }
+  return prompts.map((prompt) => [prompt]);
 }
 
 function shouldContinueParallelLaunch(token) {
@@ -694,6 +731,21 @@ async function waitWhileParallelPaused(token) {
   while (shouldContinueParallelLaunch(token) && state.paused) {
     await new Promise((resolve) => setTimeout(resolve, PARALLEL_CONFIG.launchPausePollMs));
   }
+}
+
+async function emitParallelProgress() {
+  try {
+    chrome.runtime.sendMessage({ type: 'AUTOMATION_PROGRESS', status: getStatus() });
+  } catch (_) {}
+}
+
+function getParallelDispatchOptions() {
+  return {
+    ...state.options,
+    openNewChatPerPrompt: false,
+    refreshTabBeforeEachPrompt: false,
+    parallelOneTabPerPrompt: false,
+  };
 }
 
 async function maybeFinalizeParallelRun(reason) {
@@ -713,36 +765,95 @@ async function maybeFinalizeParallelRun(reason) {
   return true;
 }
 
-async function markParallelWorkerFailed(promptId, errorMessage) {
+async function finalizeParallelWorker(workerId, { failed, errorMessage } = {}) {
   if (state.mode !== 'parallel' || !state.parallel) return;
-  const worker = state.parallel.workersByPromptId?.[promptId];
+  const worker = state.parallel.workersById?.[workerId];
   if (!worker || worker.status === 'completed' || worker.status === 'failed') return;
-  worker.status = 'failed';
-  worker.error = errorMessage || 'Unknown parallel worker failure';
-  state.parallel.failed += 1;
-  if (state.parallel.active > 0 && (worker.wasInFlight === true)) {
-    state.parallel.active = Math.max(0, state.parallel.active - 1);
+
+  if (worker.inFlightPromptId) {
+    delete state.parallel.workersByPromptId[worker.inFlightPromptId];
+    worker.inFlightPromptId = null;
   }
+
+  worker.status = failed ? 'failed' : 'completed';
+  worker.error = failed ? (errorMessage || 'Unknown parallel worker failure') : null;
+
+  if (worker.isActive && state.parallel.active > 0) {
+    state.parallel.active = Math.max(0, state.parallel.active - 1);
+    worker.isActive = false;
+  }
+
+  if (failed) {
+    state.parallel.failed += 1;
+  } else {
+    state.parallel.completed += 1;
+  }
+
   state.currentIndex = state.parallel.completed;
   state.lastActivityTime = Date.now();
+  state.recoveryAttempts = 0;
   await saveState();
-  try {
-    chrome.runtime.sendMessage({ type: 'AUTOMATION_PROGRESS', status: getStatus() });
-  } catch (_) {}
+  await emitParallelProgress();
+  await maybeFinalizeParallelRun(failed ? 'completedWithErrors' : undefined);
 }
 
-async function runParallelFanoutLaunch({ prompts, launchUrl }) {
+async function markParallelWorkerFailed(workerId, errorMessage) {
+  await finalizeParallelWorker(workerId, { failed: true, errorMessage });
+}
+
+async function dispatchParallelWorkerPrompt(workerId) {
+  if (state.mode !== 'parallel' || !state.parallel || !state.running) return false;
+  const worker = state.parallel.workersById?.[workerId];
+  if (!worker || worker.status === 'completed' || worker.status === 'failed') return false;
+  if (!worker.tabId || worker.inFlightPromptId) return false;
+  if (worker.nextPromptIndex >= worker.prompts.length) return false;
+
+  const promptIndex = worker.nextPromptIndex;
+  const promptText = buildMessageText(worker.prompts[promptIndex]);
+  const promptId = buildParallelPromptId(worker.index, promptIndex);
+  worker.inFlightPromptId = promptId;
+  worker.status = 'running';
+  state.parallel.workersByPromptId[promptId] = { workerId, promptIndex };
+  state.lastActivityTime = Date.now();
+  await saveState();
+
+  try {
+    await sendToContent(worker.tabId, {
+      type: 'SEND_PROMPT',
+      text: promptText,
+      index: promptIndex,
+      total: worker.prompts.length,
+      options: getParallelDispatchOptions(),
+      promptId,
+    });
+    worker.nextPromptIndex = promptIndex + 1;
+    state.lastActivityTime = Date.now();
+    await saveState();
+    return true;
+  } catch (err) {
+    delete state.parallel.workersByPromptId[promptId];
+    worker.inFlightPromptId = null;
+    console.error('[Parallel] Failed to dispatch prompt to worker tab', {
+      workerId,
+      tabId: worker.tabId,
+      promptIndex,
+      error: err?.message || String(err),
+    });
+    await markParallelWorkerFailed(workerId, String(err?.message || err));
+    return false;
+  }
+}
+
+async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
   const launchToken = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   state.parallel = createEmptyParallelState();
   state.parallel.launchInProgress = true;
   state.parallel.launchToken = launchToken;
   state.lastActivityTime = Date.now();
   await saveState();
-  try {
-    chrome.runtime.sendMessage({ type: 'AUTOMATION_PROGRESS', status: getStatus() });
-  } catch (_) {}
+  await emitParallelProgress();
 
-  for (let index = 0; index < prompts.length; index += 1) {
+  for (let index = 0; index < promptGroups.length; index += 1) {
     if (!shouldContinueParallelLaunch(launchToken)) break;
     await waitWhileParallelPaused(launchToken);
     if (!shouldContinueParallelLaunch(launchToken)) break;
@@ -762,16 +873,19 @@ async function runParallelFanoutLaunch({ prompts, launchUrl }) {
       if (!shouldContinueParallelLaunch(launchToken)) break;
     }
 
-    const promptId = buildParallelPromptId(index);
+    const workerId = buildParallelWorkerId(index);
     const worker = {
-      promptId,
+      workerId,
       index,
       tabId: null,
+      prompts: promptGroups[index],
+      nextPromptIndex: 0,
+      inFlightPromptId: null,
       status: 'launching',
       error: null,
-      wasInFlight: false,
+      isActive: false,
     };
-    state.parallel.workersByPromptId[promptId] = worker;
+    state.parallel.workersById[workerId] = worker;
     state.parallel.launchCursor = index + 1;
     state.lastActivityTime = Date.now();
     await saveState();
@@ -800,41 +914,22 @@ async function runParallelFanoutLaunch({ prompts, launchUrl }) {
         throw new Error('Could not establish connection to parallel content script');
       }
 
-      const promptText = buildMessageText(prompts[index]);
-      worker.status = 'in_flight';
-      worker.wasInFlight = true;
+      worker.status = 'running';
+      worker.isActive = true;
       state.parallel.active += 1;
       state.lastActivityTime = Date.now();
       await saveState();
-
-      const parallelOptions = {
-        ...state.options,
-        openNewChatPerPrompt: false,
-        refreshTabBeforeEachPrompt: false,
-        parallelOneTabPerPrompt: false,
-      };
-      await sendToContent(createdTabId, {
-        type: 'SEND_PROMPT',
-        text: promptText,
-        index,
-        total: prompts.length,
-        options: parallelOptions,
-        promptId,
-      });
-      state.lastActivityTime = Date.now();
-      await saveState();
+      await dispatchParallelWorkerPrompt(workerId);
     } catch (err) {
       console.error('[Parallel] Worker launch/send failed', {
+        workerId,
         index,
         tabId: createdTabId,
-        promptId,
         error: err?.message || String(err),
       });
-      await markParallelWorkerFailed(promptId, String(err?.message || err));
+      await markParallelWorkerFailed(workerId, String(err?.message || err));
     } finally {
-      try {
-        chrome.runtime.sendMessage({ type: 'AUTOMATION_PROGRESS', status: getStatus() });
-      } catch (_) {}
+      await emitParallelProgress();
     }
   }
 
@@ -843,9 +938,7 @@ async function runParallelFanoutLaunch({ prompts, launchUrl }) {
     state.parallel.launchDone = true;
     state.lastActivityTime = Date.now();
     await saveState();
-    try {
-      chrome.runtime.sendMessage({ type: 'AUTOMATION_PROGRESS', status: getStatus() });
-    } catch (_) {}
+    await emitParallelProgress();
   }
 
   await maybeFinalizeParallelRun();
@@ -889,7 +982,7 @@ async function sendToContent(tabId, message) {
 
 // ============ AUTOMATION LOGIC ============
 
-async function startAutomation({ prompts, tabId, options }) {
+async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
   await loadSettings();
   if (options) {
     await saveSettings(options);
@@ -900,11 +993,14 @@ async function startAutomation({ prompts, tabId, options }) {
   }
 
   const useParallel = shouldUseParallelMode(state.options);
-  if (useParallel && prompts.length > PARALLEL_CONFIG.maxTabs) {
+  const parallelPromptGroups = useParallel ? resolveParallelPromptGroups(prompts, tabPromptGroups) : [];
+  if (useParallel && parallelPromptGroups.length > PARALLEL_CONFIG.maxTabs) {
     throw new Error(`Parallel mode supports up to ${PARALLEL_CONFIG.maxTabs} prompts at a time.`);
   }
 
-  state.prompts = prompts;
+  state.prompts = useParallel
+    ? parallelPromptGroups.map((group, idx) => `Tab ${idx + 1}: ${group.length} prompt${group.length === 1 ? '' : 's'}`)
+    : prompts;
   state.currentIndex = 0;
   state.mode = useParallel ? 'parallel' : 'sequential';
   state.running = true;
@@ -931,13 +1027,13 @@ async function startAutomation({ prompts, tabId, options }) {
       throw new Error('Parallel tab URL is invalid or unsupported.');
     }
     console.log('[Parallel] Starting fan-out run', {
-      prompts: prompts.length,
+      tabs: parallelPromptGroups.length,
       maxTabs: PARALLEL_CONFIG.maxTabs,
       launchUrl,
       jitterMinMs: PARALLEL_CONFIG.launchJitterMinMs,
       jitterMaxMs: PARALLEL_CONFIG.launchJitterMaxMs,
     });
-    await runParallelFanoutLaunch({ prompts, launchUrl });
+    await runParallelFanoutLaunch({ promptGroups: parallelPromptGroups, launchUrl });
     return;
   }
 
@@ -1123,7 +1219,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             running: state.running,
             processing: state.processing,
             currentIndex: state.currentIndex,
-            promptsInRequest: message.prompts?.length
+            promptsInRequest: message.prompts?.length,
+            tabGroupsInRequest: message.tabPromptGroups?.length,
           });
           // Prevent starting a new automation while one is already running
           if (state.running) {
@@ -1133,6 +1230,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           
           const prompts = Array.isArray(message.prompts) ? message.prompts.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
+          const tabPromptGroups = Array.isArray(message.tabPromptGroups) ? message.tabPromptGroups : null;
           const tabId = message.tabId;
           const options = message.options || {};
           const effectiveOptions = validateSettings({ ...state.options, ...options });
@@ -1147,7 +1245,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
             const useParallel = shouldUseParallelMode(effectiveOptions);
-            if (useParallel && prompts.length > PARALLEL_CONFIG.maxTabs) {
+            const parallelPromptGroups = useParallel ? resolveParallelPromptGroups(prompts, tabPromptGroups) : [];
+            if (useParallel && parallelPromptGroups.length > PARALLEL_CONFIG.maxTabs) {
               sendResponse({ ok: false, error: `Parallel mode supports up to ${PARALLEL_CONFIG.maxTabs} prompts at a time.` });
               return;
             }
@@ -1164,7 +1263,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           sendResponse({ ok: true });
           try {
-            await startAutomation({ prompts, tabId, options: effectiveOptions });
+            await startAutomation({ prompts, tabId, options: effectiveOptions, tabPromptGroups });
           } catch (e) {
             console.error('[StartAutomation] Error:', e);
             state.running = false;
@@ -1237,38 +1336,58 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
             const promptId = message.promptId ? String(message.promptId) : '';
-            const worker = promptId ? state.parallel.workersByPromptId?.[promptId] : null;
-            if (!worker) {
+            const promptRef = promptId ? state.parallel.workersByPromptId?.[promptId] : null;
+            if (!promptRef) {
               console.log('[ResponseComplete][Parallel] Unknown promptId, ignoring', { promptId });
               return;
             }
+            const worker = state.parallel.workersById?.[promptRef.workerId];
+            if (!worker) {
+              console.log('[ResponseComplete][Parallel] Missing worker for promptId, ignoring', { promptId, promptRef });
+              delete state.parallel.workersByPromptId[promptId];
+              await saveState();
+              return;
+            }
             if (worker.status === 'completed' || worker.status === 'failed') {
-              console.log('[ResponseComplete][Parallel] Worker already finalized, ignoring', { promptId, status: worker.status });
+              console.log('[ResponseComplete][Parallel] Worker already finalized, ignoring', {
+                promptId,
+                workerId: worker.workerId,
+                status: worker.status,
+              });
+              delete state.parallel.workersByPromptId[promptId];
+              await saveState();
+              return;
+            }
+            if (worker.inFlightPromptId && worker.inFlightPromptId !== promptId) {
+              console.log('[ResponseComplete][Parallel] Stale worker prompt response, ignoring', {
+                promptId,
+                inFlightPromptId: worker.inFlightPromptId,
+                workerId: worker.workerId,
+              });
               return;
             }
 
-            const hasError = !!message.error || message.stoppedByStopWord === true;
-            worker.status = hasError ? 'failed' : 'completed';
-            worker.error = hasError
-              ? (message.error || (message.stoppedByStopWord ? 'Stopped by stop phrase' : 'Unknown error'))
-              : null;
-            if (worker.wasInFlight) {
-              state.parallel.active = Math.max(0, state.parallel.active - 1);
-            }
-            if (hasError) {
-              state.parallel.failed += 1;
-            } else {
-              state.parallel.completed += 1;
-            }
-            state.currentIndex = state.parallel.completed;
-            state.lastActivityTime = Date.now();
-            state.recoveryAttempts = 0;
+            worker.inFlightPromptId = null;
+            delete state.parallel.workersByPromptId[promptId];
 
-            await saveState();
-            try {
-              chrome.runtime.sendMessage({ type: "AUTOMATION_PROGRESS", status: getStatus() });
-            } catch (_) {}
-            await maybeFinalizeParallelRun(hasError ? 'completedWithErrors' : undefined);
+            const hasError = !!message.error || message.stoppedByStopWord === true;
+            if (hasError) {
+              await finalizeParallelWorker(worker.workerId, {
+                failed: true,
+                errorMessage: message.error || (message.stoppedByStopWord ? 'Stopped by stop phrase' : 'Unknown error'),
+              });
+              return;
+            }
+
+            if (worker.nextPromptIndex < worker.prompts.length) {
+              state.lastActivityTime = Date.now();
+              await saveState();
+              await emitParallelProgress();
+              await dispatchParallelWorkerPrompt(worker.workerId);
+              return;
+            }
+
+            await finalizeParallelWorker(worker.workerId, { failed: false });
             return;
           }
 

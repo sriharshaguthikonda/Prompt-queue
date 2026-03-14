@@ -1128,9 +1128,26 @@
             total: message.total,
             timestamp: Date.now()
           });
-          await PromptQueue(message.text, message.options, promptId);
-          console.log('[MessageListener] PromptQueue completed', { promptId, timestamp: Date.now() });
-          sendResponse({ ok: true });
+          // Acknowledge immediately so background can fan-out without waiting for completion.
+          sendResponse({ ok: true, accepted: true, promptId });
+          Promise.resolve()
+            .then(async () => {
+              await PromptQueue(message.text, message.options, promptId);
+              console.log('[MessageListener] PromptQueue completed', { promptId, timestamp: Date.now() });
+            })
+            .catch(async (queueErr) => {
+              console.error('[MessageListener] PromptQueue background execution failed', {
+                promptId,
+                error: queueErr?.message || String(queueErr),
+              });
+              try {
+                await chrome.runtime.sendMessage({
+                  type: 'RESPONSE_COMPLETE',
+                  promptId,
+                  error: String(queueErr?.message || queueErr),
+                });
+              } catch (_) {}
+            });
           return;
         }
         

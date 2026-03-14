@@ -57,15 +57,19 @@ Use this mode when you want to launch multiple prompts concurrently.
 ### Setup
 1. Open a supported site in the active tab.
 2. In extension options, enable **Parallel: open one tab per prompt (max 10)**.
-3. Optional: set **Custom new chat URL**.
+3. Optional: put `(new tab)` on its own line in the prompt box to split prompt sets by tab.
+4. Optional: set **Custom new chat URL**.
    - If provided, all spawned tabs use this URL.
    - If empty, the extension reuses the active tab URL.
-4. Start automation with up to 10 prompts.
+5. Start automation with up to 10 tabs.
 
 ### Expected behavior
-- One inactive background tab is opened per prompt.
+- One inactive background tab is opened per prompt group:
+  - no `(new tab)` tags: one tab per prompt
+  - with `(new tab)` tags: one tab per group between tags
 - Tab launches are staggered with a random jitter between 2 and 5 seconds.
-- Each tab receives exactly one prompt.
+- Tabs are launched in true fan-out mode (no waiting for earlier tab completion before launching later tabs).
+- Each tab processes its own prompt group sequentially.
 - Tabs remain open after completion.
 
 ### Cap and precedence

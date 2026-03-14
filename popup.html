@@ -33,6 +33,7 @@ Prompts (one per line)"></textarea>
               <div class="prompt-counter">0 prompts loaded</div>
               <button id="insertSeparatorBtn" class="preset-btn" type="button" title="Insert a multi-line separator">↵ Insert separator</button>
             </div>
+            <div class="desc">Tip: put <code>(new tab)</code> on its own line to split prompt sets per tab in parallel mode.</div>
           </div>
           <div class="prompts-right">
             <div class="inline">
@@ -210,7 +211,7 @@ Prompts (one per line)"></textarea>
         <input id="parallelOneTabPerPrompt" type="checkbox" />
         <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
       </div>
-      <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt with 2-5s jitter between launches.</div>
+      <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt or per <code>(new tab)</code> set with 2-5s jitter.</div>
       <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
         <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
       </div>
@@ -218,8 +219,9 @@ Prompts (one per line)"></textarea>
         <div class="parallel-walkthrough-title">Parallel mode quick guide</div>
         <ol>
           <li>Turn this on and keep prompts at 10 or fewer.</li>
+          <li>Optional: use <code>(new tab)</code> lines to split prompts into tab sets.</li>
           <li>Optional: set a custom URL below. If empty, active tab URL is reused.</li>
-          <li>Start automation. Each prompt gets its own background tab with 2-5s launch jitter.</li>
+          <li>Start automation. Each tab set gets one background tab with 2-5s launch jitter.</li>
           <li>Pause/Resume affects only new launches; already launched tabs keep running.</li>
           <li>Stop cancels pending launches only; launched tabs are left open.</li>
         </ol>

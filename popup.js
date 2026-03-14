@@ -6,11 +6,66 @@ import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, sav
 applyConsolePatch();
 
 const separatorInput = document.getElementById('separatorInput');
+const NEW_TAB_MARKER = '(new tab)';
 const resolveSeparator = (raw) => {
   if (!raw || typeof raw !== 'string') return PROMPT_SEPARATOR;
   // Support literal "\n" sequences entered by the user
   return raw.replace(/\\n/g, '\n');
 };
+
+function isNewTabMarker(value) {
+  return typeof value === 'string' && value.trim().toLowerCase() === NEW_TAB_MARKER;
+}
+
+function buildParallelPromptGroupsFromTaggedPrompts(promptsWithMarkers) {
+  const groups = [];
+  let currentGroup = [];
+  for (const prompt of promptsWithMarkers) {
+    if (isNewTabMarker(prompt)) {
+      if (currentGroup.length > 0) {
+        groups.push(currentGroup);
+      }
+      currentGroup = [];
+      continue;
+    }
+    currentGroup.push(prompt);
+  }
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
+  return groups;
+}
+
+function buildPromptLaunchPlan(rawText, separator) {
+  const parsedPrompts = parsePrompts(rawText, separator);
+  const promptCandidates = parsedPrompts.filter((prompt) => !isNewTabMarker(prompt));
+  const duplicateAdjusted = applyTypoVariantsToExactDuplicates(promptCandidates);
+
+  const promptsWithMarkers = [];
+  let adjustedIndex = 0;
+  for (const prompt of parsedPrompts) {
+    if (isNewTabMarker(prompt)) {
+      promptsWithMarkers.push(NEW_TAB_MARKER);
+      continue;
+    }
+    promptsWithMarkers.push(duplicateAdjusted.prompts[adjustedIndex] || prompt);
+    adjustedIndex += 1;
+  }
+
+  const prompts = promptsWithMarkers.filter((prompt) => !isNewTabMarker(prompt));
+  const hasTabMarkers = promptsWithMarkers.some((prompt) => isNewTabMarker(prompt));
+  const tabPromptGroups = hasTabMarkers
+    ? buildParallelPromptGroupsFromTaggedPrompts(promptsWithMarkers)
+    : prompts.map((prompt) => [prompt]);
+
+  return {
+    prompts,
+    promptsWithMarkers,
+    tabPromptGroups,
+    hasTabMarkers,
+    duplicateChanged: duplicateAdjusted.changed,
+  };
+}
 
 async function getActiveTabId() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -151,15 +206,14 @@ async function startAutomation() {
     const textarea = document.getElementById('prompts');
     const separatorInput = document.getElementById('separatorInput');
     const separator = resolveSeparator(separatorInput?.value);
-    const parsedPrompts = parsePrompts(textarea.value, separator);
-    const duplicateAdjusted = applyTypoVariantsToExactDuplicates(parsedPrompts);
-    const prompts = duplicateAdjusted.prompts;
+    const launchPlan = buildPromptLaunchPlan(textarea.value, separator);
+    const prompts = launchPlan.prompts;
     if (prompts.length === 0) {
       setStatus('Please enter at least one prompt.');
       return;
     }
-    if (duplicateAdjusted.changed > 0) {
-      showToast(`Adjusted ${duplicateAdjusted.changed} duplicate prompt(s) with typo-like variations`, 'info', 4000);
+    if (launchPlan.duplicateChanged > 0) {
+      showToast(`Adjusted ${launchPlan.duplicateChanged} duplicate prompt(s) with typo-like variations`, 'info', 4000);
     }
     const tabId = await getActiveTabId();
     if (!tabId) {
@@ -172,15 +226,28 @@ async function startAutomation() {
     await saveSettingsFromUI();
     const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
     const currentSettings = settingsRes?.settings || {};
-    const res = await chrome.runtime.sendMessage({ type: 'START_AUTOMATION', prompts, tabId, options: currentSettings });
+    const parallelTabCount = launchPlan.tabPromptGroups.length;
+    if (currentSettings.parallelOneTabPerPrompt === true && launchPlan.hasTabMarkers) {
+      showToast(`Detected ${parallelTabCount} tab group(s) using ${NEW_TAB_MARKER}`, 'info', 3000);
+    }
+    const res = await chrome.runtime.sendMessage({
+      type: 'START_AUTOMATION',
+      prompts,
+      tabPromptGroups: launchPlan.tabPromptGroups,
+      tabId,
+      options: currentSettings,
+    });
     if (res?.ok) {
       const initialStatus = currentSettings.parallelOneTabPerPrompt === true
-        ? { mode: 'parallel', running: true, paused: false, total: prompts.length, parallelLaunched: 0, parallelCompleted: 0, parallelFailed: 0, parallelActive: 0 }
+        ? { mode: 'parallel', running: true, paused: false, total: parallelTabCount, parallelLaunched: 0, parallelCompleted: 0, parallelFailed: 0, parallelActive: 0 }
         : { mode: 'sequential', running: true, paused: false, currentIndex: 0, total: prompts.length };
       setStatus(getRunningStatusText(initialStatus), 'running');
-      setProgress(getProgressPosition(initialStatus), prompts.length);
+      setProgress(getProgressPosition(initialStatus), initialStatus.total);
       updateControlButtons({ running: true, paused: false });
-      await chrome.runtime.sendMessage({ type: 'SAVE_PROMPT_HISTORY', item: { prompts, settings: currentSettings } });
+      await chrome.runtime.sendMessage({
+        type: 'SAVE_PROMPT_HISTORY',
+        item: { prompts: launchPlan.promptsWithMarkers, settings: currentSettings },
+      });
     } else {
       setStatus(`Failed to start: ${res?.error || 'Unknown error'}`, 'error');
       showToast(res?.error || 'Failed to start', 'error');
@@ -248,18 +315,17 @@ if (saveHistoryBtn) {
       const textarea = document.getElementById('prompts');
       const separatorInput = document.getElementById('separatorInput');
       const separator = resolveSeparator(separatorInput?.value);
-      const parsedPrompts = parsePrompts(textarea.value, separator);
-      const duplicateAdjusted = applyTypoVariantsToExactDuplicates(parsedPrompts);
-      const prompts = duplicateAdjusted.prompts;
+      const launchPlan = buildPromptLaunchPlan(textarea.value, separator);
+      const prompts = launchPlan.prompts;
       if (prompts.length === 0) {
         showToast('No prompts to save', 'error');
         return;
       }
-      if (duplicateAdjusted.changed > 0) {
-        showToast(`Adjusted ${duplicateAdjusted.changed} duplicate prompt(s) before save`, 'info', 3500);
+      if (launchPlan.duplicateChanged > 0) {
+        showToast(`Adjusted ${launchPlan.duplicateChanged} duplicate prompt(s) before save`, 'info', 3500);
       }
       const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      await saveHistoryItem(prompts, settings?.settings);
+      await saveHistoryItem(launchPlan.promptsWithMarkers, settings?.settings);
       // Immediately refresh the history list
       await loadHistoryIntoUI(updatePromptCount);
       showToast('✓ Saved to history', 'success');
@@ -571,10 +637,15 @@ const promptsTextarea = document.getElementById('prompts');
 const updatePromptCount = () => {
   if (!promptsTextarea) return;
   const separator = resolveSeparator(separatorInput?.value);
-  const prompts = parsePrompts(promptsTextarea.value, separator);
+  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator);
+  const prompts = launchPlan.prompts;
+  const tabGroups = launchPlan.tabPromptGroups.length;
   const counter = document.querySelector('.prompt-counter');
   if (counter) {
-    counter.textContent = `${prompts.length} prompt${prompts.length !== 1 ? 's' : ''} loaded`;
+    const base = `${prompts.length} prompt${prompts.length !== 1 ? 's' : ''} loaded`;
+    counter.textContent = launchPlan.hasTabMarkers
+      ? `${base} · ${tabGroups} tab set${tabGroups !== 1 ? 's' : ''}`
+      : base;
   }
 };
 
