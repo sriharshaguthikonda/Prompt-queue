@@ -22,6 +22,16 @@
   });
 })();
 
+importScripts('background-parallel-utils.js');
+const {
+  PARALLEL_CONFIG,
+  buildParallelPromptId,
+  buildParallelWorkerId,
+  resolveParallelLaunchUrl: resolveParallelLaunchUrlWithHelpers,
+  shouldUseParallelMode,
+  resolveParallelPromptGroups,
+} = self.BackgroundParallelUtils;
+
 // Open side panel when extension icon is clicked
 const openSidePanels = new Set();
 
@@ -104,11 +114,6 @@ const DEFAULT_SETTINGS = {
   stopWordCaseSensitive: false,
   openNewChatPerPrompt: false,
   openNewChatPerPromptUrl: '',
-};
-
-const PARALLEL_CONFIG = {
-  maxTabs: 10,
-  launchPausePollMs: 250,
 };
 
 const RECOVERY_CONFIG = {
@@ -666,49 +671,11 @@ async function refreshTabInBackgroundBeforeSend(tabId) {
   });
 }
 
-function buildParallelPromptId(workerIndex, promptIndex) {
-  return `parallel_${Date.now()}_${workerIndex}_${promptIndex}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function buildParallelWorkerId(index) {
-  return `worker_${Date.now()}_${index}_${Math.random().toString(36).slice(2, 8)}`;
-}
-
 function resolveParallelLaunchUrl(baseTabUrl, options) {
-  const customUrl = sanitizeUrlOrEmpty(options?.openNewChatPerPromptUrl);
-  const targetUrl = customUrl || baseTabUrl || '';
-  if (!isSupportedUrl(targetUrl)) {
-    return null;
-  }
-  return targetUrl;
-}
-
-function shouldUseParallelMode(options) {
-  return options?.parallelOneTabPerPrompt === true;
-}
-
-function sanitizeParallelPromptGroups(rawGroups) {
-  if (!Array.isArray(rawGroups)) return [];
-  const sanitized = [];
-  for (const group of rawGroups) {
-    if (!Array.isArray(group)) continue;
-    const normalizedGroup = group
-      .filter((prompt) => typeof prompt === 'string')
-      .map((prompt) => prompt.trim())
-      .filter((prompt) => prompt.length > 0);
-    if (normalizedGroup.length > 0) {
-      sanitized.push(normalizedGroup);
-    }
-  }
-  return sanitized;
-}
-
-function resolveParallelPromptGroups(prompts, rawGroups) {
-  const explicitGroups = sanitizeParallelPromptGroups(rawGroups);
-  if (explicitGroups.length > 0) {
-    return explicitGroups;
-  }
-  return prompts.map((prompt) => [prompt]);
+  return resolveParallelLaunchUrlWithHelpers(baseTabUrl, options, {
+    sanitizeUrlOrEmpty,
+    isSupportedUrl,
+  });
 }
 
 function shouldContinueParallelLaunch(token) {
