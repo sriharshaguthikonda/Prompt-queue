@@ -41,7 +41,7 @@ Prompts (one per line)"></textarea>
               <div class="prompt-counter">0 prompts loaded</div>
               <button id="insertSeparatorBtn" class="preset-btn" type="button" title="Insert a multi-line separator">↵ Insert separator</button>
             </div>
-            <div class="desc">Tip: put <code>(new tab)</code> on its own line to split prompt sets per tab in parallel mode.</div>
+            <div class="desc compact-note">Use <code>(new tab)</code> on its own line to split prompt sets per tab.</div>
           </div>
           <div class="prompts-right">
             <div class="inline">
@@ -70,31 +70,28 @@ Prompts (one per line)"></textarea>
         <div class="collapsible-content" id="optionsContent">
           <div class="row">
             <div>
-              <label for="maxWaitSec">Max wait (seconds)</label>
+              <label for="maxWaitSec">Max wait (seconds) <button type="button" class="help-icon" data-help="Upper limit per prompt. Once reached, the run moves forward instead of waiting forever.">?</button></label>
               <input id="maxWaitSec" type="number" min="5" step="5" placeholder="180" />
-              <div class="desc">Upper limit per prompt. We stop waiting and move on once this time is reached.</div>
             </div>
             <div>
               <label for="stableMinSec">Stable (seconds) min</label>
               <input id="stableMinSec" type="number" min="0.2" step="0.1" placeholder="1.2" />
             </div>
             <div>
-              <label for="stableMaxSec">Stable (seconds) max</label>
+              <label for="stableMaxSec">Stable (seconds) max <button type="button" class="help-icon" data-help="A random stable window is picked between min and max per prompt. The page must remain unchanged for that duration to count as complete.">?</button></label>
               <input id="stableMaxSec" type="number" min="0.2" step="0.1" placeholder="2.5" />
               <div id="stableCountdown" class="desc" style="color: var(--accent); font-weight: 600; margin-top: 4px; display: none;">Countdown: <span id="countdownValue">0.0</span>s</div>
-              <div class="desc">Randomized per prompt between min and max; page must stay unchanged for that duration.</div>
             </div>
           </div>
           <div class="row">
             <div>
-              <label for="pollSec">Poll interval (seconds)</label>
+              <label for="pollSec">Poll interval (seconds) <button type="button" class="help-icon" data-help="How often we re-check page state. Lower values react faster; higher values reduce CPU usage.">?</button></label>
               <input id="pollSec" type="number" min="0.1" step="0.05" placeholder="0.3" />
-              <div class="desc">How often we check for changes. Smaller values can finish a bit sooner but cost more CPU.</div>
             </div>
           </div>
           <div class="inline" style="margin-top: 10px;">
             <input id="enableRetryOnFailure" type="checkbox" checked />
-            <label for="enableRetryOnFailure">Retry failed prompts/tabs</label>
+            <label for="enableRetryOnFailure">Retry failed prompts/tabs <button type="button" class="help-icon" data-help="Retries are now targeted at send/connection failures. Completion timeout in background tabs is treated as uncertain completion to avoid duplicate sends.">?</button></label>
           </div>
           <div class="row">
             <div>
@@ -106,26 +103,22 @@ Prompts (one per line)"></textarea>
               <input id="retryDelaySec" type="number" min="0" step="0.5" placeholder="2" />
             </div>
           </div>
-          <div class="desc">Retries apply to failed prompt sends and failed prompt completions. Set Max retries to 0 to disable retries.</div>
         </div>
 
         <div class="inline" style="margin-top: 12px;">
           <input id="enableMaxWaitTimeout" type="checkbox" checked />
-          <label for="enableMaxWaitTimeout">Enable max wait timeout</label>
+          <label for="enableMaxWaitTimeout">Enable max wait timeout <button type="button" class="help-icon" data-help="If off, completion waits indefinitely. If on, completion waits only up to max wait before returning uncertain/failure based on mode.">?</button></label>
         </div>
-        <div class="desc">If disabled, will wait indefinitely for response. If enabled, will timeout after max wait seconds.</div>
 
         <div class="inline" style="margin-top: 12px;">
           <input id="autoConfirmDialogs" type="checkbox" />
-          <label for="autoConfirmDialogs">Auto-confirm tool dialogs</label>
+          <label for="autoConfirmDialogs">Auto-confirm tool dialogs <button type="button" class="help-icon" data-help="Automatically clicks Confirm when a tool permission dialog appears on supported sites.">?</button></label>
         </div>
-        <div class="desc">Automatically clicks “Confirm” when it appears, even outside automation.</div>
 
         <div class="inline" style="margin-top: 12px;">
           <input id="enableWatchedElementGate" type="checkbox" />
-          <label for="enableWatchedElementGate">Wait for new watched element before next prompt</label>
+          <label for="enableWatchedElementGate">Wait for new watched element before next prompt <button type="button" class="help-icon" data-help="When enabled, the next prompt is sent only after a new matching element appears (for example ChatGPT action buttons).">?</button></label>
         </div>
-        <div class="desc">Only continues after a new matching element appears in the response.</div>
 
         <div id="watchedElementContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
           <input
@@ -168,18 +161,17 @@ Prompts (one per line)"></textarea>
 
         <div class="inline" style="margin-top: 12px; padding: 0 12px;">
           <input id="refreshTabBeforeEachPrompt" type="checkbox" />
-          <label for="refreshTabBeforeEachPrompt">Refresh page before each prompt (background-safe)</label>
+          <label for="refreshTabBeforeEachPrompt">Refresh page before each prompt (background-safe) <button type="button" class="help-icon" data-help="Reloads the active chat before each serial send, without forcing tab focus. Useful if pages stall over time.">?</button></label>
         </div>
-        <div class="desc" style="padding: 0 12px;">Reloads the current chat tab before each send without switching to it.</div>
 
         <div class="inline" style="margin-top: 12px; padding: 0 12px;">
           <input id="openNewChatPerPrompt" type="checkbox" />
-          <label for="openNewChatPerPrompt">Send each prompt in a new chat</label>
+          <label for="openNewChatPerPrompt">Send each prompt in a new chat <button type="button" class="help-icon" data-help="Serial mode only. Navigates to a new chat URL before each prompt.">?</button></label>
         </div>
 
         <div class="inline" style="margin-top: 12px; padding: 0 12px;">
           <input id="enableStopWord" type="checkbox" />
-          <label for="enableStopWord">Stop on keyword/phrase</label>
+          <label for="enableStopWord">Stop on keyword/phrase <button type="button" class="help-icon" data-help="Stops the automation when the phrase appears in output. Useful for fail-safe boundaries.">?</button></label>
         </div>
 
         <div id="stopWordContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
@@ -190,7 +182,7 @@ Prompts (one per line)"></textarea>
             class="stop-word-input"
             style="width: 100%; padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
           />
-          <small style="color: var(--muted); display: block; margin-bottom: 6px;">
+          <small class="compact-note" style="color: var(--muted); display: block; margin-bottom: 6px;">
             Automation will stop if this text appears on the page
           </small>
           <div class="inline" style="gap: 6px;">
@@ -206,9 +198,8 @@ Prompts (one per line)"></textarea>
         <div class="section-title">Parallel mode settings</div>
         <div class="inline" style="margin-top: 12px; padding: 0 12px;">
           <input id="parallelOneTabPerPrompt" type="checkbox" />
-          <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
+          <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10) <button type="button" class="help-icon" data-help="Fan-out mode: each prompt set gets one background tab. Existing safety cap is 10 tab workers per run.">?</button></label>
         </div>
-        <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt or per <code>(new tab)</code> set, then immediately moves to the next tab once launch is ready.</div>
 
         <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
           <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
@@ -234,6 +225,7 @@ Prompts (one per line)"></textarea>
             style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
           />
         </div>
+        <div class="desc compact-note" style="padding: 0 12px;">Custom launch URL applies to parallel worker tabs.</div>
       </div>
       </section>
 
@@ -246,12 +238,11 @@ Prompts (one per line)"></textarea>
         <div class="collapsible-content" id="transcriptionContent">
           <div class="row">
             <div>
-              <label for="transcriptionFolder">Transcription Folder</label>
+              <label for="transcriptionFolder">Transcription Folder <button type="button" class="help-icon" data-help="Folder watched for new transcription JSON files. New files are added to queue automatically.">?</button></label>
               <div style="display: flex; gap: 8px; margin-bottom: 8px;">
                 <input id="transcriptionFolder" type="text" placeholder="e.g., I:\Transcriptions" style="flex: 1;" />
                 <button id="browseFolderBtn" class="preset-btn" type="button">📁 Browse</button>
               </div>
-              <div class="desc">Folder to monitor for new transcription JSON files</div>
             </div>
           </div>
           

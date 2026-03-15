@@ -22,6 +22,10 @@ const POPUP_ACTIVE_VIEW_KEY = 'popupActiveView';
 const DEFAULT_POPUP_VIEW = 'serial';
 const viewTabs = Array.from(document.querySelectorAll('.view-tab[data-view-target]'));
 const viewPanels = Array.from(document.querySelectorAll('.view-panel[data-views]'));
+const helpIcons = Array.from(document.querySelectorAll('.help-icon[data-help]'));
+let helpTooltipEl = null;
+let activeHelpIcon = null;
+let helpHideTimer = null;
 
 function parseViewList(panel) {
   const raw = panel?.dataset?.views || '';
@@ -69,6 +73,94 @@ viewTabs.forEach((tab) => {
     }
   });
 });
+
+function ensureHelpTooltip() {
+  if (helpTooltipEl) return helpTooltipEl;
+  helpTooltipEl = document.createElement('div');
+  helpTooltipEl.className = 'help-tooltip';
+  helpTooltipEl.hidden = true;
+  document.body.appendChild(helpTooltipEl);
+  return helpTooltipEl;
+}
+
+function positionHelpTooltip(iconEl) {
+  if (!helpTooltipEl || !iconEl) return;
+  const iconRect = iconEl.getBoundingClientRect();
+  const tooltipRect = helpTooltipEl.getBoundingClientRect();
+  const gap = 8;
+  const maxLeft = Math.max(8, window.innerWidth - tooltipRect.width - 8);
+  const preferredLeft = Math.min(maxLeft, Math.max(8, iconRect.left + (iconRect.width / 2) - (tooltipRect.width / 2)));
+  let top = iconRect.bottom + gap;
+  if (top + tooltipRect.height > window.innerHeight - 8) {
+    top = Math.max(8, iconRect.top - tooltipRect.height - gap);
+  }
+  helpTooltipEl.style.left = `${preferredLeft}px`;
+  helpTooltipEl.style.top = `${top}px`;
+}
+
+function hideHelpTooltip(immediate = false) {
+  if (!helpTooltipEl) return;
+  if (helpHideTimer) {
+    clearTimeout(helpHideTimer);
+    helpHideTimer = null;
+  }
+  const doHide = () => {
+    helpTooltipEl.classList.remove('visible');
+    helpTooltipEl.hidden = true;
+    activeHelpIcon = null;
+  };
+  if (immediate) {
+    doHide();
+    return;
+  }
+  helpHideTimer = setTimeout(doHide, 80);
+}
+
+function showHelpTooltip(iconEl) {
+  if (!iconEl) return;
+  const tooltip = ensureHelpTooltip();
+  if (helpHideTimer) {
+    clearTimeout(helpHideTimer);
+    helpHideTimer = null;
+  }
+  tooltip.textContent = iconEl.dataset.help || '';
+  tooltip.hidden = false;
+  tooltip.classList.add('visible');
+  activeHelpIcon = iconEl;
+  positionHelpTooltip(iconEl);
+}
+
+function bindHelpTooltipEvents() {
+  if (!helpIcons.length) return;
+
+  helpIcons.forEach((icon) => {
+    icon.addEventListener('mouseenter', () => showHelpTooltip(icon));
+    icon.addEventListener('focus', () => showHelpTooltip(icon));
+    icon.addEventListener('mouseleave', () => hideHelpTooltip());
+    icon.addEventListener('blur', () => hideHelpTooltip());
+    icon.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (activeHelpIcon === icon && helpTooltipEl && !helpTooltipEl.hidden) {
+        hideHelpTooltip(true);
+        return;
+      }
+      showHelpTooltip(icon);
+    });
+  });
+
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    if (target.closest('.help-icon')) return;
+    if (target.closest('.help-tooltip')) return;
+    hideHelpTooltip(true);
+  });
+
+  window.addEventListener('resize', () => {
+    if (!activeHelpIcon || !helpTooltipEl || helpTooltipEl.hidden) return;
+    positionHelpTooltip(activeHelpIcon);
+  });
+}
 
 function setParallelWalkthroughVisibility(visible) {
   if (!parallelWalkthrough || !toggleParallelWalkthroughBtn) return;
@@ -613,6 +705,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
     } catch (_) {}
 
+    bindHelpTooltipEvents();
     await loadActiveView();
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
