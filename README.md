@@ -85,6 +85,19 @@ Use this mode when you want to launch multiple prompts concurrently.
 - Stop cancels pending tab launches and ends the current session state.
 - Already launched tabs are not force-stopped.
 
+### Edge background reliability notes
+- Edge may throttle or sleep background tabs, which can delay completion detection.
+- For best stability in parallel mode, exclude these domains from Sleeping Tabs:
+  - `chatgpt.com`
+  - `chat.openai.com`
+  - `gemini.google.com`
+  - `claude.ai`
+  - `grok.x.ai`
+- The extension also hardens parallel workers by:
+  - avoiding resend loops when completion times out in background tabs
+  - marking worker tabs non-discardable during active runs and restoring tab policy at run end
+  - increasing completion wait windows for inactive tabs
+
 ## Prompt history
 - Click Save current as history to store the current prompts + settings
 - The list shows recent histories (deduplicated)
