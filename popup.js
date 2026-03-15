@@ -18,6 +18,57 @@ const resumeBtn = document.getElementById('resumeBtn');
 const parallelWalkthrough = document.getElementById('parallelWalkthrough');
 const toggleParallelWalkthroughBtn = document.getElementById('toggleParallelWalkthroughBtn');
 const PARALLEL_WALKTHROUGH_VISIBILITY_KEY = 'parallelWalkthroughVisible';
+const POPUP_ACTIVE_VIEW_KEY = 'popupActiveView';
+const DEFAULT_POPUP_VIEW = 'serial';
+const viewTabs = Array.from(document.querySelectorAll('.view-tab[data-view-target]'));
+const viewPanels = Array.from(document.querySelectorAll('.view-panel[data-views]'));
+
+function parseViewList(panel) {
+  const raw = panel?.dataset?.views || '';
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+}
+
+function setActiveView(viewName) {
+  const normalizedView = typeof viewName === 'string' && viewName.trim() ? viewName.trim() : DEFAULT_POPUP_VIEW;
+  viewTabs.forEach((tab) => {
+    const active = tab.dataset.viewTarget === normalizedView;
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+  viewPanels.forEach((panel) => {
+    const visible = parseViewList(panel).includes(normalizedView);
+    panel.hidden = !visible;
+  });
+}
+
+async function loadActiveView() {
+  let nextView = DEFAULT_POPUP_VIEW;
+  try {
+    const result = await chrome.storage.local.get([POPUP_ACTIVE_VIEW_KEY]);
+    const storedView = result?.[POPUP_ACTIVE_VIEW_KEY];
+    if (typeof storedView === 'string' && storedView.trim()) {
+      nextView = storedView.trim();
+    }
+  } catch (e) {
+    console.error('[PopupView] Failed to load active view:', e);
+  }
+  setActiveView(nextView);
+}
+
+viewTabs.forEach((tab) => {
+  tab.addEventListener('click', async () => {
+    const target = tab.dataset.viewTarget || DEFAULT_POPUP_VIEW;
+    setActiveView(target);
+    try {
+      await chrome.storage.local.set({ [POPUP_ACTIVE_VIEW_KEY]: target });
+    } catch (e) {
+      console.error('[PopupView] Failed to save active view:', e);
+    }
+  });
+});
 
 function setParallelWalkthroughVisibility(visible) {
   if (!parallelWalkthrough || !toggleParallelWalkthroughBtn) return;
@@ -562,6 +613,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
     } catch (_) {}
 
+    await loadActiveView();
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
     refreshWrapperPromptTextareaHeights();

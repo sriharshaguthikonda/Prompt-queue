@@ -61,6 +61,48 @@ h1 {
   margin: 6px 0 12px;
 }
 
+/* View Tabs */
+.view-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.view-tab {
+  font-size: 11px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--input-bg);
+  color: var(--muted);
+  font-weight: 600;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.view-tab:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.view-tab.active {
+  color: #fff;
+  border-color: var(--btn1-to);
+  background: linear-gradient(180deg, var(--btn1-from), var(--btn1-to));
+}
+
+.view-panel {
+  margin-bottom: 12px;
+}
+
+.view-panel[hidden] {
+  display: none !important;
+}
+
+.mode-card {
+  margin-top: 0;
+}
+
 /* Theme Toggle */
 .theme-toggle {
   display: flex;

@@ -19,6 +19,14 @@
       </div>
       <div class="tagline">Queue your prompts.</div>
 
+      <div class="view-tabs" id="modeTabs">
+        <button class="view-tab active" type="button" data-view-target="serial">Serial Mode</button>
+        <button class="view-tab" type="button" data-view-target="parallel">Parallel Mode</button>
+        <button class="view-tab" type="button" data-view-target="transcription">Transcription Monitor</button>
+        <button class="view-tab" type="button" data-view-target="history">History</button>
+      </div>
+
+      <section class="view-panel" data-views="serial,parallel">
       <div class="card">
         <div class="collapsible-header" id="promptsHeader">
           <span class="collapsible-toggle">▼</span>
@@ -148,10 +156,89 @@ Prompts (one per line)"></textarea>
           </span>
         </div>
       </div>
+      </section>
 
-      <div class="section-title">Saved prompt histories</div>
-      
-      <div class="card">
+      <section class="view-panel" data-views="serial">
+      <div class="card mode-card">
+        <div class="section-title">Serial mode settings</div>
+        <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+          <input id="disableButtonsDuringAutomation" type="checkbox" checked />
+          <label for="disableButtonsDuringAutomation">Disable buttons during automation</label>
+        </div>
+
+        <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+          <input id="refreshTabBeforeEachPrompt" type="checkbox" />
+          <label for="refreshTabBeforeEachPrompt">Refresh page before each prompt (background-safe)</label>
+        </div>
+        <div class="desc" style="padding: 0 12px;">Reloads the current chat tab before each send without switching to it.</div>
+
+        <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+          <input id="openNewChatPerPrompt" type="checkbox" />
+          <label for="openNewChatPerPrompt">Send each prompt in a new chat</label>
+        </div>
+
+        <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+          <input id="enableStopWord" type="checkbox" />
+          <label for="enableStopWord">Stop on keyword/phrase</label>
+        </div>
+
+        <div id="stopWordContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
+          <input 
+            id="stopWord" 
+            type="text" 
+            placeholder="Enter stop word or phrase..." 
+            class="stop-word-input"
+            style="width: 100%; padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+          />
+          <small style="color: var(--muted); display: block; margin-bottom: 6px;">
+            Automation will stop if this text appears on the page
+          </small>
+          <div class="inline" style="gap: 6px;">
+            <input id="stopWordCaseSensitive" type="checkbox" />
+            <label for="stopWordCaseSensitive" style="font-size: 12px;">Case sensitive</label>
+          </div>
+        </div>
+      </div>
+      </section>
+
+      <section class="view-panel" data-views="parallel">
+      <div class="card mode-card">
+        <div class="section-title">Parallel mode settings</div>
+        <div class="inline" style="margin-top: 12px; padding: 0 12px;">
+          <input id="parallelOneTabPerPrompt" type="checkbox" />
+          <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
+        </div>
+        <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt or per <code>(new tab)</code> set, then immediately moves to the next tab once launch is ready.</div>
+
+        <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
+          <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
+        </div>
+        <div id="parallelWalkthrough" class="parallel-walkthrough" style="margin: 8px 12px 0;">
+          <div class="parallel-walkthrough-title">Parallel mode quick guide</div>
+          <ol>
+            <li>Turn this on and keep prompts at 10 or fewer.</li>
+            <li>Optional: use <code>(new tab)</code> lines to split prompts into tab sets.</li>
+            <li>Optional: set a custom URL below. If empty, active tab URL is reused.</li>
+            <li>Start automation. Each tab set gets one background tab; next launch starts as soon as the previous tab accepts its first prompt.</li>
+            <li>Pause/Resume affects only new launches; already launched tabs keep running.</li>
+            <li>Stop cancels pending launches only; launched tabs are left open.</li>
+          </ol>
+          <div class="parallel-walkthrough-caveat">When parallel mode is ON, “Send each prompt in a new chat” is ignored for that run.</div>
+        </div>
+
+        <div class="inline" style="margin-top: 8px; padding: 0 12px;">
+          <input
+            id="openNewChatPerPromptUrl"
+            type="text"
+            placeholder="Custom launch URL (optional, e.g., https://chatgpt.com/g/...)"
+            style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+          />
+        </div>
+      </div>
+      </section>
+
+      <section class="view-panel" data-views="transcription">
+      <div class="card mode-card">
         <div class="collapsible-header" id="transcriptionHeader">
           <span class="collapsible-toggle">▼</span>
           <span class="section-title" style="margin: 0;">Transcription Monitor</span>
@@ -187,8 +274,10 @@ Prompts (one per line)"></textarea>
           </div>
         </div>
       </div>
-      
-      <div class="card">
+      </section>
+
+      <section class="view-panel" data-views="history">
+      <div class="card mode-card">
         <div class="history-header">
           <div class="history-buttons">
             <button id="saveHistoryBtn" class="preset-btn">💾 Save</button>
@@ -210,74 +299,7 @@ Prompts (one per line)"></textarea>
         <div id="history" class="history-list"></div>
         <button id="clearHistoryBtn" class="preset-btn clear-history-btn">🗑️ Clear all</button>
       </div>
-
-      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
-        <input id="disableButtonsDuringAutomation" type="checkbox" checked />
-        <label for="disableButtonsDuringAutomation">Disable buttons during automation</label>
-      </div>
-
-      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
-        <input id="refreshTabBeforeEachPrompt" type="checkbox" />
-        <label for="refreshTabBeforeEachPrompt">Refresh page before each prompt (background-safe)</label>
-      </div>
-      <div class="desc" style="padding: 0 12px;">Reloads the current chat tab before each send without switching to it.</div>
-
-      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
-        <input id="parallelOneTabPerPrompt" type="checkbox" />
-        <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
-      </div>
-      <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt or per <code>(new tab)</code> set, then immediately moves to the next tab once launch is ready.</div>
-      <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
-        <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
-      </div>
-      <div id="parallelWalkthrough" class="parallel-walkthrough" style="margin: 8px 12px 0;">
-        <div class="parallel-walkthrough-title">Parallel mode quick guide</div>
-        <ol>
-          <li>Turn this on and keep prompts at 10 or fewer.</li>
-          <li>Optional: use <code>(new tab)</code> lines to split prompts into tab sets.</li>
-          <li>Optional: set a custom URL below. If empty, active tab URL is reused.</li>
-          <li>Start automation. Each tab set gets one background tab; next launch starts as soon as the previous tab accepts its first prompt.</li>
-          <li>Pause/Resume affects only new launches; already launched tabs keep running.</li>
-          <li>Stop cancels pending launches only; launched tabs are left open.</li>
-        </ol>
-        <div class="parallel-walkthrough-caveat">When parallel mode is ON, “Send each prompt in a new chat” is ignored for that run.</div>
-      </div>
-
-      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
-        <input id="openNewChatPerPrompt" type="checkbox" />
-        <label for="openNewChatPerPrompt">Send each prompt in a new chat</label>
-      </div>
-
-      <div class="inline" style="margin-top: 8px; padding: 0 12px;">
-        <input 
-          id="openNewChatPerPromptUrl" 
-          type="text" 
-          placeholder="Custom new chat URL (optional, e.g., https://chatgpt.com/g/...)" 
-          style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
-        />
-      </div>
-
-      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
-        <input id="enableStopWord" type="checkbox" />
-        <label for="enableStopWord">Stop on keyword/phrase</label>
-      </div>
-
-      <div id="stopWordContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
-        <input 
-          id="stopWord" 
-          type="text" 
-          placeholder="Enter stop word or phrase..." 
-          class="stop-word-input"
-          style="width: 100%; padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
-        />
-        <small style="color: var(--muted); display: block; margin-bottom: 6px;">
-          Automation will stop if this text appears on the page
-        </small>
-        <div class="inline" style="gap: 6px;">
-          <input id="stopWordCaseSensitive" type="checkbox" />
-          <label for="stopWordCaseSensitive" style="font-size: 12px;">Case sensitive</label>
-        </div>
-      </div>
+      </section>
     </div>
 
     <!-- Toast Notification -->
