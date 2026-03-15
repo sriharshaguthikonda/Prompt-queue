@@ -83,15 +83,16 @@ function getRunningStatusText(status = {}) {
     options = {},
     parallelLaunched = 0,
     parallelCompleted = 0,
+    parallelUncertain = 0,
     parallelFailed = 0,
     parallelActive = 0,
   } = status;
 
   if (mode === 'parallel') {
     if (paused) {
-      return `Paused launches - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, failed ${parallelFailed}`;
+      return `Paused launches - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, uncertain ${parallelUncertain}, failed ${parallelFailed}`;
     }
-    return `Parallel running - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, failed ${parallelFailed}`;
+    return `Parallel running - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, uncertain ${parallelUncertain}, failed ${parallelFailed}`;
   }
 
   if (paused) {
