@@ -79,6 +79,7 @@ const state = {
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
     refreshTabBeforeEachPrompt: false,
     parallelOneTabPerPrompt: false,
+    parallelActivateTabBeforeSend: true,
     enableRetryOnFailure: true,
     maxRetriesPerPrompt: 2,
     retryDelayMs: 2000,
@@ -97,6 +98,7 @@ const state = {
 };
 let sequentialRetryTimer = null;
 let stateHydrated = false;
+let lastHealthLogAt = 0;
 
 const DEFAULT_SETTINGS = {
   stableMs: 10000,
@@ -114,6 +116,7 @@ const DEFAULT_SETTINGS = {
   watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   refreshTabBeforeEachPrompt: false,
   parallelOneTabPerPrompt: false,
+  parallelActivateTabBeforeSend: true,
   enableRetryOnFailure: true,
   maxRetriesPerPrompt: 2,
   retryDelayMs: 2000,
@@ -126,6 +129,7 @@ const DEFAULT_SETTINGS = {
 };
 
 const SETTINGS_STORAGE_KEY = 'aiTaskSequencerSettings';
+const SETTINGS_MIGRATIONS_STORAGE_KEY = 'aiTaskSequencerSettingsMigrations';
 
 const RECOVERY_CONFIG = {
   maxRecoveryAttempts: 3,
@@ -142,6 +146,58 @@ const PARALLEL_RUNTIME_CONFIG = {
   backgroundPollFloorMs: 2000,
   connectionFailureCircuitBreaker: 3,
 };
+
+function stringifyLogDetails(details) {
+  const seen = new WeakSet();
+  try {
+    return JSON.stringify(details, (_key, value) => {
+      if (value instanceof Error) {
+        return {
+          name: value.name,
+          message: value.message,
+          stack: value.stack,
+        };
+      }
+      if (typeof value === 'bigint') {
+        return String(value);
+      }
+      if (value && typeof value === 'object') {
+        if (seen.has(value)) return '[circular]';
+        seen.add(value);
+      }
+      return value;
+    });
+  } catch (err) {
+    return `[unserializable:${String(err?.message || err)}]`;
+  }
+}
+
+function logWithDetails(level, message, details) {
+  if (details === undefined) {
+    console[level](message);
+    return;
+  }
+  console[level](`${message} ${stringifyLogDetails(details)}`);
+}
+
+function buildPromptFingerprint(text) {
+  const normalized = typeof text === 'string' ? text.replace(/\s+/g, ' ').trim() : '';
+  let hash = 2166136261;
+  for (let i = 0; i < normalized.length; i += 1) {
+    hash ^= normalized.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return {
+    length: normalized.length,
+    hash: (hash >>> 0).toString(16).padStart(8, '0'),
+  };
+}
+
+function getRuntimeErrorMessage(err) {
+  if (!err) return '';
+  if (typeof err?.message === 'string' && err.message.trim()) return err.message.trim();
+  return String(err);
+}
 
 function coerceNumber(v, min, max, fallback) {
   const n = Number(v);
@@ -178,6 +234,7 @@ function validateSettings(input = {}) {
       : DEFAULT_SETTINGS.watchedElementSelector,
     refreshTabBeforeEachPrompt: input.refreshTabBeforeEachPrompt === true,
     parallelOneTabPerPrompt: input.parallelOneTabPerPrompt === true,
+    parallelActivateTabBeforeSend: input.parallelActivateTabBeforeSend !== false,
     enableRetryOnFailure: input.enableRetryOnFailure !== false,
     maxRetriesPerPrompt: coerceNumber(input.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
     retryDelayMs: coerceNumber(input.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
@@ -302,7 +359,7 @@ async function loadState() {
     } else {
       state.parallel = null;
     }
-    console.log('[LoadState] State loaded from storage', {
+    logWithDetails('log', '[LoadState] State loaded from storage', {
       oldState,
       newState: { 
         running: state.running, 
@@ -430,11 +487,13 @@ async function isTabAlive(tabId) {
   }
 }
 
-async function testContentScriptConnection(tabId) {
+async function testContentScriptConnection(tabId, { suppressFailureLog = false } = {}) {
   return new Promise((resolve) => {
     try {
       const timeoutId = setTimeout(() => {
-        console.log('[TestConnection] Timeout reached');
+        if (!suppressFailureLog) {
+          logWithDetails('log', '[TestConnection] Timeout reached', { tabId });
+        }
         resolve(false);
       }, 2000);
 
@@ -444,7 +503,12 @@ async function testContentScriptConnection(tabId) {
         (response) => {
           clearTimeout(timeoutId);
           if (chrome.runtime.lastError) {
-            console.error('[TestConnection] Error:', chrome.runtime.lastError);
+            if (!suppressFailureLog) {
+              logWithDetails('log', '[TestConnection] Ping failed', {
+                tabId,
+                error: getRuntimeErrorMessage(chrome.runtime.lastError),
+              });
+            }
             resolve(false);
           } else {
             resolve(response?.ok === true);
@@ -452,19 +516,41 @@ async function testContentScriptConnection(tabId) {
         }
       );
     } catch (e) {
-      console.error('[TestConnection] Error:', e);
+      if (!suppressFailureLog) {
+        logWithDetails('log', '[TestConnection] Ping threw', {
+          tabId,
+          error: getRuntimeErrorMessage(e),
+        });
+      }
       resolve(false);
     }
   });
 }
 
 async function ensureContentScriptReady(tabId) {
-  const isConnected = await testContentScriptConnection(tabId);
+  const isConnected = await testContentScriptConnection(tabId, { suppressFailureLog: true });
   if (!isConnected) {
     await injectContentScript(tabId);
     // Wait a bit for injection
     await new Promise(resolve => setTimeout(resolve, 500));
-    const stillConnected = await testContentScriptConnection(tabId);
+    const stillConnected = await testContentScriptConnection(tabId, { suppressFailureLog: false });
+    if (!stillConnected) {
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        logWithDetails('warn', '[EnsureContentScriptReady] Unreachable after injection', {
+          tabId,
+          url: tab?.url || null,
+          status: tab?.status || null,
+          discarded: tab?.discarded === true,
+          active: tab?.active === true,
+        });
+      } catch (tabErr) {
+        logWithDetails('warn', '[EnsureContentScriptReady] Unreachable after injection', {
+          tabId,
+          tabLookupError: getRuntimeErrorMessage(tabErr),
+        });
+      }
+    }
     return stillConnected;
   }
   return true;
@@ -564,15 +650,22 @@ async function healthCheck() {
   const now = Date.now();
   const timeSinceActivity = now - state.lastActivityTime;
   const timeSinceLastRecovery = now - state.lastRecoveryTime;
-  console.log('[Health] Tick', {
-    running: state.running,
-    processing: state.processing,
-    promptStartTime: state.promptStartTime,
-    timeSinceActivity,
-    timeSinceLastRecovery,
-    recoveryAttempts: state.recoveryAttempts,
-    staleThreshold: RECOVERY_CONFIG.staleThresholdMs,
-  });
+  const shouldLogHealth =
+    state.processing ||
+    timeSinceActivity > RECOVERY_CONFIG.staleThresholdMs ||
+    (now - lastHealthLogAt >= 30000);
+  if (shouldLogHealth) {
+    lastHealthLogAt = now;
+    logWithDetails('log', '[Health] Tick', {
+      running: state.running,
+      processing: state.processing,
+      promptStartTime: state.promptStartTime,
+      timeSinceActivity,
+      timeSinceLastRecovery,
+      recoveryAttempts: state.recoveryAttempts,
+      staleThreshold: RECOVERY_CONFIG.staleThresholdMs,
+    });
+  }
 
   if (state.mode === 'parallel') {
     await maybeFinalizeParallelRun();
@@ -617,9 +710,12 @@ setInterval(healthCheck, RECOVERY_CONFIG.healthCheckIntervalMs);
 
 async function loadSettings() {
   let rawSettings = null;
+  let migrations = {};
+  let shouldPersistMigration = false;
   try {
-    const localResult = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
+    const localResult = await chrome.storage.local.get([SETTINGS_STORAGE_KEY, SETTINGS_MIGRATIONS_STORAGE_KEY]);
     rawSettings = localResult?.[SETTINGS_STORAGE_KEY] || null;
+    migrations = localResult?.[SETTINGS_MIGRATIONS_STORAGE_KEY] || {};
     if (!rawSettings) {
       // One-time fallback for older builds that stored settings in sync.
       const syncResult = await chrome.storage.sync.get(SETTINGS_STORAGE_KEY);
@@ -631,8 +727,25 @@ async function loadSettings() {
   } catch (e) {
     console.warn('[LoadSettings] Failed to read settings storage, using defaults:', e?.message || e);
   }
+
+  if (!migrations?.parallelActivateTabBeforeSendDefaultTrue) {
+    rawSettings = { ...(rawSettings || {}), parallelActivateTabBeforeSend: true };
+    migrations = { ...(migrations || {}), parallelActivateTabBeforeSendDefaultTrue: true };
+    shouldPersistMigration = true;
+  }
+
   const merged = validateSettings({ ...DEFAULT_SETTINGS, ...(rawSettings || {}) });
   state.options = merged;
+  if (shouldPersistMigration) {
+    try {
+      await chrome.storage.local.set({
+        [SETTINGS_STORAGE_KEY]: merged,
+        [SETTINGS_MIGRATIONS_STORAGE_KEY]: migrations,
+      });
+    } catch (e) {
+      console.warn('[LoadSettings] Failed to persist settings migration:', e?.message || e);
+    }
+  }
 }
 
 async function saveSettings(newSettings) {
@@ -762,6 +875,72 @@ function waitForTabLoad(tabId) {
   });
 }
 
+function waitForTabActive(tabId, timeoutMs = 5000) {
+  return new Promise((resolve) => {
+    const start = Date.now();
+
+    const check = () => {
+      chrome.tabs.get(tabId, (tab) => {
+        if (chrome.runtime.lastError) {
+          resolve(false);
+          return;
+        }
+        if (tab?.active === true) {
+          resolve(true);
+          return;
+        }
+        if (Date.now() - start >= timeoutMs) {
+          resolve(false);
+          return;
+        }
+        setTimeout(check, 120);
+      });
+    };
+
+    check();
+  });
+}
+
+async function activateParallelTabBeforeSend(worker, tabSnapshot) {
+  if (!worker?.tabId) {
+    throw new Error('Parallel worker tab missing while trying to activate before send.');
+  }
+
+  const currentTab = tabSnapshot || await chrome.tabs.get(worker.tabId);
+
+  if (!isSupportedUrl(currentTab?.url)) {
+    throw new Error('Parallel worker tab became unsupported before activation.');
+  }
+
+  const windowId = currentTab?.windowId;
+  if (Number.isFinite(windowId)) {
+    try {
+      await chrome.windows.update(windowId, { focused: true });
+    } catch (focusErr) {
+      console.warn('[Parallel] Could not focus worker window before send', {
+        workerId: worker.workerId,
+        tabId: worker.tabId,
+        windowId,
+        error: String(focusErr?.message || focusErr),
+      });
+    }
+  }
+
+  await chrome.tabs.update(worker.tabId, { active: true });
+  const active = await waitForTabActive(worker.tabId, 4000);
+  if (!active) {
+    throw new Error('Parallel worker tab did not become active before send.');
+  }
+
+  // Allow a short settle window so UI picks up active state before content interaction.
+  await new Promise((resolve) => setTimeout(resolve, 350));
+  const refreshed = await chrome.tabs.get(worker.tabId);
+  if (!isSupportedUrl(refreshed?.url)) {
+    throw new Error('Parallel worker tab became unsupported after activation.');
+  }
+  return refreshed;
+}
+
 async function refreshTabInBackgroundBeforeSend(tabId) {
   const before = await chrome.tabs.get(tabId);
   if (!isSupportedUrl(before?.url)) {
@@ -853,7 +1032,7 @@ async function waitForParallelTabLoaded(tabId, launchToken, workerId) {
       throw new Error('Parallel tab navigated to an unsupported URL before loading.');
     }
 
-    console.warn('[Parallel] Tab load timed out, waiting and retrying', {
+    logWithDetails('warn', '[Parallel] Tab load timed out, waiting and retrying', {
       workerId,
       tabId,
       attempt,
@@ -907,6 +1086,34 @@ async function waitForParallelContentScriptReady(tabId, launchToken, workerId) {
     await new Promise((resolve) => setTimeout(resolve, 800));
   }
 
+  return false;
+}
+
+async function waitForParallelInitialDispatchOutcome(workerId, launchToken, promptIndex = 0) {
+  const start = Date.now();
+  while (shouldContinueParallelLaunch(launchToken)) {
+    const worker = state.parallel?.workersById?.[workerId];
+    if (!worker) return false;
+    if (worker.status === 'failed') return false;
+    if (worker.status === 'completed' || worker.status === 'completed_uncertain') return true;
+    if (worker.promptSubmittedByIndex?.[promptIndex]) {
+      return true;
+    }
+    if (Date.now() - start > (state.options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs)) {
+      console.warn('[Parallel] Timed out waiting for initial dispatch outcome', {
+        workerId,
+        tabId: worker.tabId,
+        promptIndex,
+        dispatchAccepted: !!worker.submittedPromptByIndex?.[promptIndex],
+        promptSubmitted: !!worker.promptSubmittedByIndex?.[promptIndex],
+        inFlightPromptId: worker.inFlightPromptId || null,
+      });
+      return false;
+    }
+    await waitWhileParallelPaused(launchToken);
+    if (!shouldContinueParallelLaunch(launchToken)) break;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
   return false;
 }
 
@@ -980,11 +1187,15 @@ async function ensureParallelTabReadyForDispatch(worker) {
 }
 
 function getParallelDispatchOptions(tabSnapshot) {
+  const foregroundSend = state.options?.parallelActivateTabBeforeSend === true;
   const options = {
     ...state.options,
     openNewChatPerPrompt: false,
     refreshTabBeforeEachPrompt: false,
     parallelOneTabPerPrompt: false,
+    parallelDispatch: true,
+    allowBackgroundSendWithoutStream: !foregroundSend,
+    skipRenderVerification: !foregroundSend,
   };
   if (tabSnapshot?.active !== true) {
     const baseMaxWait = Number(options.maxWaitMs) || DEFAULT_SETTINGS.maxWaitMs;
@@ -1154,12 +1365,12 @@ async function finalizeParallelWorker(workerId, { failed, uncertain, errorMessag
     };
     worker.failure = failureSnapshot;
     state.parallel.lastFailure = failureSnapshot;
-    console.error('[Parallel] Worker failed', failureSnapshot);
+    logWithDetails('log', '[Parallel] Worker failed', failureSnapshot);
   } else {
     if (uncertain) {
       state.parallel.uncertain += 1;
       worker.warning = resolvedError;
-      console.warn('[Parallel] Worker completed with uncertainty', {
+      logWithDetails('log', '[Parallel] Worker completed with uncertainty', {
         workerId: worker.workerId,
         workerIndex: worker.index,
         tabId: worker.tabId || null,
@@ -1206,6 +1417,12 @@ async function dispatchParallelWorkerPrompt(workerId) {
   let tabSnapshot = null;
   try {
     tabSnapshot = await ensureParallelTabReadyForDispatch(worker);
+    logWithDetails('log', '[Parallel] Activating worker tab before dispatch', {
+      workerId,
+      tabId: worker.tabId,
+      workerIndex: worker.index,
+    });
+    tabSnapshot = await activateParallelTabBeforeSend(worker, tabSnapshot);
   } catch (prepErr) {
     const prepError = normalizeErrorMessage(prepErr?.message || prepErr);
     console.error('[Parallel] Worker tab not ready for dispatch', {
@@ -1224,11 +1441,15 @@ async function dispatchParallelWorkerPrompt(workerId) {
   const basePromptText = worker.prompts[promptIndex];
   const promptText = buildMessageText(basePromptText);
   const promptId = buildParallelPromptId(worker.index, promptIndex);
-  console.log('[Parallel] Built prompt payload', {
+  const baseFingerprint = buildPromptFingerprint(basePromptText);
+  const finalFingerprint = buildPromptFingerprint(promptText);
+  logWithDetails('log', '[Parallel] Built prompt payload', {
     workerId,
     promptIndex,
     baseLength: typeof basePromptText === 'string' ? basePromptText.length : 0,
     finalLength: typeof promptText === 'string' ? promptText.length : 0,
+    baseFingerprint,
+    finalFingerprint,
   });
   worker.inFlightPromptId = promptId;
   worker.status = 'running';
@@ -1237,12 +1458,16 @@ async function dispatchParallelWorkerPrompt(workerId) {
   await saveState();
 
   try {
+    const dispatchOptions = {
+      ...getParallelDispatchOptions(tabSnapshot),
+      skipCompletionWait: worker.prompts.length === 1 && state.options?.parallelActivateTabBeforeSend !== true,
+    };
     await sendToContent(worker.tabId, {
       type: 'SEND_PROMPT',
       text: promptText,
       index: promptIndex,
       total: worker.prompts.length,
-      options: getParallelDispatchOptions(tabSnapshot),
+      options: dispatchOptions,
       promptId,
     });
     worker.nextPromptIndex = promptIndex + 1;
@@ -1303,6 +1528,7 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
       inFlightPromptId: null,
       promptRetryCounts: {},
       submittedPromptByIndex: {},
+      promptSubmittedByIndex: {},
       connectionFailureStreak: 0,
       status: 'launching',
       error: null,
@@ -1343,7 +1569,24 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
       state.parallel.active += 1;
       state.lastActivityTime = Date.now();
       await saveState();
-      await dispatchParallelWorkerPrompt(workerId);
+      const initialDispatchAccepted = await dispatchParallelWorkerPrompt(workerId);
+      const initialOutcome = await waitForParallelInitialDispatchOutcome(workerId, launchToken, 0);
+      if (!initialOutcome) {
+        const latestWorker = state.parallel?.workersById?.[workerId];
+        if (latestWorker?.status !== 'failed') {
+          const reason = initialDispatchAccepted
+            ? 'Prompt was dispatched but send was not confirmed before timeout.'
+            : 'Initial parallel prompt was not dispatched successfully.';
+          await markParallelWorkerFailed(workerId, reason);
+        }
+        continue;
+      }
+
+      logWithDetails('log', '[Parallel] Initial send confirmed; proceeding to next tab launch', {
+        workerId,
+        tabId: createdTabId,
+        workerIndex: worker.index,
+      });
     } catch (err) {
       if (!shouldContinueParallelLaunch(launchToken)) {
         console.log('[Parallel] Launch canceled while preparing worker', {
@@ -1385,11 +1628,11 @@ async function sendToContent(tabId, message) {
   
   const ready = await ensureContentScriptReady(tabId);
   if (!ready) {
-    console.error('[SendToContent] Content script not ready', { tabId, messageType: message?.type });
+    logWithDetails('error', '[SendToContent] Content script not ready', { tabId, messageType: message?.type });
     throw new Error('Could not establish connection to content script');
   }
 
-  console.log('[SendToContent] Sending message to content', { tabId, messageType: message?.type });
+  logWithDetails('log', '[SendToContent] Sending message to content', { tabId, messageType: message?.type });
   return new Promise((resolve, reject) => {
     try {
       chrome.tabs.sendMessage(
@@ -1398,10 +1641,14 @@ async function sendToContent(tabId, message) {
         (response) => {
           if (chrome.runtime.lastError) {
             const errMsg = chrome.runtime.lastError?.message || String(chrome.runtime.lastError);
-            console.error('[SendToContent] Error', { tabId, messageType: message?.type, error: errMsg });
+            logWithDetails('error', '[SendToContent] Error', { tabId, messageType: message?.type, error: errMsg });
             reject(new Error(errMsg));
           } else {
-            console.log('[SendToContent] Response received from content', { tabId, messageType: message?.type, response });
+            logWithDetails('log', '[SendToContent] Response received from content', {
+              tabId,
+              messageType: message?.type,
+              response,
+            });
             resolve(response);
           }
         }
@@ -1434,6 +1681,13 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
   if (useParallel && parallelPromptGroups.length > PARALLEL_CONFIG.maxTabs) {
     throw new Error(`Parallel mode supports up to ${PARALLEL_CONFIG.maxTabs} prompts at a time.`);
   }
+  if (useParallel && state.options.parallelActivateTabBeforeSend !== true) {
+    state.options = {
+      ...state.options,
+      parallelActivateTabBeforeSend: true,
+    };
+    console.log('[Parallel] Enforcing active-tab dispatch for this run');
+  }
 
   state.prompts = useParallel
     ? parallelPromptGroups.map((group, idx) => `Tab ${idx + 1}: ${group.length} prompt${group.length === 1 ? '' : 's'}`)
@@ -1464,11 +1718,12 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
     if (!launchUrl) {
       throw new Error('Parallel tab URL is invalid or unsupported.');
     }
-    console.log('[Parallel] Starting fan-out run', {
+    logWithDetails('log', '[Parallel] Starting fan-out run', {
       tabs: parallelPromptGroups.length,
       maxTabs: PARALLEL_CONFIG.maxTabs,
       launchUrl,
-      launchStrategy: 'launch next tab immediately after current tab accepts first prompt',
+      launchStrategy: 'create tab -> activate tab -> dispatch prompt -> wait prompt-submitted -> launch next tab',
+      foregroundSend: true,
     });
     await runParallelFanoutLaunch({ promptGroups: parallelPromptGroups, launchUrl });
     return;
@@ -1491,7 +1746,7 @@ function buildMessageText(text) {
   const appendText = explicitAppendText;
   const shouldAppend = appendText.length > 0;
 
-  console.log('[BuildMessageText] Applying prompt wrappers', {
+  logWithDetails('log', '[BuildMessageText] Applying prompt wrappers', {
     prependEnabled: prependSystemPrompt === true,
     appendEnabled: appendSystemPrompt === true,
     appendEffective: shouldAppend,
@@ -1642,6 +1897,7 @@ function makeHistorySignature(item) {
         : DEFAULT_SETTINGS.watchedElementSelector,
       refreshTabBeforeEachPrompt: item.settings?.refreshTabBeforeEachPrompt === true,
       parallelOneTabPerPrompt: item.settings?.parallelOneTabPerPrompt === true,
+      parallelActivateTabBeforeSend: item.settings?.parallelActivateTabBeforeSend === true,
       enableRetryOnFailure: item.settings?.enableRetryOnFailure !== false,
       maxRetriesPerPrompt: coerceNumber(item.settings?.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
       retryDelayMs: coerceNumber(item.settings?.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
@@ -1669,12 +1925,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         case "CONTENT_READY": {
           state.lastActivityTime = Date.now();
           await saveState();
+          sendResponse({ ok: true });
           return;
         }
         case "SIDE_PANEL_OPENED": {
           if (sender?.tab?.id) {
             openSidePanels.add(sender.tab.id);
           }
+          sendResponse({ ok: true });
           return;
         }
         case "SIDE_PANEL_CLOSED": {
@@ -1683,10 +1941,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           } else if (message?.tabId) {
             openSidePanels.delete(message.tabId);
           }
+          sendResponse({ ok: true });
           return;
         }
         case "START_AUTOMATION": {
-          console.log('[StartAutomation] Received request', {
+          logWithDetails('log', '[StartAutomation] Received request', {
             running: state.running,
             processing: state.processing,
             currentIndex: state.currentIndex,
@@ -1787,8 +2046,111 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: true, status: getStatus() });
           return;
         }
+        case "PROMPT_SUBMITTED": {
+          sendResponse({ ok: true });
+
+          if (state.mode !== 'parallel' || !state.running || !state.parallel) {
+            return;
+          }
+
+          const promptId = typeof message.promptId === 'string' ? message.promptId.trim() : '';
+          if (!promptId) {
+            console.log('[PromptSubmitted][Parallel] Missing promptId, ignoring');
+            return;
+          }
+
+          const senderTabId = sender?.tab?.id || null;
+          let promptRef = state.parallel.workersByPromptId?.[promptId] || null;
+          if (!promptRef && senderTabId) {
+            const fallbackWorker = Object.values(state.parallel.workersById || {}).find((candidate) => (
+              candidate?.tabId === senderTabId &&
+              candidate?.status !== 'completed' &&
+              candidate?.status !== 'completed_uncertain' &&
+              candidate?.status !== 'failed' &&
+              candidate?.inFlightPromptId === promptId
+            ));
+            if (fallbackWorker) {
+              promptRef = {
+                workerId: fallbackWorker.workerId,
+                promptIndex: Math.max(0, (fallbackWorker.nextPromptIndex || 1) - 1),
+                recoveredFromSenderTab: true,
+              };
+              state.parallel.workersByPromptId[promptId] = promptRef;
+              console.warn('[PromptSubmitted][Parallel] Recovered prompt mapping via sender tab', {
+                promptId,
+                senderTabId,
+                workerId: fallbackWorker.workerId,
+              });
+            }
+          }
+
+          if (!promptRef) {
+            console.log('[PromptSubmitted][Parallel] Unknown promptId, ignoring', {
+              promptId,
+              senderTabId,
+              pendingPromptIds: Object.keys(state.parallel.workersByPromptId || {}),
+            });
+            return;
+          }
+
+          const worker = state.parallel.workersById?.[promptRef.workerId];
+          if (!worker) {
+            console.log('[PromptSubmitted][Parallel] Missing worker for promptId, ignoring', { promptId, promptRef });
+            return;
+          }
+          if (worker.status === 'completed' || worker.status === 'completed_uncertain' || worker.status === 'failed') {
+            console.log('[PromptSubmitted][Parallel] Worker already finalized, ignoring', {
+              promptId,
+              workerId: worker.workerId,
+              status: worker.status,
+            });
+            return;
+          }
+
+          const promptIndex = Number.isFinite(Number(promptRef.promptIndex))
+            ? Number(promptRef.promptIndex)
+            : Math.max(0, worker.nextPromptIndex - 1);
+          const note = typeof message.note === 'string' ? message.note.trim() : '';
+          const shouldConfirmSubmission =
+            note === '' ||
+            note === 'send-stage-complete' ||
+            note === 'stream-detected' ||
+            note === 'legacy';
+          if (!shouldConfirmSubmission) {
+            logWithDetails('log', '[PromptSubmitted][Parallel] Ignoring non-confirming note', {
+              workerId: worker.workerId,
+              workerIndex: worker.index,
+              tabId: worker.tabId,
+              promptId,
+              promptIndex,
+              note,
+            });
+            return;
+          }
+          worker.promptSubmittedByIndex = worker.promptSubmittedByIndex || {};
+
+          if (!worker.promptSubmittedByIndex[promptIndex]) {
+            worker.promptSubmittedByIndex[promptIndex] = {
+              promptId,
+              at: Date.now(),
+              senderTabId,
+              note: note || null,
+            };
+            state.lastActivityTime = Date.now();
+            await saveState();
+            await emitParallelProgress();
+            logWithDetails('log', '[PromptSubmitted][Parallel] Prompt send confirmed', {
+              workerId: worker.workerId,
+              workerIndex: worker.index,
+              tabId: worker.tabId,
+              promptId,
+              promptIndex,
+            });
+          }
+          return;
+        }
         case "RESPONSE_COMPLETE": {
-          console.log('[ResponseComplete] Received', {
+          logWithDetails('log', '[ResponseComplete] Received', {
             messagePromptId: message.promptId,
             statePromptId: state.currentPromptId,
             running: state.running,
@@ -1890,7 +2252,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               }
 
               if (isLikelyCompletionTimeoutError(errorMessage)) {
-                console.warn('[ResponseComplete][Parallel] Completion timeout from background tab; no resend will be attempted', {
+                logWithDetails('log', '[ResponseComplete][Parallel] Completion timeout from background tab; no resend will be attempted', {
                   workerId: worker.workerId,
                   tabId: worker.tabId,
                   promptId,

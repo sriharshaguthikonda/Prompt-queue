@@ -3,7 +3,7 @@
   "exportedAt": "2025-11-30T00:53:07.727Z",
   "history": [
     {
-      "__sig": "{\"prompts\":[\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\"],\"settings\":{\"stableMs\":10000,\"maxWaitMs\":180000,\"pollIntervalMs\":1500,\"systemPrompt\":\"yes\",\"prependSystemPrompt\":true,\"theme\":\"dark\",\"enableMaxWaitTimeout\":false,\"enableStopWord\":true,\"stopWord\":\"Section 10: Future section\",\"stopWordCaseSensitive\":false}}",
+      "__sig": "{\"prompts\":[\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\",\".\"],\"settings\":{\"stableMs\":10000,\"maxWaitMs\":180000,\"pollIntervalMs\":1500,\"systemPrompt\":\"yes\",\"prependSystemPrompt\":true,\"theme\":\"dark\",\"enableMaxWaitTimeout\":false,\"enableStopWord\":true,\"stopWord\":\"Section 10: end of feedback\",\"stopWordCaseSensitive\":false}}",
       "prompts": [
         ".",
         ".",
@@ -25,7 +25,7 @@
         "pollIntervalMs": 1500,
         "prependSystemPrompt": true,
         "stableMs": 10000,
-        "stopWord": "Section 10: Future section",
+        "stopWord": "Section 10: end of feedback",
         "stopWordCaseSensitive": false,
         "systemPrompt": "yes",
         "theme": "dark"

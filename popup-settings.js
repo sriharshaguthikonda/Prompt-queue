@@ -28,6 +28,7 @@ export async function loadSettingsIntoUI() {
       document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
       document.getElementById('refreshTabBeforeEachPrompt').checked = s.refreshTabBeforeEachPrompt === true;
       document.getElementById('parallelOneTabPerPrompt').checked = s.parallelOneTabPerPrompt === true;
+      document.getElementById('parallelActivateTabBeforeSend').checked = s.parallelActivateTabBeforeSend === true;
       document.getElementById('openNewChatPerPrompt').checked = s.openNewChatPerPrompt === true;
       document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
 
@@ -79,6 +80,7 @@ export async function saveSettingsFromUI() {
       stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
       refreshTabBeforeEachPrompt: document.getElementById('refreshTabBeforeEachPrompt').checked,
       parallelOneTabPerPrompt: document.getElementById('parallelOneTabPerPrompt').checked,
+      parallelActivateTabBeforeSend: document.getElementById('parallelActivateTabBeforeSend').checked,
       openNewChatPerPrompt: document.getElementById('openNewChatPerPrompt').checked,
       openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
     };
@@ -106,7 +108,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'enableRetryOnFailure', 'maxRetriesPerPrompt', 'retryDelaySec', 'systemPrompt', 'appendPromptText', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'enableRetryOnFailure', 'maxRetriesPerPrompt', 'retryDelaySec', 'systemPrompt', 'appendPromptText', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt', 'parallelActivateTabBeforeSend'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });

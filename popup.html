@@ -200,6 +200,10 @@ Prompts (one per line)"></textarea>
           <input id="parallelOneTabPerPrompt" type="checkbox" />
           <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10) <button type="button" class="help-icon" data-help="Fan-out mode: each prompt set gets one background tab. Existing safety cap is 10 tab workers per run.">?</button></label>
         </div>
+        <div class="inline" style="margin-top: 8px; padding: 0 12px;">
+          <input id="parallelActivateTabBeforeSend" type="checkbox" checked />
+          <label for="parallelActivateTabBeforeSend">Foreground send fallback (activate tab before send) <button type="button" class="help-icon" data-help="Parallel mode only. Before sending each prompt, the worker tab is brought to foreground and focused. This is slower but can be more reliable than background send.">?</button></label>
+        </div>
 
         <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
           <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>

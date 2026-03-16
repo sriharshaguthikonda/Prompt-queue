@@ -61,8 +61,12 @@
           ],
           sendButtonCandidates: [
             'form button[data-testid="send-button"]',
+            'button[data-testid="send-button"]',
             'form button[aria-label="Send message"]',
+            'button[aria-label="Send message"]',
+            'button[aria-label*="Send"]',
             'form button[type="submit"]',
+            'button[type="submit"]',
           ],
           stopButtonCandidates: [
             'button[data-testid="stop-button"]',
@@ -160,11 +164,40 @@
     return null;
   }
 
+  function queryFirstWithin(root, selectors) {
+    if (!root) return null;
+    for (const sel of selectors) {
+      try {
+        const el = root.querySelector(sel);
+        if (el) return el;
+      } catch (_) {}
+    }
+    return null;
+  }
+
+  function queryLastVisible(selectors) {
+    for (const sel of selectors) {
+      let nodes = [];
+      try {
+        nodes = Array.from(document.querySelectorAll(sel));
+      } catch (_) {
+        nodes = [];
+      }
+      for (let i = nodes.length - 1; i >= 0; i -= 1) {
+        if (isElementVisible(nodes[i])) return nodes[i];
+      }
+      if (nodes.length > 0) return nodes[nodes.length - 1];
+    }
+    return null;
+  }
+
   function isButtonEnabled(btn) {
     if (!btn) return false;
-    const disabled = btn.getAttribute('disabled') !== null || btn.ariaDisabled === 'true';
-    const opacity = parseFloat(getComputedStyle(btn).opacity || '1');
-    return !disabled && opacity > 0.5;
+    const disabled =
+      btn.getAttribute('disabled') !== null ||
+      btn.ariaDisabled === 'true' ||
+      btn.getAttribute('aria-disabled') === 'true';
+    return !disabled;
   }
 
   function isElementVisible(el) {
@@ -240,31 +273,40 @@
     selection.addRange(range);
     document.execCommand('delete', false, null);
 
-    const paragraphs = String(text || '')
-      .replace(/\r\n/g, '\n')
-      .split('\n')
-      .map((line) => line.length === 0 ? '<p><br></p>' : `<p>${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
-      .join('');
+    const normalizedText = String(text || '').replace(/\r\n/g, '\n');
 
-    const insertHtmlOk = document.execCommand('insertHTML', false, paragraphs);
-    if (insertHtmlOk) return;
-
-    // Fallback: chunked insertText to avoid length limits
-    const chunks = [];
-    const maxChunk = 4000;
-    for (let i = 0; i < text.length; i += maxChunk) {
-      chunks.push(text.slice(i, i + maxChunk));
-    }
-    try {
-      for (const chunk of chunks) {
-        document.execCommand('insertText', false, chunk);
+    // Preferred path: plain text insertion tends to keep ProseMirror state consistent.
+    const insertTextOk = document.execCommand('insertText', false, normalizedText);
+    if (!insertTextOk) {
+      const paragraphs = normalizedText
+        .split('\n')
+        .map((line) => (line.length === 0 ? '<p><br></p>' : `<p>${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`))
+        .join('');
+      const insertHtmlOk = document.execCommand('insertHTML', false, paragraphs);
+      if (!insertHtmlOk) {
+        el.textContent = normalizedText;
       }
-      return;
-    } catch (_) {
-      // Last resort: set textContent and dispatch events
-      el.textContent = text;
-      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    el.dispatchEvent(new InputEvent('input', {
+      data: normalizedText,
+      bubbles: true,
+      cancelable: true,
+      inputType: 'insertText',
+    }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+
+    // Keep ChatGPT fallback textarea in sync when present.
+    const fallbackTextarea = el.closest('form')?.querySelector('textarea[name="prompt-textarea"]');
+    if (fallbackTextarea) {
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+      if (descriptor && descriptor.set) {
+        descriptor.set.call(fallbackTextarea, normalizedText);
+      } else {
+        fallbackTextarea.value = normalizedText;
+      }
+      fallbackTextarea.dispatchEvent(new InputEvent('input', { bubbles: true, data: normalizedText }));
+      fallbackTextarea.dispatchEvent(new Event('change', { bubbles: true }));
     }
   }
 
@@ -311,6 +353,14 @@
     const preview = text.length > 80 ? text.slice(0, 80) + '…' : text;
     console.log('[GetInputCurrentText] Read text from input', { length: text.length, preview });
     return text;
+  }
+
+  function isComposerClearedAfterSend(inputEl, originalText) {
+    const current = normalizeWhitespace(getInputCurrentText(inputEl));
+    const original = normalizeWhitespace(originalText);
+    if (!current) return true;
+    if (!original) return false;
+    return current !== original;
   }
 
   function normalizeWhitespace(text) {
@@ -360,7 +410,12 @@
   }
 
   async function clickSend(btn, inputEl) {
-    if (!btn) {
+    let targetButton = btn;
+    if (!targetButton || !isButtonEnabled(targetButton)) {
+      targetButton = getLiveChatGPTSendButton(inputEl) || targetButton;
+    }
+    const buttonUsable = !!targetButton && isButtonEnabled(targetButton);
+    if (!buttonUsable) {
       inputEl?.focus();
       const down = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
       const press = new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
@@ -368,9 +423,69 @@
       inputEl?.dispatchEvent(down);
       inputEl?.dispatchEvent(press);
       inputEl?.dispatchEvent(up);
+      console.warn('[PromptQueue] Send button unavailable; attempted Enter key fallback');
       return;
     }
-    btn.click();
+    targetButton.click();
+  }
+
+  function getLiveChatGPTInput() {
+    const scoped = queryLastVisible([
+      'form #prompt-textarea.ProseMirror[contenteditable="true"][role="textbox"]',
+      'form div#prompt-textarea[contenteditable="true"][role="textbox"]',
+      'form #prompt-textarea[contenteditable="true"]',
+      'form .ProseMirror[contenteditable="true"][role="textbox"]',
+      'form .ProseMirror[contenteditable="true"]',
+    ]);
+    if (scoped) return scoped;
+    return queryLastVisible([
+      '#prompt-textarea.ProseMirror[contenteditable="true"][role="textbox"]',
+      'div#prompt-textarea[contenteditable="true"][role="textbox"]',
+      '#prompt-textarea[contenteditable="true"]',
+      '.ProseMirror[contenteditable="true"][role="textbox"]',
+      '.ProseMirror[contenteditable="true"]',
+      'form textarea[name="prompt-textarea"]',
+    ]);
+  }
+
+  function getLiveChatGPTSendButton(inputEl = null) {
+    const selectors = [
+      'button[data-testid="send-button"]',
+      'button[aria-label="Send message"]',
+      'button[aria-label*="Send"]',
+      'button[type="submit"]',
+    ];
+    const composer = inputEl || getLiveChatGPTInput();
+    const form = composer?.closest?.('form');
+    const scoped = queryFirstWithin(form, selectors);
+    if (scoped) return scoped;
+    return queryLastVisible([
+      'form button[data-testid="send-button"]',
+      'form button[aria-label="Send message"]',
+      'form button[aria-label*="Send"]',
+      'form button[type="submit"]',
+      'button[data-testid="send-button"]',
+      'button[aria-label="Send message"]',
+      'button[aria-label*="Send"]',
+      'button[type="submit"]',
+    ]);
+  }
+
+  function getChatGPTSendReadinessSnapshot(inputEl = null) {
+    const composer = inputEl || getLiveChatGPTInput();
+    const sendButton = getLiveChatGPTSendButton(composer);
+    const stopButton = document.querySelector('button[data-testid="stop-button"], button[aria-label="Stop generating"], button[aria-label="Stop streaming"]');
+    return {
+      href: window.location.href,
+      visibilityState: document.visibilityState,
+      sendButtonFound: !!sendButton,
+      sendButtonEnabled: !!sendButton && isButtonEnabled(sendButton),
+      sendButtonAriaLabel: sendButton?.getAttribute?.('aria-label') || null,
+      stopButtonFound: !!stopButton,
+      composerFound: !!composer,
+      composerTag: composer?.tagName || null,
+      composerRole: composer?.getAttribute?.('role') || null,
+    };
   }
 
   function getTailConversationTurns(maxTurns = 2) {
@@ -435,18 +550,35 @@
     return false;
   }
 
-  function isChatGPTThinking() {
+  function getChatGPTBusySignals() {
     // Ignore stale indicators in older turns; only tail turns can block sending.
     const tailTurns = getTailConversationTurns(2);
     const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
     const thinkingIndicator = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
     const activeToolStatus = hasActiveToolStatusInTailTurns(tailTurns);
-    const stopPresent = document.querySelector('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
+    const stopPresent = document.querySelector('button[aria-label="Stop generating"], button[aria-label="Stop streaming"], button[data-testid="stop-button"]');
     const confirmVisible = isConfirmDialogVisible();
-    return !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible;
+    return {
+      loadingShimmer: !!loadingShimmer,
+      thinkingIndicator: !!thinkingIndicator,
+      activeToolStatus: !!activeToolStatus,
+      stopPresent: !!stopPresent,
+      confirmVisible: !!confirmVisible,
+    };
   }
 
-  function waitForChatGPTSendWindow({ sendButton, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
+  function isChatGPTThinking() {
+    const signals = getChatGPTBusySignals();
+    return (
+      signals.loadingShimmer ||
+      signals.thinkingIndicator ||
+      signals.activeToolStatus ||
+      signals.stopPresent ||
+      signals.confirmVisible
+    );
+  }
+
+  function waitForChatGPTSendWindow({ sendButton, inputEl, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250, forceAttemptAfterMs = 10000 }) {
     return new Promise((resolve, reject) => {
       const start = Date.now();
       let readySince = null;
@@ -454,27 +586,68 @@
       const check = () => {
         maybeClickConfirmButtons();
         const elapsed = Date.now() - start;
-        const busy = isChatGPTThinking();
-        const directReady = sendButton ? isButtonEnabled(sendButton) : false;
-        const canSend = directReady || isChatGPTReadyToSend();
+        const busySignals = getChatGPTBusySignals();
+        const strictBusy = busySignals.stopPresent || busySignals.confirmVisible;
+        const softBusy = busySignals.loadingShimmer || busySignals.thinkingIndicator || busySignals.activeToolStatus;
+        const hiddenTab = document.visibilityState !== 'visible';
+        const currentInputEl = inputEl || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+        const liveSendButton = getLiveChatGPTSendButton(currentInputEl) || sendButton || null;
+        const directReady = liveSendButton ? isButtonEnabled(liveSendButton) : false;
+        const canSend = directReady || isChatGPTReadyToSend({ ignoreThinking: true, inputEl: currentInputEl });
+        const inputText = getInputCurrentText(currentInputEl);
+        const inputHasText = !!(inputText || '').replace(/\s+/g, ' ').trim();
+        const strictReady = !strictBusy && !softBusy && canSend;
+        const relaxedReady = hiddenTab && !strictBusy && canSend && inputHasText;
+        // Best-effort fallback is only for hidden tabs; foreground sends should require canSend.
+        const fallbackReady = hiddenTab && !strictBusy && !softBusy && inputHasText && elapsed >= forceAttemptAfterMs;
 
-        if (!busy && canSend) {
+        if (strictReady || relaxedReady || fallbackReady) {
           if (readySince === null) {
             readySince = Date.now();
           } else if (Date.now() - readySince >= quietWindowMs) {
-            console.log('[PreSendGuard] Quiet send window reached', { elapsed, quietWindowMs });
+            console.log('[PreSendGuard] Quiet send window reached', {
+              elapsed,
+              quietWindowMs,
+              hiddenTab,
+              strictReady,
+              relaxedReady,
+              fallbackReady,
+            });
             resolve();
             return;
           }
         } else {
           if (readySince !== null) {
-            console.log('[PreSendGuard] Busy signal returned; resetting quiet window', { elapsed, busy, canSend });
+            console.log('[PreSendGuard] Busy signal returned; resetting quiet window', {
+              elapsed,
+              strictBusy,
+              softBusy,
+              canSend,
+              hiddenTab,
+              inputHasText,
+              fallbackReady,
+            });
           }
           readySince = null;
         }
 
         if (elapsed >= maxWaitMs) {
-          reject(new Error('ChatGPT did not reach a stable send window before timeout'));
+          const timeoutBestEffortAllowed = hiddenTab && (relaxedReady || fallbackReady || (!strictBusy && inputHasText));
+          if (timeoutBestEffortAllowed) {
+            console.warn('[PreSendGuard] Timeout reached in hidden tab; proceeding with best effort send', {
+              elapsed,
+              strictBusy,
+              softBusy,
+              canSend,
+              inputHasText,
+              hiddenTab,
+              fallbackReady,
+              readiness: getChatGPTSendReadinessSnapshot(currentInputEl),
+            });
+            resolve();
+            return;
+          }
+          reject(new Error(`ChatGPT did not reach a stable send window before timeout (strictBusy=${strictBusy}, softBusy=${softBusy}, canSend=${canSend}, hidden=${hiddenTab}, inputHasText=${inputHasText}, snapshot=${JSON.stringify(getChatGPTSendReadinessSnapshot(currentInputEl))})`));
           return;
         }
         setTimeout(check, pollMs);
@@ -498,13 +671,13 @@
     return found;
   }
 
-  function isChatGPTReadyToSend() {
-    // Check if send button is enabled or if we're in a state where we can send
-    const sendBtn = document.querySelector('[data-testid="send-button"]');
-    if (sendBtn && isButtonEnabled(sendBtn)) return true;
-    const regenPresent = document.querySelector('button:has([data-testid="regenerate-response-button"]) , button[aria-label*="Regenerate"]');
-    const isThinking = isChatGPTThinking();
-    return (!!sendBtn || !!regenPresent) && !isThinking;
+  function isChatGPTReadyToSend({ ignoreThinking = false, inputEl = null } = {}) {
+    const composer = inputEl || getLiveChatGPTInput();
+    const sendBtn = getLiveChatGPTSendButton(composer) || document.querySelector('[data-testid="send-button"]');
+    const inputText = getInputCurrentText(composer);
+    const inputHasText = !!(inputText || '').replace(/\s+/g, ' ').trim();
+    const isThinking = ignoreThinking ? false : isChatGPTThinking();
+    return !!sendBtn && isButtonEnabled(sendBtn) && inputHasText && !isThinking;
   }
 
   function getElementsBySelector(selector) {
@@ -773,8 +946,33 @@
     });
   }
 
+  async function notifyPromptSubmitted(promptId, note = null) {
+    if (!promptId) return false;
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        const response = await chrome.runtime.sendMessage({ type: 'PROMPT_SUBMITTED', promptId, note });
+        if (response?.ok !== false) {
+          console.log('[PromptQueue] PROMPT_SUBMITTED sent', { promptId, attempt, note });
+          return true;
+        }
+      } catch (e) {
+        console.warn('[PromptQueue] PROMPT_SUBMITTED attempt failed', {
+          promptId,
+          attempt,
+          error: e?.message || String(e),
+        });
+      }
+      await new Promise((r) => setTimeout(r, 120 * attempt));
+    }
+    return false;
+  }
+
   async function PromptQueue(text, options, promptId) {
     console.log('[PromptQueue] Received prompt request', { promptId, currentPromptId, textLength: text?.length });
+    const allowBackgroundSendWithoutStream = options?.allowBackgroundSendWithoutStream === true;
+    const skipRenderVerification = options?.skipRenderVerification === true;
+    const skipCompletionWait = options?.skipCompletionWait === true;
   
     // Wait for any currently processing prompt to complete
     if (currentPromptId !== null && currentPromptId !== promptId) {
@@ -886,6 +1084,10 @@
 
       let inputEl = queryFirst(cfg.inputCandidates);
       let sendBtn = queryFirst(cfg.sendButtonCandidates);
+      if (site === 'chatgpt') {
+        inputEl = getLiveChatGPTInput() || inputEl;
+        sendBtn = getLiveChatGPTSendButton(inputEl) || sendBtn;
+      }
       const stopBtnSel = cfg.stopButtonCandidates?.[0] || null;
       let messagesContainer = queryFirst(cfg.messagesContainerCandidates);
       
@@ -893,7 +1095,11 @@
         hasInputEl: !!inputEl, 
         hasSendBtn: !!sendBtn, 
         stopBtnSel, 
-        hasMessagesContainer: !!messagesContainer 
+        hasMessagesContainer: !!messagesContainer,
+        inputTag: inputEl?.tagName || null,
+        inputId: inputEl?.id || null,
+        inputRole: inputEl?.getAttribute?.('role') || null,
+        inputVisible: !!inputEl && isElementVisible(inputEl),
       });
 
       if ((site === 'chatgpt' || site === 'gemini' || site === 'claude') && !inputEl) {
@@ -904,6 +1110,10 @@
         await new Promise((r) => setTimeout(r, 150));
         inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
         sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
+        if (site === 'chatgpt') {
+          inputEl = getLiveChatGPTInput() || inputEl;
+          sendBtn = getLiveChatGPTSendButton(inputEl) || sendBtn;
+        }
         messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
         console.log('[PromptQueue] After focus attempt', { hasInputEl: !!inputEl, hasSendBtn: !!sendBtn });
       }
@@ -957,40 +1167,76 @@
         console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', { promptId, preSendMaxWaitMs });
         await waitForChatGPTSendWindow({
           sendButton: sendBtn,
+          inputEl,
           maxWaitMs: preSendMaxWaitMs,
           quietWindowMs: 1200,
           pollMs: 250,
         });
+        sendBtn = getLiveChatGPTSendButton(inputEl) || queryFirst(cfg.sendButtonCandidates) || sendBtn;
       }
       
       console.log('[PromptQueue] Clicking send button', { promptId });
+      let lastSendButtonEnabledBeforeClick = !!sendBtn && isButtonEnabled(sendBtn);
       await clickSend(sendBtn, inputEl);
 
       let attempt = 0;
       const maxAttempts = 2;
       let streamStarted = false;
+      const sendVerificationStart = Date.now();
+      const hiddenAtSend = document.visibilityState !== 'visible';
+      const streamStartMaxWaitMs = hiddenAtSend
+        ? Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 25000)
+        : Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 10000);
+      const originalPromptNormalized = normalizeWhitespace(text);
 
       while (attempt < maxAttempts && !streamStarted) {
         attempt += 1;
-        console.log('[PromptQueue] Verifying stream started', { promptId, attempt, maxAttempts });
+        console.log('[PromptQueue] Verifying stream started', { promptId, attempt, maxAttempts, hiddenAtSend, streamStartMaxWaitMs });
         streamStarted = await waitForStreamStart({
           stopButtonSelector: stopBtnSel,
-          maxWaitMs: Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 10000),
+          maxWaitMs: streamStartMaxWaitMs,
           pollIntervalMs: options?.pollIntervalMs,
         });
 
-        if (!streamStarted && attempt < maxAttempts) {
+        if (!streamStarted) {
           const renderMatch = findRenderedMessageMatch(text);
           if (renderMatch) {
-            console.log('[PromptQueue] Detected rendered message despite no stream signal; treating as sent', { 
-              promptId, 
-              attempt, 
-              maxAttempts, 
-              contentPreview: renderMatch.contentPreview 
+            console.log('[PromptQueue] Detected rendered message despite no stream signal; treating as sent', {
+              promptId,
+              attempt,
+              maxAttempts,
+              contentPreview: renderMatch.contentPreview,
             });
             streamStarted = true;
             break;
           }
+
+          if (isComposerClearedAfterSend(inputEl, originalPromptNormalized)) {
+            console.log('[PromptQueue] Composer changed/cleared after send; treating as sent without stream signal', {
+              promptId,
+              attempt,
+              maxAttempts,
+              elapsedSinceSendMs: Date.now() - sendVerificationStart,
+            });
+            streamStarted = true;
+            break;
+          }
+
+          const liveSendButton = site === 'chatgpt' ? getLiveChatGPTSendButton(inputEl) : sendBtn;
+          const sendDisabledAfterAttempt = !!liveSendButton && !isButtonEnabled(liveSendButton);
+          if (lastSendButtonEnabledBeforeClick && sendDisabledAfterAttempt) {
+            console.log('[PromptQueue] Send button transitioned to disabled after click; treating as sent', {
+              promptId,
+              attempt,
+              maxAttempts,
+              elapsedSinceSendMs: Date.now() - sendVerificationStart,
+            });
+            streamStarted = true;
+            break;
+          }
+        }
+
+        if (!streamStarted && attempt < maxAttempts) {
           console.warn('[PromptQueue] No active stream detected and no rendered message, re-attempting send', { promptId, attempt, maxAttempts });
           await new Promise((r) => setTimeout(r, 250));
           if (site === 'chatgpt') {
@@ -1002,13 +1248,45 @@
             });
             await waitForChatGPTSendWindow({
               sendButton: sendBtn,
+              inputEl,
               maxWaitMs: retryPreSendMaxWaitMs,
               quietWindowMs: 1200,
               pollMs: 250,
             });
+            sendBtn = getLiveChatGPTSendButton(inputEl) || queryFirst(cfg.sendButtonCandidates) || sendBtn;
           }
+          lastSendButtonEnabledBeforeClick = !!sendBtn && isButtonEnabled(sendBtn);
           await clickSend(sendBtn, inputEl);
         }
+      }
+
+      if (!streamStarted) {
+        const finalRenderMatch = findRenderedMessageMatch(text);
+        const composerChanged = isComposerClearedAfterSend(inputEl, originalPromptNormalized);
+        const liveSendButton = site === 'chatgpt' ? getLiveChatGPTSendButton(inputEl) : sendBtn;
+        const sendDisabledAfterAttempt = !!liveSendButton && !isButtonEnabled(liveSendButton);
+        const fallbackAllowed =
+          allowBackgroundSendWithoutStream &&
+          (composerChanged || !!finalRenderMatch || sendDisabledAfterAttempt);
+        if (finalRenderMatch || composerChanged || fallbackAllowed) {
+          console.warn('[PromptQueue] Final send verification passed without explicit stream signal', {
+            promptId,
+            finalRenderMatch: !!finalRenderMatch,
+            composerChanged,
+            sendDisabledAfterAttempt,
+            fallbackAllowed,
+            elapsedSinceSendMs: Date.now() - sendVerificationStart,
+          });
+          streamStarted = true;
+        }
+      }
+
+      if (!streamStarted && allowBackgroundSendWithoutStream) {
+        console.warn('[PromptQueue] Proceeding without stream signal due background send fallback option', {
+          promptId,
+          elapsedSinceSendMs: Date.now() - sendVerificationStart,
+        });
+        streamStarted = true;
       }
 
       if (!streamStarted) {
@@ -1016,13 +1294,32 @@
       }
       console.log('[PromptQueue] Stream detected or render found, proceeding to render verification', { promptId, streamStarted });
 
+      // Ensure background has a send-stage confirmation signal even when first notify
+      // was dropped (e.g., transient worker wake delay).
+      await notifyPromptSubmitted(promptId, 'send-stage-complete');
+
       // Verify the prompt text appears in the rendered chat (e.g., ChatGPT message bubble)
-      try {
-        await verifyPromptRendered({ text, promptId, attempts: 4, delayMs: 500 });
-        console.log('[PromptQueue] Render verification succeeded', { promptId });
-      } catch (e) {
-        console.error('[PromptQueue] Prompt render verification failed', { promptId, error: e?.message });
-        throw e;
+      if (skipRenderVerification) {
+        console.log('[PromptQueue] Skipping render verification by option', { promptId });
+      } else {
+        try {
+          await verifyPromptRendered({ text, promptId, attempts: 4, delayMs: 500 });
+          console.log('[PromptQueue] Render verification succeeded', { promptId });
+        } catch (e) {
+          console.error('[PromptQueue] Prompt render verification failed', { promptId, error: e?.message });
+          throw e;
+        }
+      }
+
+      if (skipCompletionWait) {
+        console.log('[PromptQueue] Skipping completion wait by option; reporting completion immediately', { promptId });
+        try {
+          const resp = await chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
+          console.log('[PromptQueue] RESPONSE_COMPLETE sent (skipCompletionWait)', { promptId, resp });
+        } catch (e) {
+          console.error('[PromptQueue] Failed to send RESPONSE_COMPLETE (skipCompletionWait)', { promptId, error: e?.message });
+        }
+        return;
       }
 
       const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
@@ -1152,6 +1449,7 @@
         }
         
         console.log('[MessageListener] Unknown message type:', message?.type);
+        sendResponse({ ok: false, error: `Unknown message type: ${String(message?.type || '')}` });
       } catch (e) {
         console.error('[MessageListener] Unexpected error:', { error: e?.message, stack: e?.stack });
         sendResponse({ ok: false, error: String(e) });
