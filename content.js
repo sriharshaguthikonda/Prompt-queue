@@ -37,6 +37,8 @@
     pollIntervalMs: 1500,
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   };
+  const PROSEMIRROR_CHUNK_SIZE = 1200;
+  const PROSEMIRROR_YIELD_EVERY = 4;
 
   function detectSite() {
     const host = location.hostname;
@@ -264,20 +266,74 @@
     maybeClickConfirmButtons();
   }, 1000);
 
-  function setProseMirrorText(el, text) {
-    el.focus({ preventScroll: true });
+  function chunkText(text, chunkSize = PROSEMIRROR_CHUNK_SIZE) {
+    if (!text) return [];
+    const chunks = [];
+    for (let i = 0; i < text.length; i += chunkSize) {
+      chunks.push(text.slice(i, i + chunkSize));
+    }
+    return chunks;
+  }
+
+  function selectAllInElement(el) {
     const selection = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(el);
     selection.removeAllRanges();
     selection.addRange(range);
+  }
+
+  function syncFallbackTextarea(el, normalizedText) {
+    const fallbackTextarea = el.closest('form')?.querySelector('textarea[name="prompt-textarea"]');
+    if (!fallbackTextarea) return;
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(fallbackTextarea, normalizedText);
+    } else {
+      fallbackTextarea.value = normalizedText;
+    }
+    fallbackTextarea.dispatchEvent(new InputEvent('input', { bubbles: true, data: normalizedText }));
+    fallbackTextarea.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function insertCurrentChunk(chunk) {
+    if (!chunk) return true;
+    const inserted = document.execCommand('insertText', false, chunk);
+    if (inserted) return true;
+    const selection = window.getSelection();
+    if (!selection || selection.rangeCount === 0) {
+      return false;
+    }
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const node = document.createTextNode(chunk);
+    range.insertNode(node);
+    range.setStartAfter(node);
+    range.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return true;
+  }
+
+  async function setProseMirrorText(el, text) {
+    const normalizedText = String(text || '').replace(/\r\n/g, '\n');
+    el.focus({ preventScroll: true });
+    selectAllInElement(el);
     document.execCommand('delete', false, null);
 
-    const normalizedText = String(text || '').replace(/\r\n/g, '\n');
+    let inserted = true;
+    const chunks = chunkText(normalizedText);
+    for (let i = 0; i < chunks.length; i += 1) {
+      if (!insertCurrentChunk(chunks[i])) {
+        inserted = false;
+        break;
+      }
+      if ((i + 1) % PROSEMIRROR_YIELD_EVERY === 0) {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+    }
 
-    // Preferred path: plain text insertion tends to keep ProseMirror state consistent.
-    const insertTextOk = document.execCommand('insertText', false, normalizedText);
-    if (!insertTextOk) {
+    if (!inserted) {
       const paragraphs = normalizedText
         .split('\n')
         .map((line) => (line.length === 0 ? '<p><br></p>' : `<p>${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`))
@@ -295,43 +351,39 @@
       inputType: 'insertText',
     }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
-
-    // Keep ChatGPT fallback textarea in sync when present.
-    const fallbackTextarea = el.closest('form')?.querySelector('textarea[name="prompt-textarea"]');
-    if (fallbackTextarea) {
-      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-      if (descriptor && descriptor.set) {
-        descriptor.set.call(fallbackTextarea, normalizedText);
-      } else {
-        fallbackTextarea.value = normalizedText;
-      }
-      fallbackTextarea.dispatchEvent(new InputEvent('input', { bubbles: true, data: normalizedText }));
-      fallbackTextarea.dispatchEvent(new Event('change', { bubbles: true }));
-    }
+    syncFallbackTextarea(el, normalizedText);
   }
 
-  function setTextInInput(el, text) {
+  async function setTextInInput(el, text) {
     if (!el) throw new Error('Input element not found');
+    const normalizedText = String(text || '').replace(/\r\n/g, '\n');
     const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
     if (isContentEditable) {
       if (el.id === 'prompt-textarea' || el.classList.contains('ProseMirror')) {
-        setProseMirrorText(el, text);
+        await setProseMirrorText(el, normalizedText);
       } else {
         el.focus();
-        el.textContent = text;
+        el.textContent = normalizedText;
         el.dispatchEvent(new InputEvent('input', { bubbles: true }));
         el.dispatchEvent(new Event('change', { bubbles: true }));
       }
       return;
     }
 
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(el, text);
+    if (typeof el.setRangeText === 'function') {
+      el.focus();
+      const currentValue = typeof el.value === 'string' ? el.value : '';
+      el.setSelectionRange(0, currentValue.length);
+      el.setRangeText(normalizedText, 0, currentValue.length, 'end');
     } else {
-      el.value = text;
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+      if (descriptor && descriptor.set) {
+        descriptor.set.call(el, normalizedText);
+      } else {
+        el.value = normalizedText;
+      }
+      el.focus();
     }
-    el.focus();
     el.dispatchEvent(new InputEvent('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
@@ -593,7 +645,7 @@
         const currentInputEl = inputEl || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
         const liveSendButton = getLiveChatGPTSendButton(currentInputEl) || sendButton || null;
         const directReady = liveSendButton ? isButtonEnabled(liveSendButton) : false;
-        const canSend = directReady || isChatGPTReadyToSend({ ignoreThinking: true, inputEl: currentInputEl });
+        const canSend = directReady || isChatGPTReadyToSend({ ignoreThinking: true, inputEl: currentInputEl, requireInputText: true });
         const inputText = getInputCurrentText(currentInputEl);
         const inputHasText = !!(inputText || '').replace(/\s+/g, ' ').trim();
         const strictReady = !strictBusy && !softBusy && canSend;
@@ -671,13 +723,13 @@
     return found;
   }
 
-  function isChatGPTReadyToSend({ ignoreThinking = false, inputEl = null } = {}) {
+  function isChatGPTReadyToSend({ ignoreThinking = false, inputEl = null, requireInputText = false } = {}) {
     const composer = inputEl || getLiveChatGPTInput();
     const sendBtn = getLiveChatGPTSendButton(composer) || document.querySelector('[data-testid="send-button"]');
     const inputText = getInputCurrentText(composer);
     const inputHasText = !!(inputText || '').replace(/\s+/g, ' ').trim();
     const isThinking = ignoreThinking ? false : isChatGPTThinking();
-    return !!sendBtn && isButtonEnabled(sendBtn) && inputHasText && !isThinking;
+    return !!sendBtn && isButtonEnabled(sendBtn) && (!requireInputText || inputHasText) && !isThinking;
   }
 
   function getElementsBySelector(selector) {
@@ -1133,7 +1185,7 @@
       console.log('[PromptQueue] Streams stopped, proceeding', { promptId });
 
       console.log('[PromptQueue] Setting text input', { promptId, textLength: text?.length });
-      setTextInInput(inputEl, text);
+      await setTextInInput(inputEl, text);
       await new Promise((r) => setTimeout(r, 150));
 
       let pasteVerifyAttempts = 0;
@@ -1147,7 +1199,7 @@
         }
         pasteVerifyAttempts += 1;
         console.warn('[PromptQueue] Input appears empty, re-setting text', { promptId, pasteVerifyAttempts, maxPasteVerifyAttempts });
-        setTextInInput(inputEl, text);
+        await setTextInInput(inputEl, text);
         await new Promise((r) => setTimeout(r, 150));
       }
 
