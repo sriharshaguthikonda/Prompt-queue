@@ -153,7 +153,8 @@ async function startAutomation() {
     const textarea = document.getElementById('prompts');
     const separatorInput = document.getElementById('separatorInput');
     const separator = resolveSeparator(separatorInput?.value);
-    const launchPlan = buildPromptLaunchPlan(textarea.value, separator);
+    const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
+    const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText);
     const prompts = launchPlan.prompts;
     if (prompts.length === 0) {
       setStatus('Please enter at least one prompt.');
@@ -176,10 +177,10 @@ async function startAutomation() {
       const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
       currentSettings = { ...(settingsRes?.settings || {}) };
     }
-    const appendText = typeof currentSettings.appendPromptText === 'string'
+    const settingsAppendText = typeof currentSettings.appendPromptText === 'string'
       ? currentSettings.appendPromptText.trim()
       : '';
-    if (appendText && currentSettings.appendSystemPrompt !== true) {
+    if (settingsAppendText && currentSettings.appendSystemPrompt !== true) {
       currentSettings.appendSystemPrompt = true;
       showToast('Append text found; auto-enabling append for this run.', 'info', 3000);
     }
@@ -272,7 +273,8 @@ if (saveHistoryBtn) {
       const textarea = document.getElementById('prompts');
       const separatorInput = document.getElementById('separatorInput');
       const separator = resolveSeparator(separatorInput?.value);
-      const launchPlan = buildPromptLaunchPlan(textarea.value, separator);
+      const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
+      const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText);
       const prompts = launchPlan.prompts;
       if (prompts.length === 0) {
         showToast('No prompts to save', 'error');
@@ -596,7 +598,8 @@ const promptsTextarea = document.getElementById('prompts');
 const updatePromptCount = () => {
   if (!promptsTextarea) return;
   const separator = resolveSeparator(separatorInput?.value);
-  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator);
+  const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
+  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator, appendText);
   const prompts = launchPlan.prompts;
   const tabGroups = launchPlan.tabPromptGroups.length;
   const counter = document.querySelector('.prompt-counter');
