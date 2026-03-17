@@ -1,0 +1,723 @@
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+ [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [StartAutomation] Received request Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [Parallel] Starting fan-out run Object
+background.js:16 [AI Prompt Queue] [Health] Tick Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers Object
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload Object
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content Object
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [Health] Tick Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers Object
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload Object
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content Object
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage Object
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content Object
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [TestConnection] Error: Object
+(anonymous) @ background.js:16
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726368402_3_w74y8v', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661780, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661780, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 221, timeSinceLastRecovery: 1773726371942, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726371687_4_kthzte', promptIndex: 0, baseLength: 88, finalLength: 8345}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661785, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661785, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 2238, timeSinceLastRecovery: 1773726376947, …}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726374665_5_lkkohu', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661788, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661788, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726378203_6_iwc1y8', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661791, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661791, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 987, timeSinceLastRecovery: 1773726381941, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726380905_7_t9glql', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661794, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661794, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726383965_8_ofu9g2', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661797, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661797, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 370, timeSinceLastRecovery: 1773726386945, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726386536_9_zmrxv6', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661800, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661800, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1649, timeSinceLastRecovery: 1773726391948, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 6654, timeSinceLastRecovery: 1773726396953, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 11647, timeSinceLastRecovery: 1773726401946, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 16650, timeSinceLastRecovery: 1773726406949, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 21650, timeSinceLastRecovery: 1773726411949, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 26655, timeSinceLastRecovery: 1773726416954, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 31643, timeSinceLastRecovery: 1773726421942, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 36642, timeSinceLastRecovery: 1773726426941, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 41648, timeSinceLastRecovery: 1773726431947, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 46654, timeSinceLastRecovery: 1773726436953, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 51667, timeSinceLastRecovery: 1773726441966, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 56654, timeSinceLastRecovery: 1773726446953, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 61654, timeSinceLastRecovery: 1773726451953, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 66655, timeSinceLastRecovery: 1773726456954, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 71657, timeSinceLastRecovery: 1773726461956, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 76648, timeSinceLastRecovery: 1773726466947, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 81647, timeSinceLastRecovery: 1773726471946, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 86690, timeSinceLastRecovery: 1773726476989, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726365774_1_0_il38fy', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726363130_1_123ho2', workerIndex: 1, tabId: 1967661774, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726371656_3_0_7otc73', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726374590_4_0_zgjavi', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [ResponseComplete][Parallel] Unknown promptId, ignoring {promptId: 'parallel_1773726374590_4_0_zgjavi', senderTabId: 1967661785, pendingPromptIds: Array(7), workerCount: 9}
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726368402_3_w74y8v', workerIndex: 3, tabId: 1967661780, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726390240_9_0_hmofp1', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726386536_9_zmrxv6', workerIndex: 9, tabId: 1967661800, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726386430_8_0_nq96kd', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726383965_8_ofu9g2', workerIndex: 8, tabId: 1967661797, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726368381_2_0_bbrzhb', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726365856_2_ws30oe', workerIndex: 2, tabId: 1967661777, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726380830_6_0_khjhra', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726378162_5_0_ti3q9d', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726378203_6_iwc1y8', workerIndex: 6, tabId: 1967661791, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726374665_5_lkkohu', workerIndex: 5, tabId: 1967661788, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726383881_7_0_eth78m', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Parallel] Worker failed {workerId: 'worker_1773726380905_7_t9glql', workerIndex: 7, tabId: 1967661794, nextPromptIndex: 0, error: 'Error: ChatGPT did not reach a stable send window before timeout', …}
+(anonymous) @ background.js:16
+finalizeParallelWorker @ background.js:1017
+await in finalizeParallelWorker
+(anonymous) @ background.js:1701
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 928, timeSinceLastRecovery: 1773726481942, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 5969, timeSinceLastRecovery: 1773726486983, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 11096, timeSinceLastRecovery: 1773726492110, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 15935, timeSinceLastRecovery: 1773726496949, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 20938, timeSinceLastRecovery: 1773726501952, …}
+background.js:16 [AI Prompt Queue] [StartAutomation] Received request {running: false, processing: false, currentIndex: 0, promptsInRequest: 10, tabGroupsInRequest: 10}
+background.js:16 [AI Prompt Queue] [Parallel] Starting fan-out run {tabs: 10, maxTabs: 10, launchUrl: 'https://chatgpt.com/g/g-69b7571f69348191bb3bddf38799a52c-plab-2-feedback-v11', launchStrategy: 'launch next tab immediately after current tab accepts first prompt'}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 2434, timeSinceLastRecovery: 1773726571952, …}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726569477_0_aybheu', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661812, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661812, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 2216, timeSinceLastRecovery: 1773726576955, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726574705_1_iavne2', promptIndex: 0, baseLength: 95, finalLength: 8352}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661815, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661815, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726578014_2_feex67', promptIndex: 0, baseLength: 90, finalLength: 8347}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661818, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661818, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1333, timeSinceLastRecovery: 1773726581942, …}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726580575_3_nk92vi', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661821, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661821, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 344, timeSinceLastRecovery: 1773726586948, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726583522_4_cndj3y', promptIndex: 0, baseLength: 88, finalLength: 8345}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661824, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661824, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726587246_5_itg6oq', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661827, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661827, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1367, timeSinceLastRecovery: 1773726591955, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726590546_6_d7jgio', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661830, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661830, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726593558_7_ha1k73', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661833, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661833, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 61, timeSinceLastRecovery: 1773726596945, …}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726596846_8_ciiqyy', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661836, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661836, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1586, timeSinceLastRecovery: 1773726601952, …}
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [TestConnection] Error: {message: 'Could not establish connection. Receiving end does not exist.'}
+(anonymous) @ background.js:16
+(anonymous) @ background.js:359
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726600328_9_r8edhj', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661839, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661839, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 3388, timeSinceLastRecovery: 1773726606942, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 8388, timeSinceLastRecovery: 1773726611942, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 13403, timeSinceLastRecovery: 1773726616957, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 18393, timeSinceLastRecovery: 1773726621947, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 23391, timeSinceLastRecovery: 1773726626945, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 28387, timeSinceLastRecovery: 1773726631941, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 33402, timeSinceLastRecovery: 1773726636956, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 38394, timeSinceLastRecovery: 1773726641948, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 43393, timeSinceLastRecovery: 1773726646947, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 48400, timeSinceLastRecovery: 1773726651954, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 53396, timeSinceLastRecovery: 1773726656950, …}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726580550_2_0_4bexkh', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726577903_1_0_a3tksz', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726578014_2_feex67', workerIndex: 2, tabId: 1967661818, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726574705_1_iavne2', workerIndex: 1, tabId: 1967661815, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726583500_3_0_may9pu', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726580575_3_nk92vi', workerIndex: 3, tabId: 1967661821, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726587154_4_0_m5c7gw', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726574688_0_0_8tyecc', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726590510_5_0_ull48c', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726583522_4_cndj3y', workerIndex: 4, tabId: 1967661824, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726569477_0_aybheu', workerIndex: 0, tabId: 1967661812, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726587246_5_itg6oq', workerIndex: 5, tabId: 1967661827, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1568, timeSinceLastRecovery: 1773726661949, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 6563, timeSinceLastRecovery: 1773726666944, …}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726574705_1_iavne2', promptIndex: 0, baseLength: 95, finalLength: 8352}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661815, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661815, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726580575_3_nk92vi', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661821, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661821, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726587246_5_itg6oq', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661827, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661827, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1535, timeSinceLastRecovery: 1773726671950, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 6539, timeSinceLastRecovery: 1773726676954, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 11537, timeSinceLastRecovery: 1773726681952, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 16533, timeSinceLastRecovery: 1773726686948, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 21526, timeSinceLastRecovery: 1773726691941, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 26541, timeSinceLastRecovery: 1773726696956, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 31530, timeSinceLastRecovery: 1773726701945, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 36533, timeSinceLastRecovery: 1773726706948, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 41537, timeSinceLastRecovery: 1773726711952, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 46529, timeSinceLastRecovery: 1773726716944, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726600253_8_0_10ts01', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726596846_8_ciiqyy', workerIndex: 8, tabId: 1967661836, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726603423_9_0_uo23em', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726600328_9_r8edhj', workerIndex: 9, tabId: 1967661839, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726596821_7_0_5xo0vu', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726593558_7_ha1k73', workerIndex: 7, tabId: 1967661833, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [ResponseComplete] Received {messagePromptId: 'parallel_1773726593506_6_0_iuwqs6', statePromptId: null, running: true, mode: 'parallel', processing: false, …}
+background.js:16 [AI Prompt Queue] [Retry][Parallel] Scheduling retry {source: 'RESPONSE_COMPLETE', workerId: 'worker_1773726590546_6_d7jgio', workerIndex: 6, tabId: 1967661830, promptIndex: 0, …}
+(anonymous) @ background.js:16
+scheduleParallelPromptRetry @ background.js:930
+await in scheduleParallelPromptRetry
+(anonymous) @ background.js:1690
+await in (anonymous)
+(anonymous) @ background.js:1868
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1424, timeSinceLastRecovery: 1773726721983, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 6394, timeSinceLastRecovery: 1773726726953, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726596846_8_ciiqyy', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661836, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661836, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726600328_9_r8edhj', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661839, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661839, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726593558_7_ha1k73', promptIndex: 0, baseLength: 87, finalLength: 8344}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661833, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661833, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [BuildMessageText] Applying prompt wrappers {prependEnabled: false, appendEnabled: true, appendEffective: true, prependLength: 0, appendLength: 8255, …}
+background.js:16 [AI Prompt Queue] [Parallel] Built prompt payload {workerId: 'worker_1773726590546_6_d7jgio', promptIndex: 0, baseLength: 86, finalLength: 8343}
+background.js:16 [AI Prompt Queue] [SendToContent] Sending message to content {tabId: 1967661830, messageType: 'SEND_PROMPT'}
+background.js:16 [AI Prompt Queue] [SendToContent] Response received from content {tabId: 1967661830, messageType: 'SEND_PROMPT', response: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 1358, timeSinceLastRecovery: 1773726731942, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 6365, timeSinceLastRecovery: 1773726736949, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 11360, timeSinceLastRecovery: 1773726741944, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 16362, timeSinceLastRecovery: 1773726746946, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 21370, timeSinceLastRecovery: 1773726751954, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 26367, timeSinceLastRecovery: 1773726756951, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 31359, timeSinceLastRecovery: 1773726761943, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 36395, timeSinceLastRecovery: 1773726766979, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 41361, timeSinceLastRecovery: 1773726771945, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 46368, timeSinceLastRecovery: 1773726776952, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 51360, timeSinceLastRecovery: 1773726781944, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 56360, timeSinceLastRecovery: 1773726786944, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 61358, timeSinceLastRecovery: 1773726791942, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 66364, timeSinceLastRecovery: 1773726796948, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 71357, timeSinceLastRecovery: 1773726801941, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 76365, timeSinceLastRecovery: 1773726806949, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 81359, timeSinceLastRecovery: 1773726811943, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 86357, timeSinceLastRecovery: 1773726816941, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 91370, timeSinceLastRecovery: 1773726821954, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 96361, timeSinceLastRecovery: 1773726826945, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 101367, timeSinceLastRecovery: 1773726831951, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 106358, timeSinceLastRecovery: 1773726836942, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 111372, timeSinceLastRecovery: 1773726841956, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 116359, timeSinceLastRecovery: 1773726846943, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 121359, timeSinceLastRecovery: 1773726851943, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 126358, timeSinceLastRecovery: 1773726856942, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 131367, timeSinceLastRecovery: 1773726861951, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 136372, timeSinceLastRecovery: 1773726866956, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 141371, timeSinceLastRecovery: 1773726871955, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 146371, timeSinceLastRecovery: 1773726876955, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 151362, timeSinceLastRecovery: 1773726881946, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 156357, timeSinceLastRecovery: 1773726886941, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 161369, timeSinceLastRecovery: 1773726891953, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 166367, timeSinceLastRecovery: 1773726896951, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 171367, timeSinceLastRecovery: 1773726901951, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 176364, timeSinceLastRecovery: 1773726906948, …}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 181359, timeSinceLastRecovery: 1773726911943, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 186359, timeSinceLastRecovery: 1773726916943, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 191358, timeSinceLastRecovery: 1773726921942, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 196359, timeSinceLastRecovery: 1773726926943, …}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+background.js:16 [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 201359, timeSinceLastRecovery: 1773726931943, …}
+ [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 206364, timeSinceLastRecovery: 1773726936948, …}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 211360, timeSinceLastRecovery: 1773726941944, …}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 216359, timeSinceLastRecovery: 1773726946943, …}
+ [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 221359, timeSinceLastRecovery: 1773726951943, …}
+ [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 226358, timeSinceLastRecovery: 1773726956942, …}
+ [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 231363, timeSinceLastRecovery: 1773726961947, …}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 236372, timeSinceLastRecovery: 1773726966956, …}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 241369, timeSinceLastRecovery: 1773726971953, …}
+ [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 246360, timeSinceLastRecovery: 1773726976944, …}
+ [AI Prompt Queue] [Health] Tick {running: true, processing: false, promptStartTime: 0, timeSinceActivity: 251364, timeSinceLastRecovery: 1773726981948, …}
+ [AI Prompt Queue] [LoadState] State loaded from storage {oldState: {…}, newState: {…}}

@@ -1,6 +1,6 @@
 import { parsePrompts, applyTypoVariantsToExactDuplicates, PROMPT_SEPARATOR } from './popup-dom-utils.js';
 
-export const NEW_TAB_MARKER = '(new tab)';
+export const NEW_TAB_MARKER = '---new tab---';
 
 export function resolveSeparator(raw) {
   if (!raw || typeof raw !== 'string') return PROMPT_SEPARATOR;
@@ -9,7 +9,10 @@ export function resolveSeparator(raw) {
 }
 
 function isNewTabMarker(value) {
-  return typeof value === 'string' && value.trim().toLowerCase() === NEW_TAB_MARKER;
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim().toLowerCase();
+  // Match dash format variations like ---new tab---, ----new tab----, etc.
+  return /^-+new\s+tab-+$/.test(trimmed);
 }
 
 function buildParallelPromptGroupsFromTaggedPrompts(promptsWithMarkers) {
