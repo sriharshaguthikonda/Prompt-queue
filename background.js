@@ -1090,6 +1090,20 @@ async function maybeFinalizeParallelRun(reason) {
   return true;
 }
 
+async function stopAutomationByStopWord() {
+  const completionStatus = { ...getStatus(), running: false, paused: false };
+  state.running = false;
+  state.paused = false;
+  await clearState();
+  try {
+    chrome.runtime.sendMessage({
+      type: "AUTOMATION_COMPLETE",
+      status: completionStatus,
+      reason: "stoppedByStopWord",
+    });
+  } catch (_) {}
+}
+
 async function finalizeParallelWorker(workerId, { failed, errorMessage } = {}) {
   if (state.mode !== 'parallel' || !state.parallel) return;
   const worker = state.parallel.workersById?.[workerId];
@@ -1204,7 +1218,9 @@ async function dispatchParallelWorkerPrompt(workerId) {
     if (liveWorker.inFlightPromptId === promptId) {
       liveWorker.inFlightPromptId = null;
     }
-    delete state.parallel.workersByPromptId[promptId];
+    if (state.parallel?.workersByPromptId) {
+      delete state.parallel.workersByPromptId[promptId];
+    }
     liveWorker.status = 'running';
     liveWorker.nextRetryAt = 0;
     liveWorker.lastSubmission = {
@@ -1231,7 +1247,9 @@ async function dispatchParallelWorkerPrompt(workerId) {
     } else if (worker.inFlightPromptId === promptId) {
       worker.inFlightPromptId = null;
     }
-    delete state.parallel.workersByPromptId[promptId];
+    if (state.parallel?.workersByPromptId) {
+      delete state.parallel.workersByPromptId[promptId];
+    }
     const dispatchError = String(err?.message || err);
     console.error('[Parallel] Failed to dispatch prompt to worker tab', {
       workerId,
@@ -1934,7 +1952,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             const hasStopWord = message.stoppedByStopWord === true;
             if (hasStopWord) {
-              await markParallelWorkerFailed(worker.workerId, 'Stopped by stop phrase');
+              console.log('[ResponseComplete][Parallel] Stop phrase detected, stopping full automation');
+              await stopAutomationByStopWord();
               return;
             }
 
@@ -1987,18 +2006,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
           }
 
-          state.currentRetryCount = 0;
-          state.currentIndex += 1;
-
           if (message.stoppedByStopWord) {
             console.log('[ResponseComplete] Stopped by stop phrase, ending automation');
-            state.running = false;
-            await clearState();
-            try {
-              chrome.runtime.sendMessage({ type: "AUTOMATION_COMPLETE", status: getStatus(), reason: "stoppedByStopWord" });
-            } catch (_) {}
+            await stopAutomationByStopWord();
             return;
           }
+
+          state.currentRetryCount = 0;
+          state.currentIndex += 1;
 
           await saveState();
           try {
