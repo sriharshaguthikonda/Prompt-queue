@@ -1016,6 +1016,20 @@
       }
       console.log('[PromptQueue] Stream detected or render found, proceeding to render verification', { promptId, streamStarted });
 
+      try {
+        await chrome.runtime.sendMessage({
+          type: 'PROMPT_SUBMITTED',
+          promptId,
+          reason: 'stream-start-detected',
+        });
+        console.log('[PromptQueue] PROMPT_SUBMITTED sent', { promptId });
+      } catch (submissionErr) {
+        console.warn('[PromptQueue] Failed to send PROMPT_SUBMITTED', {
+          promptId,
+          error: submissionErr?.message || String(submissionErr),
+        });
+      }
+
       // Verify the prompt text appears in the rendered chat (e.g., ChatGPT message bubble)
       try {
         await verifyPromptRendered({ text, promptId, attempts: 4, delayMs: 500 });
