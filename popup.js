@@ -154,7 +154,10 @@ async function startAutomation() {
     const separatorInput = document.getElementById('separatorInput');
     const separator = resolveSeparator(separatorInput?.value);
     const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
-    const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText);
+    const appendCheckboxChecked = document.getElementById('appendSystemPrompt')?.checked || false;
+    const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
+    const prependCheckboxChecked = document.getElementById('prependSystemPrompt')?.checked || false;
+    const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, appendCheckboxChecked, prependText, prependCheckboxChecked);
     const prompts = launchPlan.prompts;
     if (prompts.length === 0) {
       setStatus('Please enter at least one prompt.');
@@ -274,7 +277,10 @@ if (saveHistoryBtn) {
       const separatorInput = document.getElementById('separatorInput');
       const separator = resolveSeparator(separatorInput?.value);
       const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
-      const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText);
+      const appendCheckboxChecked = document.getElementById('appendSystemPrompt')?.checked || false;
+      const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
+      const prependCheckboxChecked = document.getElementById('prependSystemPrompt')?.checked || false;
+      const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, appendCheckboxChecked, prependText, prependCheckboxChecked);
       const prompts = launchPlan.prompts;
       if (prompts.length === 0) {
         showToast('No prompts to save', 'error');
@@ -599,7 +605,10 @@ const updatePromptCount = () => {
   if (!promptsTextarea) return;
   const separator = resolveSeparator(separatorInput?.value);
   const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
-  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator, appendText);
+  const appendCheckboxChecked = document.getElementById('appendSystemPrompt')?.checked || false;
+  const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
+  const prependCheckboxChecked = document.getElementById('prependSystemPrompt')?.checked || false;
+  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator, appendText, appendCheckboxChecked, prependText, prependCheckboxChecked);
   const prompts = launchPlan.prompts;
   const tabGroups = launchPlan.tabPromptGroups.length;
   const counter = document.querySelector('.prompt-counter');
