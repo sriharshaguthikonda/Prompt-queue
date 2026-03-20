@@ -132,9 +132,7 @@ export function buildPromptLaunchPlan(
   rawText,
   separatorRaw,
   appendText = '',
-  appendCheckboxChecked = false,
   prependText = '',
-  prependCheckboxChecked = false,
 ) {
   const separator = resolveSeparator(separatorRaw);
   const normalizedRawText = normalizeNewlines(typeof rawText === 'string' ? rawText : '');
@@ -149,8 +147,10 @@ export function buildPromptLaunchPlan(
 
   const effectiveAppendText = typeof appendText === 'string' ? appendText.trim() : '';
   const effectivePrependText = typeof prependText === 'string' ? prependText.trim() : '';
-  const canUseAppendMarker = appendCheckboxChecked && effectiveAppendText.length > 0;
-  const canUsePrependMarker = prependCheckboxChecked && effectivePrependText.length > 0;
+  // Marker semantics are independent from global prepend/append toggles:
+  // markers should still work even when the global checkboxes are off.
+  const canUseAppendMarker = effectiveAppendText.length > 0;
+  const canUsePrependMarker = effectivePrependText.length > 0;
 
   const processedPrompts = [];
   let pendingAppendToNextPrompt = false;
