@@ -11,17 +11,6 @@ This file defines baseline engineering workflow rules for contributors and codin
    - `git pull --ff-only origin main`
 4. Create or switch to a feature branch from updated `main`.
 
-## Separate Worktree Workflow
-- When the user is actively working in one branch, do implementation work in a separate Git worktree by default.
-- Preferred pattern:
-  - Create: `git worktree add ..\\Prompt-queue-<branch-name> <branch-name>`
-  - Or create new branch + worktree: `git worktree add -b <new-branch> ..\\Prompt-queue-<new-branch> main`
-- Keep one branch per worktree; do not reuse a worktree for unrelated tasks.
-- Run commits and pushes from the worktree where the branch is checked out.
-- After merge/cleanup, remove unused worktrees:
-  - `git worktree remove ..\\Prompt-queue-<branch-name>`
-- If there are uncommitted changes in the current tree, either commit/stash first or create a patch before switching to a new worktree.
-
 ## Commit Rules
 - Commit often in small, reviewable increments.
 - Each commit should represent one logical change.

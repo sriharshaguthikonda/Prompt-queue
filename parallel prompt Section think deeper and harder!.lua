@@ -1,6 +1,6 @@
 -----------------line prompt mode--------------------
------------------prepend here--------------------
 Section 1 think deeper and harder!
+-----------------prepend here--------------------
 
 
 
@@ -70,6 +70,8 @@ next section think deeper and harder!
 -------------------new tab--------------------------
 Section 2 while thinking deeper and harder
 
+-----------------prepend here--------------------
+
 
 
 
@@ -79,7 +81,7 @@ Section 2 while thinking deeper and harder
 Section 3 thinking  deeper and harder
 
 
-
+-----------------prepend here--------------------
 
 
 ---------------------append here------------------
@@ -87,7 +89,7 @@ Section 3 thinking  deeper and harder
 -------------------new tab--------------------------
 Section 4 think deeper and harder
 
-
+-----------------prepend here--------------------
 
 
 
@@ -97,15 +99,19 @@ Section 4 think deeper and harder
 Section 5 think deeper and harder..
 
 
-
+-----------------prepend here--------------------
 
 ---------------------append here------------------
 next section reflect more deeply and more!
+
+
+
 
 -------------------new tab--------------------------
 Section 7 think deeper and harder?
 
 
+-----------------prepend here--------------------
 
 ---------------------append here------------------
 
@@ -114,12 +120,14 @@ Section 8 think deeper and harder?
 
 
 
+-----------------prepend here--------------------
+
 ---------------------append here------------------
 
 -------------------new tab--------------------------
 Section 9 think deeper and harder?
 
-
+-----------------prepend here--------------------
 
 ---------------------append here------------------
 
