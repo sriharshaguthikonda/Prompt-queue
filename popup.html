@@ -32,12 +32,15 @@ Prompts (one per line)"></textarea>
             <div class="prompt-counter-row">
               <div class="prompt-counter">0 prompts loaded</div>
               <button id="insertSeparatorBtn" class="preset-btn" type="button" title="Insert a multi-line separator">↵ Insert separator</button>
+              <span class="info-wrap">
+                <button type="button" class="info-trigger" aria-label="Prompt tips" aria-expanded="false">i</button>
+                <span class="info-popover">
+                  • Use <code>---new tab---</code> on its own line to split tab sets in parallel mode.<br>
+                  • Use <code>---line prompt mode---</code> to treat each non-divider line as one prompt.<br>
+                  • Use <code>---append here---</code> and <code>---prepend here---</code> for local prompt edits.
+                </span>
+              </span>
             </div>
-            <div class="desc">Tips: 
-            <br>• Put <code>---new tab---</code> on its own line to split prompt sets per tab in parallel mode.
-            <br>• Put <code>---line prompt mode---</code> on its own line to treat each non-divider line as a prompt.
-            <br>• Put <code>---append here---</code> to append "Text to append" to the previous prompt (or next prompt if no previous prompt in the tab group).
-            <br>• Put <code>---prepend here---</code> to prepend "Text to prepend" to the previous prompt (or next prompt if no previous prompt in the tab group).</div>
           </div>
           <div class="prompts-right">
             <div class="inline">
@@ -66,31 +69,50 @@ Prompts (one per line)"></textarea>
         <div class="collapsible-content" id="optionsContent">
           <div class="row">
             <div>
-              <label for="maxWaitSec">Max wait (seconds)</label>
+              <div class="label-row">
+                <label for="maxWaitSec">Max wait (seconds)</label>
+                <span class="info-wrap">
+                  <button type="button" class="info-trigger" aria-label="Max wait help" aria-expanded="false">i</button>
+                  <span class="info-popover">Upper limit per prompt. After this timeout, automation moves to the next prompt.</span>
+                </span>
+              </div>
               <input id="maxWaitSec" type="number" min="5" step="5" placeholder="180" />
-              <div class="desc">Upper limit per prompt. We stop waiting and move on once this time is reached.</div>
             </div>
             <div>
               <label for="stableMinSec">Stable (seconds) min</label>
               <input id="stableMinSec" type="number" min="0.2" step="0.1" placeholder="1.2" />
             </div>
             <div>
-              <label for="stableMaxSec">Stable (seconds) max</label>
+              <div class="label-row">
+                <label for="stableMaxSec">Stable (seconds) max</label>
+                <span class="info-wrap">
+                  <button type="button" class="info-trigger" aria-label="Stable window help" aria-expanded="false">i</button>
+                  <span class="info-popover">A random stable window is picked between min and max for each prompt before advancing.</span>
+                </span>
+              </div>
               <input id="stableMaxSec" type="number" min="0.2" step="0.1" placeholder="2.5" />
               <div id="stableCountdown" class="desc" style="color: var(--accent); font-weight: 600; margin-top: 4px; display: none;">Countdown: <span id="countdownValue">0.0</span>s</div>
-              <div class="desc">Randomized per prompt between min and max; page must stay unchanged for that duration.</div>
             </div>
           </div>
           <div class="row">
             <div>
-              <label for="pollSec">Poll interval (seconds)</label>
+              <div class="label-row">
+                <label for="pollSec">Poll interval (seconds)</label>
+                <span class="info-wrap">
+                  <button type="button" class="info-trigger" aria-label="Poll interval help" aria-expanded="false">i</button>
+                  <span class="info-popover">How often the extension checks for page changes. Lower values respond faster but use more CPU.</span>
+                </span>
+              </div>
               <input id="pollSec" type="number" min="0.1" step="0.05" placeholder="0.3" />
-              <div class="desc">How often we check for changes. Smaller values can finish a bit sooner but cost more CPU.</div>
             </div>
           </div>
           <div class="inline" style="margin-top: 10px;">
             <input id="enableRetryOnFailure" type="checkbox" checked />
             <label for="enableRetryOnFailure">Retry failed prompts/tabs</label>
+            <span class="info-wrap">
+              <button type="button" class="info-trigger" aria-label="Retry help" aria-expanded="false">i</button>
+              <span class="info-popover">Retries apply to send and completion failures. Set Max retries to 0 to disable retries.</span>
+            </span>
           </div>
           <div class="row">
             <div>
@@ -102,26 +124,34 @@ Prompts (one per line)"></textarea>
               <input id="retryDelaySec" type="number" min="0" step="0.5" placeholder="2" />
             </div>
           </div>
-          <div class="desc">Retries apply to failed prompt sends and failed prompt completions. Set Max retries to 0 to disable retries.</div>
         </div>
 
         <div class="inline" style="margin-top: 12px;">
           <input id="enableMaxWaitTimeout" type="checkbox" checked />
           <label for="enableMaxWaitTimeout">Enable max wait timeout</label>
+          <span class="info-wrap">
+            <button type="button" class="info-trigger" aria-label="Max wait timeout help" aria-expanded="false">i</button>
+            <span class="info-popover">When off, the extension waits indefinitely for completion.</span>
+          </span>
         </div>
-        <div class="desc">If disabled, will wait indefinitely for response. If enabled, will timeout after max wait seconds.</div>
 
         <div class="inline" style="margin-top: 12px;">
           <input id="autoConfirmDialogs" type="checkbox" />
           <label for="autoConfirmDialogs">Auto-confirm tool dialogs</label>
+          <span class="info-wrap">
+            <button type="button" class="info-trigger" aria-label="Auto confirm help" aria-expanded="false">i</button>
+            <span class="info-popover">Clicks visible “Confirm” buttons automatically, even when automation is idle.</span>
+          </span>
         </div>
-        <div class="desc">Automatically clicks “Confirm” when it appears, even outside automation.</div>
 
         <div class="inline" style="margin-top: 12px;">
           <input id="enableWatchedElementGate" type="checkbox" />
           <label for="enableWatchedElementGate">Wait for new watched element before next prompt</label>
+          <span class="info-wrap">
+            <button type="button" class="info-trigger" aria-label="Watched element gate help" aria-expanded="false">i</button>
+            <span class="info-popover">Advances only after a newly detected matching element appears in the response.</span>
+          </span>
         </div>
-        <div class="desc">Only continues after a new matching element appears in the response.</div>
 
         <div id="watchedElementContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
           <input
@@ -223,14 +253,20 @@ Prompts (one per line)"></textarea>
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">
         <input id="refreshTabBeforeEachPrompt" type="checkbox" />
         <label for="refreshTabBeforeEachPrompt">Refresh page before each prompt (background-safe)</label>
+        <span class="info-wrap">
+          <button type="button" class="info-trigger" aria-label="Refresh before prompt help" aria-expanded="false">i</button>
+          <span class="info-popover">Reloads the current chat tab before each send without switching to it.</span>
+        </span>
       </div>
-      <div class="desc" style="padding: 0 12px;">Reloads the current chat tab before each send without switching to it.</div>
 
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">
         <input id="parallelOneTabPerPrompt" type="checkbox" />
         <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
+        <span class="info-wrap">
+          <button type="button" class="info-trigger" aria-label="Parallel mode help" aria-expanded="false">i</button>
+          <span class="info-popover">Launches one tab per prompt or <code>---new tab---</code> group, then dispatches prompt sends as tabs become ready.</span>
+        </span>
       </div>
-      <div class="desc" style="padding: 0 12px;">Launches one background tab per prompt or per <code>---new tab---</code> set, then immediately moves to the next tab once launch is ready.</div>
       <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
         <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
       </div>

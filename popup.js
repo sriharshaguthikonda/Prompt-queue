@@ -25,6 +25,38 @@ function setParallelWalkthroughVisibility(visible) {
   toggleParallelWalkthroughBtn.textContent = visible ? 'Hide guide' : 'Show guide';
 }
 
+function closeOpenInfoPopovers(exceptWrap = null) {
+  document.querySelectorAll('.info-wrap.is-open').forEach((wrap) => {
+    if (exceptWrap && wrap === exceptWrap) return;
+    wrap.classList.remove('is-open');
+    const btn = wrap.querySelector('.info-trigger');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function initInfoPopovers() {
+  const infoButtons = document.querySelectorAll('.info-trigger');
+  infoButtons.forEach((btn) => {
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const wrap = btn.closest('.info-wrap');
+      if (!wrap) return;
+      const willOpen = !wrap.classList.contains('is-open');
+      closeOpenInfoPopovers(wrap);
+      wrap.classList.toggle('is-open', willOpen);
+      btn.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+  });
+
+  document.addEventListener('click', () => closeOpenInfoPopovers());
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      closeOpenInfoPopovers();
+    }
+  });
+}
+
 async function loadParallelWalkthroughVisibility() {
   if (!parallelWalkthrough || !toggleParallelWalkthroughBtn) return;
   let visible = true;
@@ -558,6 +590,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
     } catch (_) {}
 
+    initInfoPopovers();
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
     refreshWrapperPromptTextareaHeights();

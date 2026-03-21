@@ -15,12 +15,10 @@ export function createHistoryRow(item, index, { onLoadPrompts } = {}) {
   row.className = 'history-row';
 
   const left = document.createElement('div');
-  left.style.flex = '1';
+  left.className = 'history-main';
 
   const titleEl = document.createElement('div');
-  titleEl.style.whiteSpace = 'nowrap';
-  titleEl.style.overflow = 'hidden';
-  titleEl.style.textOverflow = 'ellipsis';
+  titleEl.className = 'history-item-title';
   titleEl.textContent = title;
   titleEl.title = (item.prompts || []).join('\n');
 

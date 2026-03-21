@@ -166,6 +166,13 @@ input[type="number"] {
   transform: scale(1.1);
 }
 
+.label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
 /* Buttons */
 button {
   flex: 1;
@@ -285,14 +292,73 @@ button.secondary {
 .prompt-counter-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-top: 6px;
+}
+
+.prompt-counter-row .prompt-counter {
+  margin-right: auto;
 }
 
 #insertSeparatorBtn {
   flex: 0 0 auto;
   padding: 6px 10px;
+}
+
+.info-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.info-trigger {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+}
+
+.info-trigger:hover,
+.info-trigger:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.info-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: min(280px, 80vw);
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  z-index: 35;
+  display: none;
+}
+
+.info-wrap:hover .info-popover,
+.info-wrap:focus-within .info-popover,
+.info-wrap.is-open .info-popover {
+  display: block;
 }
 
 /* Prompts Container */
@@ -387,8 +453,11 @@ button.secondary {
   width: 100%;
   overflow-x: hidden;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   display: grid;
   gap: 6px;
+  padding-right: 4px;
+  box-sizing: border-box;
 }
 
 .history-item {
@@ -402,12 +471,22 @@ button.secondary {
 }
 
 .history-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   width: 100%;
   min-width: 0;
+}
+
+.history-main {
+  min-width: 0;
+}
+
+.history-item-title {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .history-item-date {
@@ -419,6 +498,14 @@ button.secondary {
 .mini-controls {
   display: flex;
   gap: 6px;
+  flex: 0 0 auto;
+}
+
+.mini-controls button {
+  flex: 0 0 auto;
+  min-width: 58px;
+  padding: 6px 8px;
+  font-size: 11px;
 }
 
 .history-header {
