@@ -1741,8 +1741,11 @@ function makeHistorySignature(item) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
-      // Rehydrate state on each message so MV3 service worker restarts don't lose automation context
-      await loadState();
+      // Rehydrate state on demand. Replacing in-memory state during active runs can
+      // invalidate worker references held by launch/dispatch loops.
+      if (!state.running) {
+        await loadState();
+      }
 
       switch (message?.type) {
         case "CONTENT_READY": {
