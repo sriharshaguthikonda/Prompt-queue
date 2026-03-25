@@ -866,14 +866,66 @@ function getParallelDispatchOptions() {
     openNewChatPerPrompt: false,
     refreshTabBeforeEachPrompt: false,
     parallelOneTabPerPrompt: false,
+    enableMaxWaitTimeout: false,
+    parallelDispatchMode: true,
+  };
+}
+
+function getParallelMappingDebugSummary() {
+  if (!state.parallel) {
+    return { hasParallelState: false };
+  }
+  const workers = Object.values(state.parallel.workersById || {});
+  const activeWorkers = workers
+    .filter((worker) => worker && worker.status !== 'completed' && worker.status !== 'failed')
+    .map((worker) => ({
+      workerId: worker.workerId,
+      workerIndex: worker.index,
+      tabId: worker.tabId || null,
+      status: worker.status,
+      nextPromptIndex: worker.nextPromptIndex,
+      inFlightPromptId: worker.inFlightPromptId || null,
+      inFlightPromptIndex: Number.isFinite(worker.inFlightPromptIndex)
+        ? Number(worker.inFlightPromptIndex)
+        : null,
+      nextRetryAt: worker.nextRetryAt || 0,
+    }));
+  const inFlightWorkers = activeWorkers
+    .filter((worker) => !!worker.inFlightPromptId)
+    .map((worker) => ({
+      workerId: worker.workerId,
+      tabId: worker.tabId,
+      promptId: worker.inFlightPromptId,
+      nextPromptIndex: worker.nextPromptIndex,
+      inFlightPromptIndex: worker.inFlightPromptIndex ?? null,
+      status: worker.status,
+    }));
+  return {
+    hasParallelState: true,
+    mode: state.mode,
+    running: state.running,
+    mappedPromptCount: Object.keys(state.parallel.workersByPromptId || {}).length,
+    activeWorkerCount: activeWorkers.length,
+    inFlightWorkerCount: inFlightWorkers.length,
+    inFlightWorkers: inFlightWorkers.slice(0, 10),
+    activeWorkers: activeWorkers.slice(0, 10),
   };
 }
 
 function resolveParallelPromptRef(promptId, senderTabId) {
   if (!state.parallel) return null;
   if (promptId && state.parallel.workersByPromptId[promptId]) {
-    return state.parallel.workersByPromptId[promptId];
+    const mapped = state.parallel.workersByPromptId[promptId];
+    console.log('[Parallel][PromptRef] Resolved via promptId map', {
+      promptId,
+      senderTabId,
+      workerId: mapped?.workerId || null,
+      promptIndex: mapped?.promptIndex,
+    });
+    return mapped;
   }
+  // Never remap an explicit promptId via tab fallback; treat it as stale/missing mapping.
+  if (promptId) return null;
   if (!senderTabId) return null;
 
   const fallbackWorker = Object.values(state.parallel.workersById || {}).find((worker) => (
@@ -884,16 +936,26 @@ function resolveParallelPromptRef(promptId, senderTabId) {
   ));
   if (!fallbackWorker) return null;
 
-  const fallbackPromptId = promptId || fallbackWorker.inFlightPromptId;
+  const fallbackPromptId = fallbackWorker.inFlightPromptId;
+  const fallbackPromptIndex = Number.isFinite(fallbackWorker.inFlightPromptIndex)
+    ? Math.max(0, Number(fallbackWorker.inFlightPromptIndex))
+    : Number.isFinite(fallbackWorker.nextPromptIndex)
+      ? Math.max(0, Number(fallbackWorker.nextPromptIndex))
+      : 0;
   const promptRef = {
     workerId: fallbackWorker.workerId,
-    promptIndex: Number.isFinite(fallbackWorker.nextPromptIndex)
-      ? Math.max(0, Number(fallbackWorker.nextPromptIndex))
-      : 0,
+    promptIndex: fallbackPromptIndex,
   };
-  if (fallbackPromptId) {
+  if (fallbackPromptId && !state.parallel.workersByPromptId[fallbackPromptId]) {
     state.parallel.workersByPromptId[fallbackPromptId] = promptRef;
   }
+  console.warn('[Parallel][PromptRef] Resolved via tab fallback', {
+    promptId,
+    senderTabId,
+    fallbackPromptId: fallbackPromptId || null,
+    workerId: promptRef.workerId,
+    promptIndex: promptRef.promptIndex,
+  });
   return promptRef;
 }
 
@@ -907,6 +969,11 @@ function createParallelSubmissionWaiter(promptId, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const timeoutId = setTimeout(() => {
       parallelSubmissionWaiters.delete(promptId);
+      console.warn('[Parallel][SubmissionWaiter] Timed out', {
+        promptId,
+        timeoutMs,
+        mappingSummary: getParallelMappingDebugSummary(),
+      });
       reject(new Error(`Timed out waiting for prompt submission: ${promptId}`));
     }, timeoutMs);
 
@@ -923,13 +990,39 @@ function createParallelSubmissionWaiter(promptId, timeoutMs = 30000) {
         reject(error instanceof Error ? error : new Error(String(error)));
       },
     });
+    console.log('[Parallel][SubmissionWaiter] Registered', {
+      promptId,
+      timeoutMs,
+      activeWaiters: parallelSubmissionWaiters.size,
+    });
   });
+}
+
+function getParallelSubmissionTimeoutMs(options = state.options) {
+  const configuredMaxWaitMs = Number(options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs);
+  const baseMaxWaitMs = Number.isFinite(configuredMaxWaitMs)
+    ? configuredMaxWaitMs
+    : DEFAULT_SETTINGS.maxWaitMs;
+  // Allow time for in-tab queueing (previous prompt still finishing) before stream start.
+  return Math.min(Math.max(baseMaxWaitMs + 30000, 90000), 600000);
 }
 
 function settleParallelSubmission(promptId, payload) {
   if (!promptId) return false;
   const waiter = parallelSubmissionWaiters.get(promptId);
-  if (!waiter) return false;
+  if (!waiter) {
+    console.warn('[Parallel][SubmissionWaiter] No waiter to settle', {
+      promptId,
+      payload: payload || null,
+      mappingSummary: getParallelMappingDebugSummary(),
+    });
+    return false;
+  }
+  console.log('[Parallel][SubmissionWaiter] Settled', {
+    promptId,
+    payload: payload || null,
+    activeWaitersBeforeSettle: parallelSubmissionWaiters.size,
+  });
   waiter.resolve(payload);
   return true;
 }
@@ -937,7 +1030,19 @@ function settleParallelSubmission(promptId, payload) {
 function rejectParallelSubmission(promptId, error) {
   if (!promptId) return false;
   const waiter = parallelSubmissionWaiters.get(promptId);
-  if (!waiter) return false;
+  if (!waiter) {
+    console.warn('[Parallel][SubmissionWaiter] No waiter to reject', {
+      promptId,
+      error: String(error?.message || error),
+      mappingSummary: getParallelMappingDebugSummary(),
+    });
+    return false;
+  }
+  console.warn('[Parallel][SubmissionWaiter] Rejected', {
+    promptId,
+    error: String(error?.message || error),
+    activeWaitersBeforeReject: parallelSubmissionWaiters.size,
+  });
   waiter.reject(error instanceof Error ? error : new Error(String(error)));
   return true;
 }
@@ -1069,6 +1174,7 @@ async function scheduleParallelPromptRetry(workerId, promptIndex, errorMessage, 
     maxRetries: retryPolicy.maxRetries,
     retryDelayMs: retryPolicy.retryDelayMs,
     error: errorMessage,
+    mappingSummary: getParallelMappingDebugSummary(),
   });
   return true;
 }
@@ -1117,6 +1223,7 @@ async function finalizeParallelWorker(workerId, { failed, errorMessage } = {}) {
     delete state.parallel.workersByPromptId[worker.inFlightPromptId];
     worker.inFlightPromptId = null;
   }
+  worker.inFlightPromptIndex = null;
 
   const resolvedError = failed ? (errorMessage || 'Unknown parallel worker failure') : null;
   worker.status = failed ? 'failed' : 'completed';
@@ -1134,6 +1241,7 @@ async function finalizeParallelWorker(workerId, { failed, errorMessage } = {}) {
       workerIndex: worker.index,
       tabId: worker.tabId || null,
       nextPromptIndex: worker.nextPromptIndex,
+      inFlightPromptIndex: worker.inFlightPromptIndex,
       error: resolvedError,
       at: Date.now(),
       tab: await getParallelTabSnapshot(worker.tabId),
@@ -1169,14 +1277,20 @@ async function dispatchParallelWorkerPrompt(workerId) {
   const basePromptText = worker.prompts[promptIndex];
   const promptText = buildMessageText(basePromptText);
   const promptId = buildParallelPromptId(worker.index, promptIndex);
+  const dispatchStartedAt = Date.now();
   console.log('[Parallel] Built prompt payload', {
     workerId,
     promptIndex,
     baseLength: typeof basePromptText === 'string' ? basePromptText.length : 0,
     finalLength: typeof promptText === 'string' ? promptText.length : 0,
+    workerStatus: worker.status,
+    workerTabId: worker.tabId || null,
+    inFlightPromptIdBeforeSet: worker.inFlightPromptId || null,
+    retriesForPrompt: worker.promptRetryCounts?.[promptIndex] || 0,
   });
 
   worker.inFlightPromptId = promptId;
+  worker.inFlightPromptIndex = promptIndex;
   worker.status = 'dispatching';
   state.parallel.workersByPromptId[promptId] = { workerId, promptIndex };
   state.lastActivityTime = Date.now();
@@ -1188,19 +1302,40 @@ async function dispatchParallelWorkerPrompt(workerId) {
     if (!loaded) {
       throw new Error('Tab did not finish loading before dispatch');
     }
+    console.log('[Parallel] Worker tab reported loaded', {
+      workerId,
+      tabId: worker.tabId,
+      promptIndex,
+      promptId,
+      elapsedMs: Date.now() - dispatchStartedAt,
+    });
 
     const ready = await waitForParallelContentScriptReady(worker.tabId, launchToken, workerId);
     if (!ready) {
       throw new Error('Content script was not ready before dispatch');
     }
+    console.log('[Parallel] Worker tab content script ready', {
+      workerId,
+      tabId: worker.tabId,
+      promptIndex,
+      promptId,
+      elapsedMs: Date.now() - dispatchStartedAt,
+    });
 
     await activateParallelWorkerTab(worker.tabId, workerId);
+    const submissionTimeoutMs = getParallelSubmissionTimeoutMs(state.options);
+    console.log('[Parallel] Waiting for prompt submission', {
+      workerId,
+      promptIndex,
+      promptId,
+      submissionTimeoutMs,
+    });
     const submissionWait = createParallelSubmissionWaiter(
       promptId,
-      Math.min(Math.max(state.options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs, 15000), 60000),
+      submissionTimeoutMs,
     );
 
-    await sendToContent(worker.tabId, {
+    const sendAck = await sendToContent(worker.tabId, {
       type: 'SEND_PROMPT',
       text: promptText,
       index: promptIndex,
@@ -1208,54 +1343,78 @@ async function dispatchParallelWorkerPrompt(workerId) {
       options: getParallelDispatchOptions(),
       promptId,
     });
+    console.log('[Parallel] SEND_PROMPT acknowledged by content script', {
+      workerId,
+      tabId: worker.tabId,
+      promptIndex,
+      promptId,
+      sendAck: sendAck || null,
+      elapsedMs: Date.now() - dispatchStartedAt,
+    });
 
     const submissionMeta = await submissionWait;
+    console.log('[Parallel] Submission waiter resolved', {
+      workerId,
+      tabId: worker.tabId,
+      promptIndex,
+      promptId,
+      submissionMeta: submissionMeta || null,
+      elapsedMs: Date.now() - dispatchStartedAt,
+    });
     const liveWorker = state.parallel?.workersById?.[workerId];
     if (!liveWorker || liveWorker.status === 'completed' || liveWorker.status === 'failed') {
       return true;
     }
-
     if (liveWorker.inFlightPromptId === promptId) {
-      liveWorker.inFlightPromptId = null;
+      liveWorker.status = 'running';
+      liveWorker.nextRetryAt = 0;
+      liveWorker.lastSubmission = {
+        promptId,
+        promptIndex,
+        at: Date.now(),
+        reason: submissionMeta?.reason || null,
+      };
+      if (liveWorker.promptRetryCounts && Number.isFinite(promptIndex)) {
+        delete liveWorker.promptRetryCounts[promptIndex];
+      }
+    } else {
+      console.warn('[Parallel] Submission resolved for non-current in-flight prompt', {
+        workerId,
+        promptId,
+        inFlightPromptId: liveWorker.inFlightPromptId || null,
+        inFlightPromptIndex: Number.isFinite(liveWorker.inFlightPromptIndex)
+          ? Number(liveWorker.inFlightPromptIndex)
+          : null,
+        promptIndex,
+      });
     }
-    if (state.parallel?.workersByPromptId) {
-      delete state.parallel.workersByPromptId[promptId];
-    }
-    liveWorker.status = 'running';
-    liveWorker.nextRetryAt = 0;
-    liveWorker.lastSubmission = {
-      promptId,
-      promptIndex,
-      at: Date.now(),
-      reason: submissionMeta?.reason || null,
-    };
-    if (liveWorker.promptRetryCounts && Number.isFinite(promptIndex)) {
-      delete liveWorker.promptRetryCounts[promptIndex];
-    }
-    liveWorker.nextPromptIndex = Math.max(liveWorker.nextPromptIndex || 0, promptIndex + 1);
     state.lastActivityTime = Date.now();
     await saveState();
     await emitParallelProgress();
-    if (liveWorker.nextPromptIndex >= liveWorker.prompts.length) {
-      await finalizeParallelWorker(liveWorker.workerId, { failed: false });
-    }
     return true;
   } catch (err) {
     const liveWorker = state.parallel?.workersById?.[workerId];
     if (liveWorker && liveWorker.inFlightPromptId === promptId) {
       liveWorker.inFlightPromptId = null;
+      liveWorker.inFlightPromptIndex = null;
     } else if (worker.inFlightPromptId === promptId) {
       worker.inFlightPromptId = null;
+      worker.inFlightPromptIndex = null;
     }
     if (state.parallel?.workersByPromptId) {
       delete state.parallel.workersByPromptId[promptId];
     }
     const dispatchError = String(err?.message || err);
+    const tabSnapshot = await getParallelTabSnapshot(liveWorker?.tabId || worker.tabId);
     console.error('[Parallel] Failed to dispatch prompt to worker tab', {
       workerId,
       tabId: liveWorker?.tabId || worker.tabId,
       promptIndex,
+      promptId,
       error: dispatchError,
+      elapsedMs: Date.now() - dispatchStartedAt,
+      tabSnapshot,
+      mappingSummary: getParallelMappingDebugSummary(),
     });
     if (liveWorker) {
       liveWorker.status = 'retrying';
@@ -1427,6 +1586,7 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
       prompts: promptGroups[index],
       nextPromptIndex: 0,
       inFlightPromptId: null,
+      inFlightPromptIndex: null,
       promptRetryCounts: {},
       nextRetryAt: 0,
       status: 'queued',
@@ -1879,7 +2039,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const senderTabId = sender?.tab?.id || null;
           const promptRef = resolveParallelPromptRef(promptId, senderTabId);
           if (!promptRef) {
-            console.log('[PromptSubmitted][Parallel] Unknown prompt mapping, ignoring', { promptId, senderTabId });
+            console.warn('[PromptSubmitted][Parallel] Unknown prompt mapping, ignoring', {
+              promptId,
+              senderTabId,
+              reason: message.reason || null,
+              mappingSummary: getParallelMappingDebugSummary(),
+            });
             return;
           }
 
@@ -1889,22 +2054,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
           }
 
+          const resolvedPromptId = promptId || worker.inFlightPromptId || '';
           const resolvedPromptIndex = Number.isFinite(promptRef.promptIndex)
             ? Number(promptRef.promptIndex)
-            : Math.max(0, Number(worker.nextPromptIndex || 0));
+            : Number.isFinite(worker.inFlightPromptIndex)
+              ? Number(worker.inFlightPromptIndex)
+              : Math.max(0, Number(worker.nextPromptIndex || 0));
 
-          if (worker.inFlightPromptId === promptId) {
-            worker.inFlightPromptId = null;
+          if (!resolvedPromptId) {
+            console.warn('[PromptSubmitted][Parallel] Missing resolved prompt id, ignoring', {
+              promptId,
+              senderTabId,
+              workerId: worker.workerId,
+              mappingSummary: getParallelMappingDebugSummary(),
+            });
+            return;
           }
-          delete state.parallel.workersByPromptId[promptId];
-          worker.nextPromptIndex = Math.max(worker.nextPromptIndex || 0, resolvedPromptIndex + 1);
+
+          if (worker.inFlightPromptId !== resolvedPromptId) {
+            console.warn('[PromptSubmitted][Parallel] Late/stale submission observed, not mutating worker state', {
+              promptId: resolvedPromptId,
+              senderTabId,
+              workerId: worker.workerId,
+              inFlightPromptId: worker.inFlightPromptId || null,
+              inFlightPromptIndex: Number.isFinite(worker.inFlightPromptIndex)
+                ? Number(worker.inFlightPromptIndex)
+                : null,
+              resolvedPromptIndex,
+            });
+            settleParallelSubmission(resolvedPromptId, {
+              ignored: true,
+              stale: true,
+              workerId: worker.workerId,
+              promptIndex: resolvedPromptIndex,
+            });
+            return;
+          }
+
           worker.status = 'running';
           worker.nextRetryAt = 0;
           if (worker.promptRetryCounts && Number.isFinite(resolvedPromptIndex)) {
             delete worker.promptRetryCounts[resolvedPromptIndex];
           }
           worker.lastSubmission = {
-            promptId,
+            promptId: resolvedPromptId,
             promptIndex: resolvedPromptIndex,
             at: Date.now(),
             reason: message.reason || null,
@@ -1913,16 +2106,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           state.lastActivityTime = Date.now();
           await saveState();
           await emitParallelProgress();
-          settleParallelSubmission(promptId, {
+          settleParallelSubmission(resolvedPromptId, {
             workerId: worker.workerId,
             promptIndex: resolvedPromptIndex,
             reason: message.reason || null,
           });
           console.log('[PromptSubmitted][Parallel] Submission confirmed', {
-            promptId,
+            promptId: resolvedPromptId,
             workerId: worker.workerId,
             promptIndex: resolvedPromptIndex,
             reason: message.reason || null,
+            senderTabId,
+            mappingSummary: getParallelMappingDebugSummary(),
           });
           return;
         }
@@ -1948,7 +2143,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const promptId = message.promptId ? String(message.promptId) : '';
             const senderTabId = sender?.tab?.id || null;
             const promptRef = resolveParallelPromptRef(promptId, senderTabId);
-            if (!promptRef) return;
+            if (!promptRef) {
+              console.warn('[ResponseComplete][Parallel] Unknown prompt mapping, ignoring', {
+                promptId,
+                senderTabId,
+                error: message.error || null,
+                stoppedByStopWord: message.stoppedByStopWord === true,
+                mappingSummary: getParallelMappingDebugSummary(),
+              });
+              return;
+            }
 
             const worker = state.parallel.workersById?.[promptRef.workerId];
             if (!worker || worker.status === 'completed' || worker.status === 'failed') return;
@@ -1960,20 +2164,138 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
 
-            if (message.error) {
-              if (worker.inFlightPromptId === promptId) {
-                rejectParallelSubmission(promptId, new Error(String(message.error)));
-                worker.inFlightPromptId = null;
-                delete state.parallel.workersByPromptId[promptId];
-              }
-              state.lastActivityTime = Date.now();
-              await saveState();
-              await emitParallelProgress();
-              console.warn('[ResponseComplete][Parallel] Completion error observed after send attempt', {
+            const resolvedPromptId = promptId || worker.inFlightPromptId || '';
+            const resolvedPromptIndex = Number.isFinite(promptRef.promptIndex)
+              ? Number(promptRef.promptIndex)
+              : Number.isFinite(worker.inFlightPromptIndex)
+                ? Number(worker.inFlightPromptIndex)
+                : Math.max(0, Number(worker.nextPromptIndex || 0));
+            const isCurrentInFlight = !!resolvedPromptId && worker.inFlightPromptId === resolvedPromptId;
+            const hasPendingSubmissionWaiter = !!resolvedPromptId && parallelSubmissionWaiters.has(resolvedPromptId);
+
+            if (!resolvedPromptId) {
+              console.warn('[ResponseComplete][Parallel] Missing resolved prompt id, ignoring', {
                 promptId,
+                senderTabId,
                 workerId: worker.workerId,
-                error: message.error,
+                mappingSummary: getParallelMappingDebugSummary(),
               });
+              return;
+            }
+
+            if (message.error) {
+              const completionError = String(message.error);
+
+              if (!isCurrentInFlight && !hasPendingSubmissionWaiter) {
+                console.warn('[ResponseComplete][Parallel] Stale completion error ignored', {
+                  promptId: resolvedPromptId,
+                  workerId: worker.workerId,
+                  error: completionError,
+                  senderTabId,
+                  inFlightPromptId: worker.inFlightPromptId || null,
+                  inFlightPromptIndex: Number.isFinite(worker.inFlightPromptIndex)
+                    ? Number(worker.inFlightPromptIndex)
+                    : null,
+                  resolvedPromptIndex,
+                });
+                delete state.parallel.workersByPromptId[resolvedPromptId];
+                return;
+              }
+
+              if (hasPendingSubmissionWaiter) {
+                rejectParallelSubmission(resolvedPromptId, new Error(completionError));
+                state.lastActivityTime = Date.now();
+                await saveState();
+                await emitParallelProgress();
+                console.warn('[ResponseComplete][Parallel] Submission-stage error forwarded to waiter', {
+                  promptId: resolvedPromptId,
+                  workerId: worker.workerId,
+                  error: completionError,
+                  senderTabId,
+                  mappingSummary: getParallelMappingDebugSummary(),
+                });
+                return;
+              }
+
+              if (isCurrentInFlight) {
+                worker.inFlightPromptId = null;
+                worker.inFlightPromptIndex = null;
+              }
+              delete state.parallel.workersByPromptId[resolvedPromptId];
+
+              const retried = await scheduleParallelPromptRetry(
+                worker.workerId,
+                resolvedPromptIndex,
+                completionError,
+                'RESPONSE_COMPLETE',
+              );
+              if (!retried) {
+                await markParallelWorkerFailed(worker.workerId, completionError);
+              } else {
+                await saveState();
+                await emitParallelProgress();
+              }
+              console.warn('[ResponseComplete][Parallel] Completion error observed after send attempt', {
+                promptId: resolvedPromptId,
+                workerId: worker.workerId,
+                error: completionError,
+                senderTabId,
+                workerStatus: worker.status,
+                inFlightPromptId: worker.inFlightPromptId || null,
+                inFlightPromptIndex: Number.isFinite(worker.inFlightPromptIndex)
+                  ? Number(worker.inFlightPromptIndex)
+                  : null,
+                resolvedPromptIndex,
+                nextPromptIndex: worker.nextPromptIndex,
+                mappingSummary: getParallelMappingDebugSummary(),
+              });
+              return;
+            }
+
+            // Successful completion in parallel mode.
+            if (!isCurrentInFlight && !hasPendingSubmissionWaiter) {
+              console.warn('[ResponseComplete][Parallel] Stale completion ignored', {
+                promptId: resolvedPromptId,
+                workerId: worker.workerId,
+                senderTabId,
+                inFlightPromptId: worker.inFlightPromptId || null,
+                inFlightPromptIndex: Number.isFinite(worker.inFlightPromptIndex)
+                  ? Number(worker.inFlightPromptIndex)
+                  : null,
+                resolvedPromptIndex,
+              });
+              delete state.parallel.workersByPromptId[resolvedPromptId];
+              return;
+            }
+
+            if (hasPendingSubmissionWaiter) {
+              settleParallelSubmission(resolvedPromptId, {
+                workerId: worker.workerId,
+                promptIndex: resolvedPromptIndex,
+                reason: 'response-complete-fallback',
+              });
+            }
+            if (isCurrentInFlight) {
+              worker.inFlightPromptId = null;
+              worker.inFlightPromptIndex = null;
+            }
+            delete state.parallel.workersByPromptId[resolvedPromptId];
+            worker.nextPromptIndex = Math.max(worker.nextPromptIndex || 0, resolvedPromptIndex + 1);
+            worker.status = 'ready';
+            worker.nextRetryAt = 0;
+            if (worker.promptRetryCounts && Number.isFinite(resolvedPromptIndex)) {
+              delete worker.promptRetryCounts[resolvedPromptIndex];
+            }
+            worker.lastCompletion = {
+              promptId: resolvedPromptId,
+              promptIndex: resolvedPromptIndex,
+              at: Date.now(),
+            };
+            state.lastActivityTime = Date.now();
+            await saveState();
+            await emitParallelProgress();
+            if (worker.nextPromptIndex >= worker.prompts.length) {
+              await finalizeParallelWorker(worker.workerId, { failed: false });
             }
             return;
           }

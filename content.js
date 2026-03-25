@@ -507,6 +507,42 @@
     return (!!sendBtn || !!regenPresent) && !isThinking;
   }
 
+  function getInputTextLengthQuiet(el) {
+    if (!el) return 0;
+    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
+    if (isContentEditable) {
+      return (el.textContent || '').length;
+    }
+    if (typeof el.value === 'string') {
+      return el.value.length;
+    }
+    return (el.textContent || '').length;
+  }
+
+  function buildPromptQueueDebugSnapshot({ site, inputEl, sendBtn, stopButtonSelector, promptId, attempt }) {
+    const resolvedSite = site || detectSite();
+    const resolvedSendBtn = sendBtn || queryFirst(selectorsForSite(resolvedSite).sendButtonCandidates);
+    const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
+    const inputLength = getInputTextLengthQuiet(inputEl);
+    return {
+      promptId,
+      attempt: Number.isFinite(attempt) ? attempt : null,
+      site: resolvedSite,
+      url: location.href,
+      visibilityState: document.visibilityState,
+      hasInputEl: !!inputEl,
+      inputLength,
+      hasSendButton: !!resolvedSendBtn,
+      sendButtonEnabled: isButtonEnabled(resolvedSendBtn),
+      stopButtonSelector: stopButtonSelector || null,
+      stopButtonPresent: !!stopBtn && isButtonEnabled(stopBtn),
+      isChatGPTThinking: resolvedSite === 'chatgpt' ? isChatGPTThinking() : null,
+      hasConfirmDialog: isConfirmDialogVisible(),
+      activeElementTag: document.activeElement?.tagName || null,
+      activeElementId: document.activeElement?.id || null,
+    };
+  }
+
   function getElementsBySelector(selector) {
     if (!selector || typeof selector !== 'string') return null;
     try {
@@ -863,8 +899,18 @@
     console.log('[PromptQueue] Starting processing', { promptId, timestamp: Date.now(), options });
     
     // Set a safety timeout to force cleanup if this prompt takes too long
-    const enablePromptTimeout = options?.enableMaxWaitTimeout !== false;
+    const isParallelDispatch = options?.parallelDispatchMode === true;
+    const enablePromptTimeout = options?.enableMaxWaitTimeout !== false && !isParallelDispatch;
     const maxPromptDuration = (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 10000; // Add 10s buffer
+    console.log('[PromptQueue] Prompt timeout configuration', {
+      promptId,
+      isParallelDispatch,
+      enablePromptTimeout,
+      maxPromptDuration,
+      maxWaitMs: options?.maxWaitMs || DEFAULTS.maxWaitMs,
+      stableMs: options?.stableMs || DEFAULTS.stableMs,
+      pollIntervalMs: options?.pollIntervalMs || DEFAULTS.pollIntervalMs,
+    });
     const timeoutId = enablePromptTimeout
       ? setTimeout(() => {
           console.error('[PromptQueue] TIMEOUT: Prompt processing exceeded max duration', { 
@@ -913,6 +959,7 @@
       const watchGate = buildWatchGate(options);
 
       // Wait for any active streaming/processing to complete before sending
+      const streamWaitStartedAt = Date.now();
       console.log('[PromptQueue] Waiting for streams to stop', { promptId, enableTimeout: false });
       try {
         await waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: undefined, enableTimeout: false });
@@ -920,7 +967,17 @@
         console.error('[PromptQueue] waitForStreamsToStop failed', { promptId, error: e?.message });
         throw e;
       }
-      console.log('[PromptQueue] Streams stopped, proceeding', { promptId });
+      console.log('[PromptQueue] Streams stopped, proceeding', {
+        promptId,
+        elapsedMs: Date.now() - streamWaitStartedAt,
+        snapshot: buildPromptQueueDebugSnapshot({
+          site,
+          inputEl,
+          sendBtn,
+          stopButtonSelector: stopBtnSel,
+          promptId,
+        }),
+      });
 
       console.log('[PromptQueue] Setting text input', { promptId, textLength: text?.length });
       setTextInInput(inputEl, text);
@@ -947,6 +1004,13 @@
         console.error('[PromptQueue] Input still empty before send after retries', {
           promptId,
           finalLength: finalNormalized.length,
+          snapshot: buildPromptQueueDebugSnapshot({
+            site,
+            inputEl,
+            sendBtn,
+            stopButtonSelector: stopBtnSel,
+            promptId,
+          }),
         });
         throw new Error('Input field empty before sending');
       }
@@ -955,12 +1019,27 @@
       if (site === 'chatgpt') {
         const preSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
         console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', { promptId, preSendMaxWaitMs });
-        await waitForChatGPTSendWindow({
-          sendButton: sendBtn,
-          maxWaitMs: preSendMaxWaitMs,
-          quietWindowMs: 1200,
-          pollMs: 250,
-        });
+        try {
+          await waitForChatGPTSendWindow({
+            sendButton: sendBtn,
+            maxWaitMs: preSendMaxWaitMs,
+            quietWindowMs: 1200,
+            pollMs: 250,
+          });
+        } catch (preSendErr) {
+          console.error('[PromptQueue] Pre-send quiet window failed', {
+            promptId,
+            error: preSendErr?.message || String(preSendErr),
+            snapshot: buildPromptQueueDebugSnapshot({
+              site,
+              inputEl,
+              sendBtn,
+              stopButtonSelector: stopBtnSel,
+              promptId,
+            }),
+          });
+          throw preSendErr;
+        }
       }
       
       console.log('[PromptQueue] Clicking send button', { promptId });
@@ -991,7 +1070,19 @@
             streamStarted = true;
             break;
           }
-          console.warn('[PromptQueue] No active stream detected and no rendered message, re-attempting send', { promptId, attempt, maxAttempts });
+          console.warn('[PromptQueue] No active stream detected and no rendered message, re-attempting send', {
+            promptId,
+            attempt,
+            maxAttempts,
+            snapshot: buildPromptQueueDebugSnapshot({
+              site,
+              inputEl,
+              sendBtn,
+              stopButtonSelector: stopBtnSel,
+              promptId,
+              attempt,
+            }),
+          });
           await new Promise((r) => setTimeout(r, 250));
           if (site === 'chatgpt') {
             const retryPreSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
@@ -1000,29 +1091,58 @@
               attempt,
               retryPreSendMaxWaitMs,
             });
-            await waitForChatGPTSendWindow({
-              sendButton: sendBtn,
-              maxWaitMs: retryPreSendMaxWaitMs,
-              quietWindowMs: 1200,
-              pollMs: 250,
-            });
+            try {
+              await waitForChatGPTSendWindow({
+                sendButton: sendBtn,
+                maxWaitMs: retryPreSendMaxWaitMs,
+                quietWindowMs: 1200,
+                pollMs: 250,
+              });
+            } catch (retryPreSendErr) {
+              console.error('[PromptQueue] Retry pre-send quiet window failed', {
+                promptId,
+                attempt,
+                error: retryPreSendErr?.message || String(retryPreSendErr),
+                snapshot: buildPromptQueueDebugSnapshot({
+                  site,
+                  inputEl,
+                  sendBtn,
+                  stopButtonSelector: stopBtnSel,
+                  promptId,
+                  attempt,
+                }),
+              });
+              throw retryPreSendErr;
+            }
           }
           await clickSend(sendBtn, inputEl);
         }
       }
 
       if (!streamStarted) {
+        console.error('[PromptQueue] Stream start verification failed after retries', {
+          promptId,
+          maxAttempts,
+          snapshot: buildPromptQueueDebugSnapshot({
+            site,
+            inputEl,
+            sendBtn,
+            stopButtonSelector: stopBtnSel,
+            promptId,
+            attempt: maxAttempts,
+          }),
+        });
         throw new Error('No active stream detected after sending prompt (after retries)');
       }
       console.log('[PromptQueue] Stream detected or render found, proceeding to render verification', { promptId, streamStarted });
 
       try {
-        await chrome.runtime.sendMessage({
+        const submittedResp = await chrome.runtime.sendMessage({
           type: 'PROMPT_SUBMITTED',
           promptId,
           reason: 'stream-start-detected',
         });
-        console.log('[PromptQueue] PROMPT_SUBMITTED sent', { promptId });
+        console.log('[PromptQueue] PROMPT_SUBMITTED sent', { promptId, response: submittedResp || null });
       } catch (submissionErr) {
         console.warn('[PromptQueue] Failed to send PROMPT_SUBMITTED', {
           promptId,
@@ -1086,7 +1206,17 @@
         }
         console.log('[PromptQueue] Completion wait finished (no stop word)', { promptId });
       } catch (e) {
-        console.error('[PromptQueue] waitForCompletion failed', { promptId, error: e?.message });
+        console.error('[PromptQueue] waitForCompletion failed', {
+          promptId,
+          error: e?.message,
+          snapshot: buildPromptQueueDebugSnapshot({
+            site,
+            inputEl,
+            sendBtn,
+            stopButtonSelector: stopBtnSel,
+            promptId,
+          }),
+        });
         throw e;
       }
       
@@ -1098,11 +1228,23 @@
         console.error('[PromptQueue] Failed to send RESPONSE_COMPLETE', { promptId, error: e?.message });
       }
     } catch (e) {
+      const catchSite = detectSite();
+      const catchCfg = selectorsForSite(catchSite);
+      const catchInputEl = queryFirst(catchCfg.inputCandidates);
+      const catchSendBtn = queryFirst(catchCfg.sendButtonCandidates);
+      const catchStopBtnSel = catchCfg.stopButtonCandidates?.[0] || null;
       console.error('[PromptQueue] Error during processing', { 
         promptId, 
         error: e?.message, 
         stack: e?.stack,
-        timestamp: Date.now() 
+        timestamp: Date.now(),
+        snapshot: buildPromptQueueDebugSnapshot({
+          site: catchSite,
+          inputEl: catchInputEl,
+          sendBtn: catchSendBtn,
+          stopButtonSelector: catchStopBtnSel,
+          promptId,
+        }),
       });
       try {
         chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, error: String(e) });
