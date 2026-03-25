@@ -1,74 +1,70 @@
 -----------------line prompt mode--------------------
 -----------------prepend here--------------------
-Section 1 think deeper and harder!
+Section 1 think deeper and harder and upload!
 
 
 
 
 
 ---------------------append here------------------
-next section review deeper and harder?
-do the next section thikn with greater intensity!
-lets proceed to next sectoin probe deeper and harder.
-next seciton consider more deeply?
-we shud next section scrutinize deeper nad harder?
-can we next section assess deeper nad harder!
-pls next sectoin evaluate deeper and harder?
-next section examine deeper nad hared!
-time ot next sectoin investigate deeper and harder!
-next sectoin study depeer nad hared!
-u shud now next section analyze deeper nad harder?
-now advance ot next section dig deeper and harder?
-let go next section explore depeer and harder!
-next section think deeper and harder!
-i want u ot next sectoin evaluate deeper and harder.
-next sectoin anlyze more thoroughly.
-advance ot next sectoin dig deeper and harder?
-now go ot next section think deeper and harder!
-we need ot next sectoin detail deeper and harder.
-pls proceed ot next sectoin probe deeper and harder?
-help me next seciton dissect deeper and harder.
-time for next section scrutinize deeper and harder.
-next section examine deeper and hared!
-we need  next sectoin detail deeper and harder.
-next seciton consider more deepyl?
-lets explore next sectoin explore deeper nad harder!
-can u next section analyze deeper nad harder!
-now next section review deeper nad harder!
-now audit next section examine deeper nad harder.
-time for next section scrutinize deeper nad harder!
-next section think deeper nad harer.
-advanc e to next sectoin anlyze more thoroughly?
-we shud next section scrutinize deeper and harder?
-let go next section explore depeer nad harder!
-pls next sectoin evaluate deeper and harder?
-lets next section assess deeper and harder.
-next section reflect more profoundly nad hardr!
-go to next section, think deeper nad harder!
-next sectoin study depeer nad hared!
-we need to next sectoin detail deeper and harder.
-now move to next section dig deeper and harder!
-can we next section assess deeper and harder!
-help me next section review deeper nad harder?
-must advance ot next section investigate deeper and harder.
-do the next section thikn with greater intesnity!
-pls clarify next section clarify deeper nad harder?
-lets proceed ot next sectoin probe deeper and harder.
-time ot next sectoin investigate deeper and harder!
-we must next section audit deeper nad harder?
-now next section review deeper nad harder!
-can u next section analyze deeper nad harder!
-pls next sectoin evaluate deeper nad harder?
-lets next section assess deeper nad harder.
-now audit next section examine deeper and harder.
-time for next section examine deeper nad harder.
-lets explore next sectoin explore deeper nad harder!
-pls clarify next section clarify deeper nad harder?
-we need  ot next sectoin detail deeper and harder.
-next section think deeper and harder!
+next section review deeper and harder, and upload?
+do the next section think with greater intensity, and upload!
+let's proceed to the next section, probe deeper and harder, and upload!
+next section consider more deeply, and upload!
+we should next section scrutinize deeper and harder, and upload!
+can we next section assess deeper and harder, and upload!
+please next section evaluate deeper and harder, and upload!
+next section examine deeper and harder, and upload!
+time for the next section to investigate deeper and harder, and upload!
+next section study deeper and harder, and upload!
+you should now next section analyze deeper and harder, and upload!
+now advance to the next section, dig deeper and harder, and upload!
+let go next section explore deeper and harder, and upload!
+next section think deeper and harder, and upload!
+I want you to next section evaluate deeper and harder, and upload!
+next section analyze more thoroughly, and upload!
+advance to the next section, dig deeper and harder, and upload!
+now go to the next section, think deeper and harder, and upload!
+we need the next section to detail deeper and harder, and upload!
+please proceed to the next section, probe deeper and harder, and upload!
+help me next section dissect deeper and harder, and upload!
+time for the next section to scrutinize deeper and harder, and upload!
+next section examine deeper and harder, and upload!
+we need the next section to detail deeper and harder, and upload!
+next section consider more deeply, and upload!
+let's explore the next section, explore deeper and harder, and upload!
+can you next section analyze deeper and harder, and upload!
+now next section review deeper and harder, and upload!
+can you analyze next section, analyze deeper and harder, and upload!
+please audit next section, examine deeper and harder, and upload!
+time for the next section to scrutinize deeper and harder, and upload!
+next section think deeper and harder, and upload!
+advance to the next section, analyze more thoroughly, and upload!
+we should next section scrutinize deeper and harder, and upload!
+let's explore the next section, explore deeper and harder, and upload!
+please next section evaluate deeper and harder, and upload!
+let's next section assess deeper and harder, and upload!
+now reflect next section, reflect deeper and harder, and upload!
+go to the next section, think deeper and harder, and upload!
+next section study deeper and harder, and upload!
+we need the next section to detail deeper and harder, and upload!
+now move to the next section, dig deeper and harder, and upload!
+can we next section assess deeper and harder, and upload!
+help me next section review deeper and harder, and upload!
+we must next section audit deeper and harder, and upload!
+now next section review deeper and harder, and upload!
+can you next section analyze deeper and harder, and upload!
+please next section evaluate deeper and harder, and upload!
+let's next section assess deeper and harder, and upload!
+now reflect next section, reflect deeper and harder, and upload!
+time for the next section to examine deeper and harder, and upload!
+let's explore the next section, explore deeper and harder, and upload!
+please clarify next section, clarify deeper and harder, and upload!
+we need the next section to detail deeper and harder, and upload!
+next section think deeper and harder, and upload!
 
 -------------------new tab--------------------------
-Section 2 while thinking deeper and harder
+Section 2 while thinking deeper and harder but don't upload yet
 
 
 
@@ -76,7 +72,7 @@ Section 2 while thinking deeper and harder
 ---------------------append here------------------
 
 -------------------new tab--------------------------
-Section 3 thinking  deeper and harder
+Section 3 thinking  deeper and harder but don't upload yet!
 
 
 
@@ -85,7 +81,7 @@ Section 3 thinking  deeper and harder
 ---------------------append here------------------
 
 -------------------new tab--------------------------
-Section 4 think deeper and harder
+Section 4 think deeper and harder but don't upload yet.
 
 
 
@@ -94,30 +90,30 @@ Section 4 think deeper and harder
 ---------------------append here------------------
 
 -------------------new tab--------------------------
-Section 5 think deeper and harder..
+Section 5 think deeper and harder but don't upload yet .
 
 
 
 
 ---------------------append here------------------
-next section reflect more deeply and more!
+next section reflect more deeply and more! do not upload yet!
 
 -------------------new tab--------------------------
-Section 7 think deeper and harder?
-
-
-
----------------------append here------------------
-
--------------------new tab--------------------------
-Section 8 think deeper and harder?
+Section 7 think deeper and harder? do not upload yet!
 
 
 
 ---------------------append here------------------
 
 -------------------new tab--------------------------
-Section 9 think deeper and harder?
+Section 8 think deeper and harder? do not upload yet
+
+
+
+---------------------append here------------------
+
+-------------------new tab--------------------------
+Section 9 think deeper and harder? do not upload.
 
 
 
