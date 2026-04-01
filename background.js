@@ -4,21 +4,39 @@
 // NOTE: This patch exists in all 3 JS files because Chrome extensions have separate
 // JavaScript contexts (service worker, popup, page). Each context needs its own patch.
 (function () {
-  if (console.__aiPromptQueuePatched) return;
+  const root = self;
+  const setDebugEnabled = (enabled) => {
+    root.__aiPromptQueueDebugLoggingEnabled = enabled === true;
+  };
+
+  if (console.__aiPromptQueuePatched) {
+    root.__aiPromptQueueSetDebugLogging = setDebugEnabled;
+    if (typeof root.__aiPromptQueueDebugLoggingEnabled !== 'boolean') {
+      setDebugEnabled(false);
+    }
+    return;
+  }
+
   const PREFIX = '[AI Prompt Queue]';
+  setDebugEnabled(false);
+  root.__aiPromptQueueSetDebugLogging = setDebugEnabled;
   console.__aiPromptQueuePatched = true;
+
   ['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
     const original = console[method]?.bind(console);
-    if (original) {
-      console[method] = (...args) => {
-        const first = args[0];
-        if (typeof first === 'string') {
-          original(`${PREFIX} ${first}`, ...args.slice(1));
-        } else {
-          original(PREFIX, ...args);
-        }
-      };
-    }
+    if (!original) return;
+    const alwaysEmit = method === 'error';
+    console[method] = (...args) => {
+      if (!alwaysEmit && root.__aiPromptQueueDebugLoggingEnabled !== true) {
+        return;
+      }
+      const first = args[0];
+      if (typeof first === 'string') {
+        original(`${PREFIX} ${first}`, ...args.slice(1));
+      } else {
+        original(PREFIX, ...args);
+      }
+    };
   });
 })();
 
@@ -82,6 +100,7 @@ const state = {
     enableRetryOnFailure: true,
     maxRetriesPerPrompt: 2,
     retryDelayMs: 2000,
+    debugLoggingEnabled: false,
     openNewChatPerPrompt: false,
     openNewChatPerPromptUrl: '',
   },
@@ -97,6 +116,7 @@ const state = {
 };
 let sequentialRetryTimer = null;
 const parallelSubmissionWaiters = new Map();
+let hasHydratedPersistentState = false;
 
 const DEFAULT_SETTINGS = {
   stableMs: 10000,
@@ -117,6 +137,7 @@ const DEFAULT_SETTINGS = {
   enableRetryOnFailure: true,
   maxRetriesPerPrompt: 2,
   retryDelayMs: 2000,
+  debugLoggingEnabled: false,
   enableMaxWaitTimeout: true,
   enableStopWord: false,
   stopWord: 'end of feedback',
@@ -126,6 +147,17 @@ const DEFAULT_SETTINGS = {
 };
 
 const SETTINGS_STORAGE_KEY = 'aiTaskSequencerSettings';
+
+function applyDebugLoggingSetting(enabled) {
+  const next = enabled === true;
+  try {
+    if (typeof self.__aiPromptQueueSetDebugLogging === 'function') {
+      self.__aiPromptQueueSetDebugLogging(next);
+    } else {
+      self.__aiPromptQueueDebugLoggingEnabled = next;
+    }
+  } catch (_) {}
+}
 
 const RECOVERY_CONFIG = {
   maxRecoveryAttempts: 3,
@@ -174,6 +206,7 @@ function validateSettings(input = {}) {
     enableRetryOnFailure: input.enableRetryOnFailure !== false,
     maxRetriesPerPrompt: coerceNumber(input.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
     retryDelayMs: coerceNumber(input.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
+    debugLoggingEnabled: input.debugLoggingEnabled === true,
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
     enableStopWord: input.enableStopWord === true,
     stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
@@ -264,6 +297,7 @@ async function saveState() {
 
 async function loadState() {
   const { aiTaskSequencerState } = await chrome.storage.local.get('aiTaskSequencerState');
+  hasHydratedPersistentState = true;
   if (aiTaskSequencerState) {
     const oldState = { running: state.running, currentIndex: state.currentIndex, prompts: state.prompts.length };
     state.prompts = aiTaskSequencerState.prompts || [];
@@ -555,11 +589,13 @@ async function loadSettings() {
   }
   const merged = validateSettings({ ...DEFAULT_SETTINGS, ...(rawSettings || {}) });
   state.options = merged;
+  applyDebugLoggingSetting(state.options?.debugLoggingEnabled === true);
 }
 
 async function saveSettings(newSettings) {
   const merged = validateSettings({ ...state.options, ...newSettings });
   state.options = merged;
+  applyDebugLoggingSetting(state.options?.debugLoggingEnabled === true);
   try {
     await chrome.storage.local.set({ [SETTINGS_STORAGE_KEY]: merged });
   } catch (e) {
@@ -599,6 +635,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area === 'local' && changes[SETTINGS_STORAGE_KEY]) {
     const next = validateSettings({ ...state.options, ...(changes[SETTINGS_STORAGE_KEY].newValue || {}) });
     state.options = next;
+    applyDebugLoggingSetting(state.options?.debugLoggingEnabled === true);
   }
 });
 
@@ -1047,48 +1084,153 @@ function rejectParallelSubmission(promptId, error) {
   return true;
 }
 
+const PARALLEL_TAB_ACTIVATION_RETRY_DELAYS_MS = [0, 250, 500, 1000];
+
+function isTransientParallelTabActivationError(errorMessage) {
+  const text = String(errorMessage || '').toLowerCase();
+  if (!text) return false;
+  return (
+    text.includes('tabs cannot be edited right now') ||
+    text.includes('user may be dragging a tab') ||
+    text.includes('cannot be edited right now') ||
+    text.includes('tab is in drag mode') ||
+    text.includes('operation timed out')
+  );
+}
+
 async function activateParallelWorkerTab(tabId, workerId) {
-  let tab;
-  try {
-    tab = await chrome.tabs.get(tabId);
-  } catch (err) {
-    throw new Error(`Worker tab is unavailable (${workerId}): ${String(err?.message || err)}`);
-  }
+  const totalAttempts = PARALLEL_TAB_ACTIVATION_RETRY_DELAYS_MS.length;
+  let lastErrorMessage = '';
 
-  console.log('[Parallel] Activating worker tab', {
-    workerId,
-    tabId,
-    windowId: tab?.windowId,
-    currentlyActive: tab?.active === true,
-    status: tab?.status,
-  });
+  for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+    const retryDelay = PARALLEL_TAB_ACTIVATION_RETRY_DELAYS_MS[attempt];
+    if (retryDelay > 0) {
+      await new Promise((resolve) => setTimeout(resolve, retryDelay));
+    }
 
-  if (Number.isInteger(tab?.windowId)) {
+    let tab;
     try {
-      await chrome.windows.update(tab.windowId, { focused: true });
+      tab = await chrome.tabs.get(tabId);
     } catch (err) {
-      console.warn('[Parallel] Could not focus worker window; continuing', {
+      throw new Error(`Worker tab is unavailable (${workerId}): ${String(err?.message || err)}`);
+    }
+
+    if (tab?.active === true) {
+      console.log('[Parallel] Worker tab already active', {
         workerId,
         tabId,
         windowId: tab?.windowId,
-        error: String(err?.message || err),
+        status: tab?.status,
+      });
+      return { activated: true, alreadyActive: true, fallbackUsed: false };
+    }
+
+    console.log('[Parallel] Activating worker tab', {
+      workerId,
+      tabId,
+      windowId: tab?.windowId,
+      currentlyActive: tab?.active === true,
+      status: tab?.status,
+      attempt: attempt + 1,
+      totalAttempts,
+    });
+
+    if (Number.isInteger(tab?.windowId)) {
+      try {
+        await chrome.windows.update(tab.windowId, { focused: true });
+      } catch (err) {
+        console.warn('[Parallel] Could not focus worker window; continuing', {
+          workerId,
+          tabId,
+          windowId: tab?.windowId,
+          error: String(err?.message || err),
+          attempt: attempt + 1,
+        });
+      }
+    }
+
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+    } catch (err) {
+      lastErrorMessage = String(err?.message || err);
+      const transient = isTransientParallelTabActivationError(lastErrorMessage);
+      console.warn('[Parallel] Worker tab activation attempt failed', {
+        workerId,
+        tabId,
+        attempt: attempt + 1,
+        totalAttempts,
+        transient,
+        error: lastErrorMessage,
+      });
+      if (transient) {
+        continue;
+      }
+      throw new Error(`Failed to activate worker tab (${workerId}): ${lastErrorMessage}`);
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    try {
+      const after = await chrome.tabs.get(tabId);
+      if (after?.active === true) {
+        console.log('[Parallel] Worker tab activated', {
+          workerId,
+          tabId,
+          active: true,
+          status: after?.status,
+          url: after?.url || null,
+          attempt: attempt + 1,
+        });
+        return { activated: true, alreadyActive: false, fallbackUsed: false };
+      }
+      console.warn('[Parallel] Worker tab not active after activation attempt', {
+        workerId,
+        tabId,
+        attempt: attempt + 1,
+        totalAttempts,
+        status: after?.status,
+      });
+    } catch (err) {
+      lastErrorMessage = String(err?.message || err);
+      console.warn('[Parallel] Could not verify worker tab activation', {
+        workerId,
+        tabId,
+        attempt: attempt + 1,
+        totalAttempts,
+        error: lastErrorMessage,
       });
     }
   }
 
-  await chrome.tabs.update(tabId, { active: true });
-  await new Promise((resolve) => setTimeout(resolve, 300));
-
+  let finalTab = null;
   try {
-    const after = await chrome.tabs.get(tabId);
-    console.log('[Parallel] Worker tab activated', {
+    finalTab = await chrome.tabs.get(tabId);
+  } catch (err) {
+    throw new Error(`Worker tab disappeared before activation (${workerId}): ${String(err?.message || err)}`);
+  }
+
+  if (finalTab?.active === true) {
+    console.log('[Parallel] Worker tab active on final verification', {
       workerId,
       tabId,
-      active: after?.active === true,
-      status: after?.status,
-      url: after?.url || null,
+      status: finalTab?.status,
+      url: finalTab?.url || null,
     });
-  } catch (_) {}
+    return { activated: true, alreadyActive: false, fallbackUsed: false };
+  }
+
+  if (isTransientParallelTabActivationError(lastErrorMessage)) {
+    console.warn('[Parallel] Proceeding without confirmed foreground activation after transient failures', {
+      workerId,
+      tabId,
+      error: lastErrorMessage,
+      status: finalTab?.status,
+      url: finalTab?.url || null,
+    });
+    return { activated: false, alreadyActive: false, fallbackUsed: true, error: lastErrorMessage };
+  }
+
+  throw new Error(`Failed to activate worker tab (${workerId}): ${lastErrorMessage || 'unknown activation error'}`);
 }
 
 function getRandomPrelaunchGapMs() {
@@ -1322,7 +1464,16 @@ async function dispatchParallelWorkerPrompt(workerId) {
       elapsedMs: Date.now() - dispatchStartedAt,
     });
 
-    await activateParallelWorkerTab(worker.tabId, workerId);
+    const activationResult = await activateParallelWorkerTab(worker.tabId, workerId);
+    if (activationResult?.fallbackUsed) {
+      console.warn('[Parallel] Activation fallback in use; attempting send without confirmed foreground tab', {
+        workerId,
+        tabId: worker.tabId,
+        promptIndex,
+        promptId,
+        error: activationResult.error || null,
+      });
+    }
     const submissionTimeoutMs = getParallelSubmissionTimeoutMs(state.options);
     console.log('[Parallel] Waiting for prompt submission', {
       workerId,
@@ -1669,7 +1820,7 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
     throw new Error('Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.');
   }
 
-  const useParallel = shouldUseParallelMode(state.options);
+  const useParallel = shouldUseParallelMode(state.options, tabPromptGroups);
   const parallelPromptGroups = useParallel ? resolveParallelPromptGroups(prompts, tabPromptGroups) : [];
   if (useParallel && parallelPromptGroups.length > PARALLEL_CONFIG.maxTabs) {
     throw new Error(`Parallel mode supports up to ${PARALLEL_CONFIG.maxTabs} prompts at a time.`);
@@ -1885,6 +2036,7 @@ function makeHistorySignature(item) {
       enableRetryOnFailure: item.settings?.enableRetryOnFailure !== false,
       maxRetriesPerPrompt: coerceNumber(item.settings?.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
       retryDelayMs: coerceNumber(item.settings?.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
+      debugLoggingEnabled: item.settings?.debugLoggingEnabled === true,
       enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
       enableStopWord: item.settings?.enableStopWord === true,
       stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
@@ -1903,7 +2055,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     try {
       // Rehydrate state on demand. Replacing in-memory state during active runs can
       // invalidate worker references held by launch/dispatch loops.
-      if (!state.running) {
+      if (!state.running && !hasHydratedPersistentState) {
         await loadState();
       }
 
@@ -1957,7 +2109,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               sendResponse({ ok: false, error: 'Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.' });
               return;
             }
-            const useParallel = shouldUseParallelMode(effectiveOptions);
+            const useParallel = shouldUseParallelMode(effectiveOptions, tabPromptGroups);
             const parallelPromptGroups = useParallel ? resolveParallelPromptGroups(prompts, tabPromptGroups) : [];
             if (useParallel && parallelPromptGroups.length > PARALLEL_CONFIG.maxTabs) {
               sendResponse({ ok: false, error: `Parallel mode supports up to ${PARALLEL_CONFIG.maxTabs} prompts at a time.` });

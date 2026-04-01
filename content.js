@@ -4,21 +4,39 @@
 // NOTE: This patch exists in all 3 JS files because Chrome extensions have separate
 // JavaScript contexts (service worker, popup, page). Each context needs its own patch.
 (function () {
-  if (console.__aiPromptQueuePatched) return;
+  const root = window;
+  const setDebugEnabled = (enabled) => {
+    root.__aiPromptQueueDebugLoggingEnabled = enabled === true;
+  };
+
+  if (console.__aiPromptQueuePatched) {
+    root.__aiPromptQueueSetDebugLogging = setDebugEnabled;
+    if (typeof root.__aiPromptQueueDebugLoggingEnabled !== 'boolean') {
+      setDebugEnabled(false);
+    }
+    return;
+  }
+
   const PREFIX = '[AI Prompt Queue]';
+  setDebugEnabled(false);
+  root.__aiPromptQueueSetDebugLogging = setDebugEnabled;
   console.__aiPromptQueuePatched = true;
   ['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
     const original = console[method]?.bind(console);
-    if (original) {
-      console[method] = (...args) => {
-        const first = args[0];
-        if (typeof first === 'string') {
-          original(`${PREFIX} ${first}`, ...args.slice(1));
-        } else {
-          original(PREFIX, ...args);
-        }
-      };
-    }
+    if (!original) return;
+
+    const alwaysEmit = method === 'error';
+    console[method] = (...args) => {
+      if (!alwaysEmit && root.__aiPromptQueueDebugLoggingEnabled !== true) {
+        return;
+      }
+      const first = args[0];
+      if (typeof first === 'string') {
+        original(`${PREFIX} ${first}`, ...args.slice(1));
+      } else {
+        original(PREFIX, ...args);
+      }
+    };
   });
 })();
 
@@ -30,6 +48,15 @@
   let automationAborted = false; // Signal to queued prompts to stop
   let autoConfirmDialogs = false;
   let lastConfirmClickAt = 0;
+
+  function setDebugLoggingEnabled(enabled) {
+    const next = enabled === true;
+    if (typeof window.__aiPromptQueueSetDebugLogging === 'function') {
+      window.__aiPromptQueueSetDebugLogging(next);
+      return;
+    }
+    window.__aiPromptQueueDebugLoggingEnabled = next;
+  }
 
   const DEFAULTS = {
     stableMs: 10000,
@@ -223,6 +250,7 @@
       const res = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
       if (res?.ok && res.settings) {
         setAutoConfirmDialogs(res.settings.autoConfirmDialogs === true, source);
+        setDebugLoggingEnabled(res.settings.debugLoggingEnabled === true);
       }
     } catch (_) {}
   }
@@ -1267,6 +1295,7 @@
 
         if (message?.type === 'SETTINGS_UPDATED' && message.settings) {
           setAutoConfirmDialogs(message.settings.autoConfirmDialogs === true, 'settings_updated');
+          setDebugLoggingEnabled(message.settings.debugLoggingEnabled === true);
           sendResponse({ ok: true });
           return;
         }
@@ -1275,6 +1304,9 @@
           const promptId = message.promptId || Math.random();
           if (message.options && typeof message.options.autoConfirmDialogs === 'boolean') {
             setAutoConfirmDialogs(message.options.autoConfirmDialogs, 'send_prompt');
+          }
+          if (message.options && typeof message.options.debugLoggingEnabled === 'boolean') {
+            setDebugLoggingEnabled(message.options.debugLoggingEnabled);
           }
           console.log('[MessageListener] SEND_PROMPT received', { 
             promptId, 

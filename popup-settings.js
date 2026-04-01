@@ -1,4 +1,4 @@
-import { applyConsolePatch } from './popup-console-patch.js';
+import { applyConsolePatch, setDebugLoggingEnabled } from './popup-console-patch.js';
 import { msToSec, secToMs, applyTheme } from './popup-dom-utils.js';
 
 // Initialization and helpers for settings UI
@@ -27,9 +27,14 @@ export async function loadSettingsIntoUI() {
       document.getElementById('stopWord').value = s.stopWord || '';
       document.getElementById('stopWordCaseSensitive').checked = s.stopWordCaseSensitive === true;
       document.getElementById('refreshTabBeforeEachPrompt').checked = s.refreshTabBeforeEachPrompt === true;
-      document.getElementById('parallelOneTabPerPrompt').checked = s.parallelOneTabPerPrompt === true;
+      const parallelOneTabPerPrompt = document.getElementById('parallelOneTabPerPrompt');
+      if (parallelOneTabPerPrompt) {
+        parallelOneTabPerPrompt.checked = s.parallelOneTabPerPrompt === true;
+      }
+      document.getElementById('debugLoggingEnabled').checked = s.debugLoggingEnabled === true;
       document.getElementById('openNewChatPerPrompt').checked = s.openNewChatPerPrompt === true;
       document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
+      setDebugLoggingEnabled(s.debugLoggingEnabled === true);
 
       const stopWordContainer = document.getElementById('stopWordContainer');
       const watchedElementContainer = document.getElementById('watchedElementContainer');
@@ -78,7 +83,8 @@ export async function saveSettingsFromUI() {
       stopWord: document.getElementById('stopWord').value || '',
       stopWordCaseSensitive: document.getElementById('stopWordCaseSensitive').checked,
       refreshTabBeforeEachPrompt: document.getElementById('refreshTabBeforeEachPrompt').checked,
-      parallelOneTabPerPrompt: document.getElementById('parallelOneTabPerPrompt').checked,
+      parallelOneTabPerPrompt: document.getElementById('parallelOneTabPerPrompt')?.checked === true,
+      debugLoggingEnabled: document.getElementById('debugLoggingEnabled').checked,
       openNewChatPerPrompt: document.getElementById('openNewChatPerPrompt').checked,
       openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
     };
@@ -91,7 +97,7 @@ export async function saveSettingsFromUI() {
 }
 
 export function initSettingsUI() {
-  applyConsolePatch();
+  applyConsolePatch(undefined, false);
 
   const themeSelect = document.getElementById('themeSelect');
   if (themeSelect) {
@@ -124,6 +130,7 @@ export function initSettingsUI() {
   const watchedElementContainer = document.getElementById('watchedElementContainer');
   const watchedElementSelectorInput = document.getElementById('watchedElementSelector');
   const useChatgptActionSelectorBtn = document.getElementById('useChatgptActionSelector');
+  const debugLoggingEnabledCheckbox = document.getElementById('debugLoggingEnabled');
   const openNewChatPerPromptCheckbox = document.getElementById('openNewChatPerPrompt');
   const openNewChatPerPromptUrlInput = document.getElementById('openNewChatPerPromptUrl');
 
@@ -170,6 +177,13 @@ export function initSettingsUI() {
         enableWatchedElementGateCheckbox.checked = true;
         watchedElementContainer.classList.remove('hidden');
       }
+      saveSettingsFromUI();
+    });
+  }
+
+  if (debugLoggingEnabledCheckbox) {
+    debugLoggingEnabledCheckbox.addEventListener('change', () => {
+      setDebugLoggingEnabled(debugLoggingEnabledCheckbox.checked);
       saveSettingsFromUI();
     });
   }

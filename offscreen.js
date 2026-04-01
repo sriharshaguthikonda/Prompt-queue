@@ -2,23 +2,66 @@
 
 // Console prefix patch
 (function () {
-  if (console.__aiPromptQueuePatched) return;
+  const root = self;
+  const setDebugEnabled = (enabled) => {
+    root.__aiPromptQueueDebugLoggingEnabled = enabled === true;
+  };
+
+  if (console.__aiPromptQueuePatched) {
+    root.__aiPromptQueueSetDebugLogging = setDebugEnabled;
+    if (typeof root.__aiPromptQueueDebugLoggingEnabled !== 'boolean') {
+      setDebugEnabled(false);
+    }
+    return;
+  }
+
   const PREFIX = '[AI Prompt Queue - Offscreen]';
+  setDebugEnabled(false);
+  root.__aiPromptQueueSetDebugLogging = setDebugEnabled;
   console.__aiPromptQueuePatched = true;
   ['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
     const original = console[method]?.bind(console);
-    if (original) {
-      console[method] = (...args) => {
-        const first = args[0];
-        if (typeof first === 'string') {
-          original(`${PREFIX} ${first}`, ...args.slice(1));
-        } else {
-          original(PREFIX, ...args);
-        }
-      };
-    }
+    if (!original) return;
+
+    const alwaysEmit = method === 'error';
+    console[method] = (...args) => {
+      if (!alwaysEmit && root.__aiPromptQueueDebugLoggingEnabled !== true) {
+        return;
+      }
+      const first = args[0];
+      if (typeof first === 'string') {
+        original(`${PREFIX} ${first}`, ...args.slice(1));
+      } else {
+        original(PREFIX, ...args);
+      }
+    };
   });
 })();
+
+const SETTINGS_STORAGE_KEY = 'aiTaskSequencerSettings';
+
+async function refreshDebugLoggingSetting() {
+  try {
+    const result = await chrome.storage.local.get(SETTINGS_STORAGE_KEY);
+    const enabled = result?.[SETTINGS_STORAGE_KEY]?.debugLoggingEnabled === true;
+    if (typeof self.__aiPromptQueueSetDebugLogging === 'function') {
+      self.__aiPromptQueueSetDebugLogging(enabled);
+    } else {
+      self.__aiPromptQueueDebugLoggingEnabled = enabled;
+    }
+  } catch (_) {}
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes[SETTINGS_STORAGE_KEY]) {
+    const enabled = changes[SETTINGS_STORAGE_KEY].newValue?.debugLoggingEnabled === true;
+    if (typeof self.__aiPromptQueueSetDebugLogging === 'function') {
+      self.__aiPromptQueueSetDebugLogging(enabled);
+    } else {
+      self.__aiPromptQueueDebugLoggingEnabled = enabled;
+    }
+  }
+});
 
 // Handle messages from background script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -82,4 +125,5 @@ async function readFileContent(filePath) {
 // Alternative approach: Use a native messaging host
 // This would require a separate native application that the extension can communicate with
 
+refreshDebugLoggingSetting();
 console.log('Offscreen script loaded');

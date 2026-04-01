@@ -35,7 +35,7 @@ Prompts (one per line)"></textarea>
               <span class="info-wrap">
                 <button type="button" class="info-trigger" aria-label="Prompt tips" aria-expanded="false">i</button>
                 <span class="info-popover">
-                  • Use <code>---new tab---</code> on its own line to split tab sets in parallel mode.<br>
+                  • Use <code>---new tab---</code> on its own line to split tab sets and auto-run in parallel.<br>
                   • Use <code>---line prompt mode---</code> to treat each non-divider line as one prompt.<br>
                   • Use <code>---append here---</code> and <code>---prepend here---</code> for local prompt edits.
                 </span>
@@ -105,6 +105,14 @@ Prompts (one per line)"></textarea>
               </div>
               <input id="pollSec" type="number" min="0.1" step="0.05" placeholder="0.3" />
             </div>
+          </div>
+          <div class="inline" style="margin-top: 8px;">
+            <input id="debugLoggingEnabled" type="checkbox" />
+            <label for="debugLoggingEnabled">Enable debug console logging</label>
+            <span class="info-wrap">
+              <button type="button" class="info-trigger" aria-label="Debug logging help" aria-expanded="false">i</button>
+              <span class="info-popover">Off by default. Keeps only errors in console to reduce overhead and noise.</span>
+            </span>
           </div>
           <div class="inline" style="margin-top: 10px;">
             <input id="enableRetryOnFailure" type="checkbox" checked />
@@ -259,28 +267,20 @@ Prompts (one per line)"></textarea>
         </span>
       </div>
 
-      <div class="inline" style="margin-top: 12px; padding: 0 12px;">
-        <input id="parallelOneTabPerPrompt" type="checkbox" />
-        <label for="parallelOneTabPerPrompt">Parallel: open one tab per prompt (max 10)</label>
-        <span class="info-wrap">
-          <button type="button" class="info-trigger" aria-label="Parallel mode help" aria-expanded="false">i</button>
-          <span class="info-popover">Launches one tab per prompt or <code>---new tab---</code> group, then dispatches prompt sends as tabs become ready.</span>
-        </span>
-      </div>
       <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;">
         <button id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide guide</button>
       </div>
       <div id="parallelWalkthrough" class="parallel-walkthrough" style="margin: 8px 12px 0;">
-        <div class="parallel-walkthrough-title">Parallel mode quick guide</div>
+        <div class="parallel-walkthrough-title">Tab-split quick guide</div>
         <ol>
-          <li>Turn this on and keep prompts at 10 or fewer.</li>
-          <li>Optional: use <code>---new tab---</code> lines to split prompts into tab sets.</li>
+          <li>Add <code>---new tab---</code> lines to split prompts into tab sets (max 10 tab sets).</li>
+          <li>If no <code>---new tab---</code> markers are present, automation runs sequentially.</li>
           <li>Optional: set a custom URL below. If empty, active tab URL is reused.</li>
           <li>Start automation. Each tab set gets one background tab; next launch starts as soon as the previous tab accepts its first prompt.</li>
           <li>Pause/Resume affects only new launches; already launched tabs keep running.</li>
           <li>Stop cancels pending launches only; launched tabs are left open.</li>
         </ol>
-        <div class="parallel-walkthrough-caveat">When parallel mode is ON, “Send each prompt in a new chat” is ignored for that run.</div>
+        <div class="parallel-walkthrough-caveat">When <code>---new tab---</code> markers are used, “Send each prompt in a new chat” is ignored for that run.</div>
       </div>
 
       <div class="inline" style="margin-top: 12px; padding: 0 12px;">
