@@ -7,6 +7,7 @@ import { NEW_TAB_MARKER, resolveSeparator, buildPromptLaunchPlan } from './popup
 applyConsolePatch();
 
 const separatorInput = document.getElementById('separatorInput');
+let latestAutomationStatus = null;
 
 async function getActiveTabId() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -152,6 +153,7 @@ async function refreshStatus() {
   try {
     const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
     if (res?.ok && res.status) {
+      latestAutomationStatus = res.status;
       const { running, paused, total, currentIndex } = res.status;
       const progressPos = getProgressPosition(res.status);
       setProgress(running ? progressPos : total, total);
@@ -210,19 +212,19 @@ async function startAutomation() {
       const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
       currentSettings = { ...(settingsRes?.settings || {}) };
     }
-    const parallelTabCount = launchPlan.tabPromptGroups.length;
-    if (currentSettings.parallelOneTabPerPrompt === true && launchPlan.hasTabMarkers) {
+    const parallelTabCount = launchPlan.hasTabMarkers ? launchPlan.tabPromptGroups.length : 0;
+    if (launchPlan.hasTabMarkers) {
       showToast(`Detected ${parallelTabCount} tab group(s) using ${NEW_TAB_MARKER}`, 'info', 3000);
     }
     const res = await chrome.runtime.sendMessage({
       type: 'START_AUTOMATION',
       prompts,
-      tabPromptGroups: launchPlan.tabPromptGroups,
+      tabPromptGroups: launchPlan.hasTabMarkers ? launchPlan.tabPromptGroups : null,
       tabId,
       options: currentSettings,
     });
     if (res?.ok) {
-      const initialStatus = currentSettings.parallelOneTabPerPrompt === true
+      const initialStatus = launchPlan.hasTabMarkers
         ? { mode: 'parallel', running: true, paused: false, total: parallelTabCount, parallelLaunched: 0, parallelCompleted: 0, parallelFailed: 0, parallelActive: 0 }
         : { mode: 'sequential', running: true, paused: false, currentIndex: 0, total: prompts.length };
       setStatus(getRunningStatusText(initialStatus), 'running');
@@ -397,6 +399,7 @@ if (importBtn && importFile) {
 chrome.runtime.onMessage.addListener((message) => {
   try {
     if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
+      latestAutomationStatus = message.status;
       const { total, paused, running } = message.status;
       lastActivityTime = Date.now();
       setButtonsDisabled(running && !paused);
@@ -407,6 +410,7 @@ chrome.runtime.onMessage.addListener((message) => {
     } else if (message?.type === 'AUTOMATION_COMPLETE') {
       const reason = message.reason;
       const status = message.status;
+      latestAutomationStatus = status || { running: false, paused: false, total: 0, currentIndex: 0 };
       const lastFailureError = status?.parallelLastFailure?.error;
       if (reason === 'stoppedByStopWord') {
         setStatus('Stopped by stop phrase', 'idle');
@@ -435,6 +439,7 @@ chrome.runtime.onMessage.addListener((message) => {
       stopCountdownTimer();
       updateControlButtons({ running: false, paused: false });
     } else if (message?.type === 'AUTOMATION_ERROR') {
+      latestAutomationStatus = { ...(latestAutomationStatus || {}), running: false, paused: false };
       setStatus(`Error: ${message.error}`, 'error');
       setButtonsDisabled(false);
       showToast(`✗ Error: ${message.error}`, 'error', 5000);
@@ -464,39 +469,32 @@ function startCountdownTimer() {
   countdownAbortController = new AbortController();
   const signal = countdownAbortController.signal;
 
-  const doCountdown = async () => {
+  const doCountdown = () => {
     if (signal.aborted) return;
-    
-    try {
-      const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
-      if (res?.ok && res.status?.running && !res.status?.paused) {
-        const stableMs =
-          res.status.stableCountdownMs ||
-          res.status.options?.stableMs ||
-          secToMs(Number(document.getElementById('stableMaxSec')?.value)) ||
-          1200;
-        const countdownEl = document.getElementById('stableCountdown');
-        const countdownValue = document.getElementById('countdownValue');
-        
-        // Show countdown
-        countdownEl.style.display = 'block';
-        
-        // Simulate countdown (updates every 100ms)
-        const elapsed = Date.now() - lastActivityTime;
-        const remaining = Math.max(0, stableMs - elapsed);
-        const remainingSec = (remaining / 1000).toFixed(1);
-        countdownValue.textContent = remainingSec;
-      } else {
-        // Hide countdown when not running
-        const countdownEl = document.getElementById('stableCountdown');
-        countdownEl.style.display = 'none';
-      }
-    } catch (e) {
-      console.error('[Countdown] Error:', e);
+
+    const countdownEl = document.getElementById('stableCountdown');
+    const countdownValue = document.getElementById('countdownValue');
+    if (!countdownEl || !countdownValue) return;
+
+    const status = latestAutomationStatus;
+    const running = status?.running === true && status?.paused !== true;
+    if (running) {
+      const stableMs =
+        Number(status?.stableCountdownMs) ||
+        Number(status?.options?.stableMs) ||
+        secToMs(Number(document.getElementById('stableMaxSec')?.value)) ||
+        1200;
+
+      countdownEl.style.display = 'block';
+      const elapsed = Date.now() - lastActivityTime;
+      const remaining = Math.max(0, stableMs - elapsed);
+      countdownValue.textContent = (remaining / 1000).toFixed(1);
+    } else {
+      countdownEl.style.display = 'none';
     }
-    
+
     if (!signal.aborted) {
-      setTimeout(doCountdown, 100);
+      setTimeout(doCountdown, 250);
     }
   };
   doCountdown();
@@ -539,15 +537,30 @@ async function checkForSampleExport() {
     if (!response.ok) return;
     
     const data = await response.json();
-    if (!data.history || !Array.isArray(data.history) || data.history.length === 0) return;
-    
-    // Check if history is empty (no point prompting if user already has data)
-    const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
-    if (res?.history && res.history.length > 0) return; // Already has history
-    
-    // Show confirmation toast
-    if (confirm(`Found sample-export.json with ${data.history.length} saved prompt(s). Load it?`)) {
-      await importSampleData(data);
+    if (!data.history || !Array.isArray(data.history) || data.history.length === 0) {
+      return;
+    }
+
+    const validItems = data.history.filter((item) => (
+      item &&
+      typeof item === 'object' &&
+      Array.isArray(item.prompts) &&
+      item.prompts.length > 0
+    ));
+    if (validItems.length === 0) {
+      return;
+    }
+
+    const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
+    const makeSignature = (item) => JSON.stringify((item?.prompts || []).map((p) => (typeof p === 'string' ? p.trim() : '')));
+    const existingSignatures = new Set(aiTaskSequencerHistory.map(makeSignature));
+    const newItems = validItems.filter((item) => !existingSignatures.has(makeSignature(item)));
+    if (newItems.length === 0) {
+      return;
+    }
+
+    if (confirm(`Found sample-export.json with ${newItems.length} new prompt set(s). Load now?`)) {
+      await importSampleData({ history: newItems });
     }
   } catch (e) {
     // File doesn't exist or can't be read - that's fine
@@ -557,25 +570,17 @@ async function checkForSampleExport() {
 
 async function importSampleData(importData) {
   try {
-    const validItems = importData.history.filter(item => {
-      if (!item || typeof item !== 'object') return false;
-      if (!Array.isArray(item.prompts) || item.prompts.length === 0) return false;
-      return true;
-    });
-    
-    if (validItems.length === 0) {
-      showToast('No valid items in sample file', 'error');
+    const result = await importHistoryItems(importData);
+    if (result.imported === 0) {
+      if (result.duplicates > 0) {
+        showToast('Sample prompts already loaded', 'success');
+      } else {
+        showToast('No valid items in sample file', 'error');
+      }
       return;
     }
-    
-    const itemsWithTimestamp = validItems.map(item => ({
-      ...item,
-      savedAt: item.savedAt || Date.now()
-    }));
-    
-    await chrome.storage.local.set({ aiTaskSequencerHistory: itemsWithTimestamp.slice(0, 50) });
     await loadHistoryIntoUI();
-    showToast(`✓ Loaded ${validItems.length} item(s) from sample`, 'success');
+    showToast(`✓ Loaded ${result.imported} item(s) from sample`, 'success');
   } catch (e) {
     console.error('[ImportSample] Error:', e);
     showToast('Failed to load sample', 'error');
