@@ -27,8 +27,8 @@
     return targetUrl;
   }
 
-  function shouldUseParallelMode(options) {
-    return options?.parallelOneTabPerPrompt === true;
+  function shouldUseParallelMode(options, tabPromptGroups) {
+    return Array.isArray(tabPromptGroups) && tabPromptGroups.length > 0;
   }
 
   function sanitizeParallelPromptGroups(rawGroups) {
