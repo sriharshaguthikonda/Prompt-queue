@@ -537,11 +537,19 @@ async function emitTabSessionProgress(tabId) {
 
 async function emitTabSessionError(tabId, error) {
   const session = tabSessions.get(tabId);
+  const message = String(error?.message || error);
+  const details = typeof error === 'object' && error !== null
+    ? (typeof error.details === 'string'
+      ? error.details
+      : (error.snapshot ? JSON.stringify(error.snapshot, null, 2) : null))
+    : null;
   try {
     chrome.runtime.sendMessage({
       type: 'AUTOMATION_ERROR',
       tabId,
-      error: String(error?.message || error),
+      error: message,
+      details,
+      stack: typeof error?.stack === 'string' ? error.stack : null,
       status: session ? buildTabSessionStatus(session) : createIdleStatusForTab(tabId),
     });
   } catch (_) {}
@@ -681,11 +689,13 @@ async function sendNextPromptForTabSession(tabId) {
       promptId: session.currentPromptId,
     });
   } catch (err) {
-    const sendError = String(err?.message || err);
+    const rawSendError = String(err?.message || err);
+    const sendError = buildBackgroundDispatchFailureMessage(tabId, rawSendError);
     console.error('[TabSession] Error sending prompt:', {
       tabId,
       promptIndex: session.currentIndex,
-      error: sendError,
+      error: rawSendError,
+      surfacedError: sendError,
     });
     const retried = await scheduleTabSessionRetry(tabId, sendError, 'sendNextPromptForTabSession');
     if (retried) {
@@ -1450,153 +1460,46 @@ function rejectParallelSubmission(promptId, error) {
   return true;
 }
 
-const PARALLEL_TAB_ACTIVATION_RETRY_DELAYS_MS = [0, 250, 500, 1000];
-
-function isTransientParallelTabActivationError(errorMessage) {
-  const text = String(errorMessage || '').toLowerCase();
-  if (!text) return false;
-  return (
-    text.includes('tabs cannot be edited right now') ||
-    text.includes('user may be dragging a tab') ||
-    text.includes('cannot be edited right now') ||
-    text.includes('tab is in drag mode') ||
-    text.includes('operation timed out')
-  );
+function buildBackgroundDispatchFailureMessage(tabId, errorMessage) {
+  const detail = String(errorMessage || 'Unknown background dispatch error').trim();
+  if (detail.toLowerCase().startsWith('background send/check failed')) {
+    return detail;
+  }
+  const tabLabel = Number.isInteger(tabId) ? `tab ${tabId}` : 'this tab';
+  return `Background send/check failed in ${tabLabel}. Inspect that tab manually. ${detail}`;
 }
 
-async function activateParallelWorkerTab(tabId, workerId) {
-  const totalAttempts = PARALLEL_TAB_ACTIVATION_RETRY_DELAYS_MS.length;
-  let lastErrorMessage = '';
-
-  for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
-    const retryDelay = PARALLEL_TAB_ACTIVATION_RETRY_DELAYS_MS[attempt];
-    if (retryDelay > 0) {
-      await new Promise((resolve) => setTimeout(resolve, retryDelay));
-    }
-
-    let tab;
-    try {
-      tab = await chrome.tabs.get(tabId);
-    } catch (err) {
-      throw new Error(`Worker tab is unavailable (${workerId}): ${String(err?.message || err)}`);
-    }
-
-    if (tab?.active === true) {
-      console.log('[Parallel] Worker tab already active', {
-        workerId,
-        tabId,
-        windowId: tab?.windowId,
-        status: tab?.status,
-      });
-      return { activated: true, alreadyActive: true, fallbackUsed: false };
-    }
-
-    console.log('[Parallel] Activating worker tab', {
-      workerId,
-      tabId,
-      windowId: tab?.windowId,
-      currentlyActive: tab?.active === true,
-      status: tab?.status,
-      attempt: attempt + 1,
-      totalAttempts,
-    });
-
-    if (Number.isInteger(tab?.windowId)) {
-      try {
-        await chrome.windows.update(tab.windowId, { focused: true });
-      } catch (err) {
-        console.warn('[Parallel] Could not focus worker window; continuing', {
-          workerId,
-          tabId,
-          windowId: tab?.windowId,
-          error: String(err?.message || err),
-          attempt: attempt + 1,
-        });
-      }
-    }
-
-    try {
-      await chrome.tabs.update(tabId, { active: true });
-    } catch (err) {
-      lastErrorMessage = String(err?.message || err);
-      const transient = isTransientParallelTabActivationError(lastErrorMessage);
-      console.warn('[Parallel] Worker tab activation attempt failed', {
-        workerId,
-        tabId,
-        attempt: attempt + 1,
-        totalAttempts,
-        transient,
-        error: lastErrorMessage,
-      });
-      if (transient) {
-        continue;
-      }
-      throw new Error(`Failed to activate worker tab (${workerId}): ${lastErrorMessage}`);
-    }
-
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
-    try {
-      const after = await chrome.tabs.get(tabId);
-      if (after?.active === true) {
-        console.log('[Parallel] Worker tab activated', {
-          workerId,
-          tabId,
-          active: true,
-          status: after?.status,
-          url: after?.url || null,
-          attempt: attempt + 1,
-        });
-        return { activated: true, alreadyActive: false, fallbackUsed: false };
-      }
-      console.warn('[Parallel] Worker tab not active after activation attempt', {
-        workerId,
-        tabId,
-        attempt: attempt + 1,
-        totalAttempts,
-        status: after?.status,
-      });
-    } catch (err) {
-      lastErrorMessage = String(err?.message || err);
-      console.warn('[Parallel] Could not verify worker tab activation', {
-        workerId,
-        tabId,
-        attempt: attempt + 1,
-        totalAttempts,
-        error: lastErrorMessage,
-      });
-    }
-  }
-
-  let finalTab = null;
+async function prepareParallelWorkerBackgroundDispatch(tabId, workerId) {
+  let tab;
   try {
-    finalTab = await chrome.tabs.get(tabId);
+    tab = await chrome.tabs.get(tabId);
   } catch (err) {
-    throw new Error(`Worker tab disappeared before activation (${workerId}): ${String(err?.message || err)}`);
+    throw new Error(`Worker tab is unavailable (${workerId}): ${String(err?.message || err)}`);
   }
 
-  if (finalTab?.active === true) {
-    console.log('[Parallel] Worker tab active on final verification', {
-      workerId,
-      tabId,
-      status: finalTab?.status,
-      url: finalTab?.url || null,
-    });
-    return { activated: true, alreadyActive: false, fallbackUsed: false };
+  const backgroundReady = tab?.discarded !== true && tab?.status === 'complete';
+  const snapshot = {
+    workerId,
+    tabId,
+    windowId: tab?.windowId,
+    active: tab?.active === true,
+    discarded: tab?.discarded === true,
+    status: tab?.status || null,
+    url: tab?.url || null,
+  };
+
+  if (!backgroundReady) {
+    console.warn('[Parallel] Worker tab not fully ready for background dispatch; continuing without focus fallback', snapshot);
+  } else {
+    console.log('[Parallel] Worker tab ready for background dispatch', snapshot);
   }
 
-  if (isTransientParallelTabActivationError(lastErrorMessage)) {
-    console.warn('[Parallel] Proceeding without confirmed foreground activation after transient failures', {
-      workerId,
-      tabId,
-      error: lastErrorMessage,
-      status: finalTab?.status,
-      url: finalTab?.url || null,
-    });
-    return { activated: false, alreadyActive: false, fallbackUsed: true, error: lastErrorMessage };
-  }
-
-  throw new Error(`Failed to activate worker tab (${workerId}): ${lastErrorMessage || 'unknown activation error'}`);
+  return {
+    activated: false,
+    alreadyActive: tab?.active === true,
+    fallbackUsed: !backgroundReady,
+    backgroundReady,
+  };
 }
 
 function getRandomPrelaunchGapMs() {
@@ -1830,14 +1733,14 @@ async function dispatchParallelWorkerPrompt(workerId) {
       elapsedMs: Date.now() - dispatchStartedAt,
     });
 
-    const activationResult = await activateParallelWorkerTab(worker.tabId, workerId);
-    if (activationResult?.fallbackUsed) {
-      console.warn('[Parallel] Activation fallback in use; attempting send without confirmed foreground tab', {
+    const dispatchPreparation = await prepareParallelWorkerBackgroundDispatch(worker.tabId, workerId);
+    if (dispatchPreparation?.fallbackUsed) {
+      console.warn('[Parallel] Background dispatch proceeding without a fully ready worker tab', {
         workerId,
         tabId: worker.tabId,
         promptIndex,
         promptId,
-        error: activationResult.error || null,
+        backgroundReady: dispatchPreparation.backgroundReady === true,
       });
     }
     const submissionTimeoutMs = getParallelSubmissionTimeoutMs(state.options);
@@ -1921,14 +1824,19 @@ async function dispatchParallelWorkerPrompt(workerId) {
     if (state.parallel?.workersByPromptId) {
       delete state.parallel.workersByPromptId[promptId];
     }
-    const dispatchError = String(err?.message || err);
+    const rawDispatchError = String(err?.message || err);
+    const dispatchError = buildBackgroundDispatchFailureMessage(
+      liveWorker?.tabId || worker.tabId,
+      rawDispatchError,
+    );
     const tabSnapshot = await getParallelTabSnapshot(liveWorker?.tabId || worker.tabId);
     console.error('[Parallel] Failed to dispatch prompt to worker tab', {
       workerId,
       tabId: liveWorker?.tabId || worker.tabId,
       promptIndex,
       promptId,
-      error: dispatchError,
+      error: rawDispatchError,
+      surfacedError: dispatchError,
       elapsedMs: Date.now() - dispatchStartedAt,
       tabSnapshot,
       mappingSummary: getParallelMappingDebugSummary(),

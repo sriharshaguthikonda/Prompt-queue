@@ -9,6 +9,8 @@ applyConsolePatch();
 const separatorInput = document.getElementById('separatorInput');
 let latestAutomationStatus = null;
 let currentPanelTabId = null;
+let lastParallelFailureSignature = null;
+let hasInitializedParallelFailureState = false;
 
 async function getActiveTabId() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -28,6 +30,31 @@ function shouldHandleAutomationMessage(message) {
   if (!Number.isInteger(messageTabId)) return true;
   if (!Number.isInteger(currentPanelTabId)) return true;
   return messageTabId === currentPanelTabId;
+}
+
+function getParallelFailureSignature(status = {}) {
+  const failure = status?.parallelLastFailure;
+  if (!failure) return null;
+  return [
+    failure.at || '',
+    failure.workerId || '',
+    failure.tabId || '',
+    failure.error || '',
+  ].join(':');
+}
+
+function syncParallelFailureNotice(status = {}, { silent = false } = {}) {
+  const signature = getParallelFailureSignature(status);
+  if (!signature) {
+    return;
+  }
+  if (signature === lastParallelFailureSignature) {
+    return;
+  }
+  lastParallelFailureSignature = signature;
+  if (!silent) {
+    showToast(status.parallelLastFailure.error || 'A worker tab failed. Inspect it manually.', 'info', 7000);
+  }
 }
 
 const pauseBtn = document.getElementById('pauseBtn');
@@ -171,6 +198,8 @@ async function refreshStatus() {
     const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST', tabId });
     if (res?.ok && res.status) {
       latestAutomationStatus = res.status;
+      syncParallelFailureNotice(res.status, { silent: !hasInitializedParallelFailureState });
+      hasInitializedParallelFailureState = true;
       const { running, paused, total, currentIndex } = res.status;
       const progressPos = getProgressPosition(res.status);
       setProgress(running ? progressPos : total, total);
@@ -425,6 +454,7 @@ chrome.runtime.onMessage.addListener((message) => {
     }
     if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
       latestAutomationStatus = message.status;
+      syncParallelFailureNotice(message.status);
       const { total, paused, running } = message.status;
       lastActivityTime = Date.now();
       setButtonsDisabled(running && !paused);
