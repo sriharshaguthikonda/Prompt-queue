@@ -48,6 +48,10 @@
   let automationAborted = false; // Signal to queued prompts to stop
   let autoConfirmDialogs = false;
   let lastConfirmClickAt = 0;
+  let activeStopWord = null;
+  let activeStopWordCaseSensitive = false;
+  let stopWordGuardArmed = false;
+  let stopWordBlockedAutoConfirm = false;
 
   function setDebugLoggingEnabled(enabled) {
     const next = enabled === true;
@@ -221,8 +225,9 @@
     return candidates.some(isConfirmButton);
   }
 
-  function maybeClickConfirmButtons() {
+  function maybeClickConfirmButtons(source = 'unknown') {
     if (!autoConfirmDialogs) return false;
+    if (shouldBlockConfirmForStopWord(source)) return false;
     const now = Date.now();
     if (now - lastConfirmClickAt < 1000) return false;
     const candidates = Array.from(document.querySelectorAll('button'));
@@ -256,7 +261,7 @@
   }
 
   setInterval(() => {
-    maybeClickConfirmButtons();
+    maybeClickConfirmButtons('interval');
   }, 1000);
 
   function setProseMirrorText(el, text) {
@@ -480,7 +485,7 @@
       let readySince = null;
 
       const check = () => {
-        maybeClickConfirmButtons();
+        maybeClickConfirmButtons('waitForChatGPTSendWindow');
         const elapsed = Date.now() - start;
         const busy = isChatGPTThinking();
         const directReady = sendButton ? isButtonEnabled(sendButton) : false;
@@ -524,6 +529,37 @@
       console.log('[StopWord] Stop word detected:', { stopWord, found });
     }
     return found;
+  }
+
+  function configureStopWordGuard(stopWord, caseSensitive) {
+    activeStopWord = typeof stopWord === 'string' && stopWord.trim() ? stopWord.trim() : null;
+    activeStopWordCaseSensitive = caseSensitive === true;
+    stopWordGuardArmed = false;
+    stopWordBlockedAutoConfirm = false;
+  }
+
+  function armStopWordGuard(source = 'unknown') {
+    if (!activeStopWord || stopWordGuardArmed) return;
+    stopWordGuardArmed = true;
+    console.log('[StopWord] Guard armed', { source, stopWord: activeStopWord });
+  }
+
+  function blockAutoConfirmForStopWord(source = 'unknown') {
+    if (stopWordBlockedAutoConfirm) return true;
+    stopWordBlockedAutoConfirm = true;
+    automationAborted = true;
+    console.log('[StopWord] Blocking auto-confirm after stop word detection', {
+      source,
+      stopWord: activeStopWord,
+    });
+    return true;
+  }
+
+  function shouldBlockConfirmForStopWord(source = 'unknown') {
+    if (automationAborted || stopWordBlockedAutoConfirm) return true;
+    if (!stopWordGuardArmed || !activeStopWord) return false;
+    if (!checkForStopWord(activeStopWord, activeStopWordCaseSensitive)) return false;
+    return blockAutoConfirmForStopWord(source);
   }
 
   function isChatGPTReadyToSend() {
@@ -641,19 +677,18 @@
       }
 
       const interval = setInterval(() => {
-        maybeClickConfirmButtons();
-        const elapsed = Date.now() - startTime;
-        const stableFor = Date.now() - lastChange;
-        const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
-        const stopBtnPresent = stopBtn && isButtonEnabled(stopBtn);
-
-        // Check for stop word
         if (stopWord && checkForStopWord(stopWord, stopWordCaseSensitive)) {
+          blockAutoConfirmForStopWord('waitForCompletion');
           console.log('[WaitForCompletion] Stop word detected, stopping automation', { completionId, stopWord });
           cleanup();
           resolve({ stoppedByStopWord: true });
           return;
         }
+        maybeClickConfirmButtons('waitForCompletion');
+        const elapsed = Date.now() - startTime;
+        const stableFor = Date.now() - lastChange;
+        const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
+        const stopBtnPresent = stopBtn && isButtonEnabled(stopBtn);
 
         let canSend = isButtonEnabled(sendButton);
         if (site === 'chatgpt') {
@@ -735,7 +770,7 @@
       const site = detectSite();
 
       const checkStop = () => {
-        maybeClickConfirmButtons();
+        maybeClickConfirmButtons('waitForStreamsToStop');
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
         const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
@@ -795,7 +830,7 @@
       console.log('[WaitForStreamStart] Starting', { site, effectiveMaxWaitMs, effectivePollMs, stopButtonSelector });
 
       const check = () => {
-        maybeClickConfirmButtons();
+        maybeClickConfirmButtons('waitForStreamStart');
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
         const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
@@ -924,6 +959,7 @@
 
     currentPromptId = promptId;
     automationAborted = false; // Reset abort flag for new prompt
+    configureStopWordGuard(options?.enableStopWord ? options?.stopWord : null, options?.stopWordCaseSensitive);
     console.log('[PromptQueue] Starting processing', { promptId, timestamp: Date.now(), options });
     
     // Set a safety timeout to force cleanup if this prompt takes too long
@@ -1189,6 +1225,7 @@
 
       const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
       const effectiveStopWord = options?.enableStopWord ? options?.stopWord : null;
+      armStopWordGuard('PromptQueue');
       console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, enableStopWord: options?.enableStopWord, stopWord: effectiveStopWord, watchGate });
       try {
         let result;
@@ -1225,6 +1262,7 @@
 
         // Check if automation was stopped by stop word
         if (result?.stoppedByStopWord) {
+          blockAutoConfirmForStopWord('PromptQueueResult');
           console.log('[PromptQueue] Automation stopped by stop word', { promptId });
           automationAborted = true; // Signal queued prompts to abort
           try {
