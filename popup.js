@@ -8,10 +8,26 @@ applyConsolePatch();
 
 const separatorInput = document.getElementById('separatorInput');
 let latestAutomationStatus = null;
+let currentPanelTabId = null;
 
 async function getActiveTabId() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs?.[0]?.id;
+}
+
+async function getContextTabId() {
+  const tabId = await getActiveTabId();
+  if (Number.isInteger(tabId)) {
+    currentPanelTabId = tabId;
+  }
+  return tabId;
+}
+
+function shouldHandleAutomationMessage(message) {
+  const messageTabId = Number(message?.tabId);
+  if (!Number.isInteger(messageTabId)) return true;
+  if (!Number.isInteger(currentPanelTabId)) return true;
+  return messageTabId === currentPanelTabId;
 }
 
 const pauseBtn = document.getElementById('pauseBtn');
@@ -151,7 +167,8 @@ function getProgressPosition(status = {}) {
 
 async function refreshStatus() {
   try {
-    const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
+    const tabId = await getContextTabId();
+    const res = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST', tabId });
     if (res?.ok && res.status) {
       latestAutomationStatus = res.status;
       const { running, paused, total, currentIndex } = res.status;
@@ -176,14 +193,6 @@ initSettingsUI();
 
 async function startAutomation() {
   try {
-    // Check if automation is already running
-    const statusRes = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST' });
-    if (statusRes?.ok && statusRes.status?.running) {
-      showToast('Automation is already running. Stop it first.', 'error');
-      setStatus(getRunningStatusText(statusRes.status), statusRes.status.paused ? 'paused' : 'running');
-      return;
-    }
-
     const textarea = document.getElementById('prompts');
     const separatorInput = document.getElementById('separatorInput');
     const separator = resolveSeparator(separatorInput?.value);
@@ -198,11 +207,21 @@ async function startAutomation() {
     if (launchPlan.duplicateChanged > 0) {
       showToast(`Adjusted ${launchPlan.duplicateChanged} duplicate prompt(s) with typo-like variations`, 'info', 4000);
     }
-    const tabId = await getActiveTabId();
+    const tabId = await getContextTabId();
     if (!tabId) {
       setStatus('No active tab found.');
       return;
     }
+
+    // Check only this tab's session status; other tabs are allowed to run concurrently.
+    const statusRes = await chrome.runtime.sendMessage({ type: 'AUTOMATION_STATUS_REQUEST', tabId });
+    const runningStatus = statusRes?.ok ? statusRes.status : null;
+    if (runningStatus?.running === true) {
+      showToast('Automation is already running in this tab. Stop it first.', 'error');
+      setStatus(getRunningStatusText(runningStatus), runningStatus.paused ? 'paused' : 'running');
+      return;
+    }
+
     setStatus('Starting...');
     hideError(); // Clear any previous error
     // Get current settings and include them in START_AUTOMATION to avoid race conditions
@@ -249,7 +268,8 @@ document.getElementById('startBtn').addEventListener('click', startAutomation);
 if (pauseBtn) {
   pauseBtn.addEventListener('click', async () => {
     try {
-      const res = await chrome.runtime.sendMessage({ type: 'PAUSE_AUTOMATION' });
+      const tabId = await getContextTabId();
+      const res = await chrome.runtime.sendMessage({ type: 'PAUSE_AUTOMATION', tabId });
       if (res?.ok) {
         setStatus('Paused', 'paused');
         updateControlButtons({ running: true, paused: true });
@@ -266,7 +286,8 @@ if (pauseBtn) {
 if (resumeBtn) {
   resumeBtn.addEventListener('click', async () => {
     try {
-      const res = await chrome.runtime.sendMessage({ type: 'RESUME_AUTOMATION' });
+      const tabId = await getContextTabId();
+      const res = await chrome.runtime.sendMessage({ type: 'RESUME_AUTOMATION', tabId });
       if (res?.ok) {
         setStatus('Resuming...', 'running');
         updateControlButtons({ running: true, paused: false });
@@ -282,7 +303,8 @@ if (resumeBtn) {
 
 document.getElementById('stopBtn').addEventListener('click', async () => {
   try {
-    await chrome.runtime.sendMessage({ type: 'STOP_AUTOMATION' });
+    const tabId = await getContextTabId();
+    await chrome.runtime.sendMessage({ type: 'STOP_AUTOMATION', tabId });
     setStatus('Stopped');
     updateControlButtons({ running: false, paused: false });
     // Refresh to clear any recovery status
@@ -398,6 +420,9 @@ if (importBtn && importFile) {
 
 chrome.runtime.onMessage.addListener((message) => {
   try {
+    if (!shouldHandleAutomationMessage(message)) {
+      return;
+    }
     if (message?.type === 'AUTOMATION_PROGRESS' && message.status) {
       latestAutomationStatus = message.status;
       const { total, paused, running } = message.status;
@@ -595,6 +620,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
     } catch (_) {}
 
+    await getContextTabId();
     initInfoPopovers();
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
@@ -1003,7 +1029,10 @@ chrome.runtime.onMessage.addListener((message) => {
     // Reload prompts to show new transcription entries
     loadStateIntoUI();
   } else if (message?.type === 'CLOSE_SIDE_PANEL') {
-    window.close();
+    const messageTabId = Number(message?.tabId);
+    if (!Number.isInteger(messageTabId) || !Number.isInteger(currentPanelTabId) || messageTabId === currentPanelTabId) {
+      window.close();
+    }
   }
 });
 

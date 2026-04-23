@@ -375,6 +375,372 @@ async function clearState() {
   state.parallel = null;
 }
 
+const TAB_SESSIONS_STORAGE_KEY = 'aiTaskSequencerTabSessions';
+const tabSessions = new Map();
+const tabSessionRetryTimers = new Map();
+let hasHydratedTabSessions = false;
+
+function createIdleStatusForTab(tabId, options = state.options) {
+  return {
+    running: false,
+    paused: false,
+    total: 0,
+    currentIndex: 0,
+    mode: 'sequential',
+    tabId: Number.isInteger(Number(tabId)) ? Number(tabId) : null,
+    options: options || state.options,
+    recoveryAttempts: 0,
+    currentRetryCount: 0,
+    stableCountdownMs: 0,
+    parallelLaunched: 0,
+    parallelCompleted: 0,
+    parallelFailed: 0,
+    parallelActive: 0,
+    parallelLastFailure: null,
+  };
+}
+
+function buildTabSessionStatus(session) {
+  if (!session) return createIdleStatusForTab(null);
+  return {
+    running: session.running === true,
+    paused: session.paused === true,
+    total: Array.isArray(session.prompts) ? session.prompts.length : 0,
+    currentIndex: Number.isFinite(session.currentIndex) ? Number(session.currentIndex) : 0,
+    mode: 'sequential',
+    tabId: session.tabId,
+    options: session.options || state.options,
+    recoveryAttempts: Number(session.recoveryAttempts || 0),
+    currentRetryCount: Number(session.currentRetryCount || 0),
+    stableCountdownMs: Number(session.stableCountdownMs || 0),
+    parallelLaunched: 0,
+    parallelCompleted: 0,
+    parallelFailed: 0,
+    parallelActive: 0,
+    parallelLastFailure: null,
+  };
+}
+
+function cloneTabSessionForStorage(session) {
+  return {
+    prompts: Array.isArray(session.prompts) ? session.prompts.slice() : [],
+    currentIndex: Number(session.currentIndex || 0),
+    running: session.running === true,
+    paused: session.paused === true,
+    tabId: session.tabId,
+    options: session.options || state.options,
+    lastActivityTime: Number(session.lastActivityTime || Date.now()),
+    processing: session.processing === true,
+    currentPromptId: session.currentPromptId || null,
+    currentRetryCount: Number(session.currentRetryCount || 0),
+    promptStartTime: Number(session.promptStartTime || 0),
+    stableCountdownMs: Number(session.stableCountdownMs || 0),
+    recoveryAttempts: Number(session.recoveryAttempts || 0),
+    savedAt: Date.now(),
+  };
+}
+
+async function saveTabSessions() {
+  const serialized = {};
+  for (const [tabId, session] of tabSessions.entries()) {
+    serialized[String(tabId)] = cloneTabSessionForStorage(session);
+  }
+  await chrome.storage.local.set({ [TAB_SESSIONS_STORAGE_KEY]: serialized });
+}
+
+async function loadTabSessions() {
+  if (hasHydratedTabSessions) return;
+  hasHydratedTabSessions = true;
+  try {
+    const stored = await chrome.storage.local.get([TAB_SESSIONS_STORAGE_KEY]);
+    const raw = stored?.[TAB_SESSIONS_STORAGE_KEY];
+    if (!raw || typeof raw !== 'object') return;
+    for (const [rawTabId, rawSession] of Object.entries(raw)) {
+      const tabId = Number(rawTabId);
+      if (!Number.isInteger(tabId) || !rawSession || typeof rawSession !== 'object') continue;
+      tabSessions.set(tabId, {
+        prompts: Array.isArray(rawSession.prompts) ? rawSession.prompts.slice() : [],
+        currentIndex: Number(rawSession.currentIndex || 0),
+        running: rawSession.running === true,
+        paused: rawSession.paused === true,
+        tabId,
+        options: validateSettings(rawSession.options || state.options),
+        lastActivityTime: Number(rawSession.lastActivityTime || Date.now()),
+        processing: rawSession.processing === true,
+        currentPromptId: rawSession.currentPromptId || null,
+        currentRetryCount: Number(rawSession.currentRetryCount || 0),
+        promptStartTime: Number(rawSession.promptStartTime || 0),
+        stableCountdownMs: Number(rawSession.stableCountdownMs || 0),
+        recoveryAttempts: Number(rawSession.recoveryAttempts || 0),
+      });
+    }
+  } catch (e) {
+    console.error('[TabSession] Failed to hydrate sessions:', e);
+  }
+}
+
+async function pruneClosedTabSessions() {
+  let changed = false;
+  for (const [tabId] of tabSessions.entries()) {
+    try {
+      await chrome.tabs.get(tabId);
+    } catch (_) {
+      clearTabSessionRetryTimer(tabId);
+      tabSessions.delete(tabId);
+      changed = true;
+    }
+  }
+  if (changed) {
+    await saveTabSessions();
+  }
+}
+
+function clearTabSessionRetryTimer(tabId) {
+  const timerId = tabSessionRetryTimers.get(tabId);
+  if (timerId) {
+    clearTimeout(timerId);
+    tabSessionRetryTimers.delete(tabId);
+  }
+}
+
+function buildMessageTextWithOptions(text, options = {}) {
+  const systemPrompt = typeof options.systemPrompt === 'string' ? options.systemPrompt.trim() : '';
+  const appendPromptText = typeof options.appendPromptText === 'string' ? options.appendPromptText.trim() : '';
+  const prependSystemPrompt = options.prependSystemPrompt !== false;
+  const appendSystemPrompt = options.appendSystemPrompt === true;
+
+  if (!(prependSystemPrompt && systemPrompt) && !(appendSystemPrompt && appendPromptText)) {
+    return text;
+  }
+
+  let out = text;
+  if (prependSystemPrompt && systemPrompt) {
+    out = `${systemPrompt}\n\n${out}`;
+  }
+  if (appendSystemPrompt && appendPromptText) {
+    out = `${out}\n\n${appendPromptText}`;
+  }
+  return out;
+}
+
+async function emitTabSessionProgress(tabId) {
+  const session = tabSessions.get(tabId);
+  if (!session) return;
+  try {
+    chrome.runtime.sendMessage({
+      type: 'AUTOMATION_PROGRESS',
+      tabId,
+      status: buildTabSessionStatus(session),
+    });
+  } catch (_) {}
+}
+
+async function emitTabSessionError(tabId, error) {
+  const session = tabSessions.get(tabId);
+  try {
+    chrome.runtime.sendMessage({
+      type: 'AUTOMATION_ERROR',
+      tabId,
+      error: String(error?.message || error),
+      status: session ? buildTabSessionStatus(session) : createIdleStatusForTab(tabId),
+    });
+  } catch (_) {}
+}
+
+async function emitTabSessionComplete(tabId, status, reason) {
+  try {
+    chrome.runtime.sendMessage({
+      type: 'AUTOMATION_COMPLETE',
+      tabId,
+      status: status || createIdleStatusForTab(tabId),
+      reason,
+    });
+  } catch (_) {}
+}
+
+async function stopTabSession(tabId, { reason = 'stoppedByUser', emitComplete = false } = {}) {
+  const session = tabSessions.get(tabId);
+  if (!session) return false;
+  clearTabSessionRetryTimer(tabId);
+  const completionStatus = {
+    ...buildTabSessionStatus(session),
+    running: false,
+    paused: false,
+  };
+  tabSessions.delete(tabId);
+  await saveTabSessions();
+  if (emitComplete) {
+    await emitTabSessionComplete(tabId, completionStatus, reason);
+  }
+  return true;
+}
+
+async function scheduleTabSessionRetry(tabId, errorMessage, source) {
+  const session = tabSessions.get(tabId);
+  if (!session || !session.running) return false;
+  const retryPolicy = getRetryPolicy(session.options);
+  if (!retryPolicy.enabled || retryPolicy.maxRetries <= 0) return false;
+  if (session.currentRetryCount >= retryPolicy.maxRetries) return false;
+
+  session.currentRetryCount += 1;
+  session.processing = false;
+  session.promptStartTime = 0;
+  session.currentPromptId = null;
+  session.lastActivityTime = Date.now();
+  await saveTabSessions();
+  await emitTabSessionProgress(tabId);
+
+  console.warn('[Retry][TabSession] Scheduling retry', {
+    source,
+    tabId,
+    promptIndex: session.currentIndex,
+    retryAttempt: session.currentRetryCount,
+    maxRetries: retryPolicy.maxRetries,
+    retryDelayMs: retryPolicy.retryDelayMs,
+    error: errorMessage,
+  });
+
+  clearTabSessionRetryTimer(tabId);
+  const timerId = setTimeout(() => {
+    tabSessionRetryTimers.delete(tabId);
+    (async () => {
+      const liveSession = tabSessions.get(tabId);
+      if (!liveSession || !liveSession.running || liveSession.paused) return;
+      try {
+        await sendNextPromptForTabSession(tabId);
+      } catch (retryErr) {
+        console.error('[Retry][TabSession] Retry send failed', {
+          tabId,
+          promptIndex: liveSession.currentIndex,
+          retryAttempt: liveSession.currentRetryCount,
+          error: retryErr?.message || String(retryErr),
+        });
+      }
+    })();
+  }, retryPolicy.retryDelayMs);
+  tabSessionRetryTimers.set(tabId, timerId);
+  return true;
+}
+
+async function sendNextPromptForTabSession(tabId) {
+  const session = tabSessions.get(tabId);
+  if (!session || !session.running) return;
+  if (session.paused || session.processing) return;
+
+  if (session.currentIndex >= session.prompts.length) {
+    const finalStatus = {
+      ...buildTabSessionStatus(session),
+      running: false,
+      paused: false,
+      currentIndex: session.prompts.length,
+    };
+    tabSessions.delete(tabId);
+    clearTabSessionRetryTimer(tabId);
+    await saveTabSessions();
+    await emitTabSessionComplete(tabId, finalStatus);
+    return;
+  }
+
+  const basePromptText = session.prompts[session.currentIndex];
+  const promptText = buildMessageTextWithOptions(basePromptText, session.options);
+  const stableMin = session.options?.stableMinMs ?? DEFAULT_SETTINGS.stableMinMs;
+  const stableMax = session.options?.stableMaxMs ?? DEFAULT_SETTINGS.stableMaxMs;
+  const stableMs = Math.max(stableMin, Math.min(stableMax, Math.random() * (stableMax - stableMin) + stableMin));
+
+  session.options = { ...session.options, stableMs };
+  session.stableCountdownMs = stableMs;
+  session.lastActivityTime = Date.now();
+  session.promptStartTime = Date.now();
+  session.processing = true;
+  session.currentPromptId = `tab_${tabId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  await saveTabSessions();
+  await emitTabSessionProgress(tabId);
+
+  try {
+    if (session.options?.openNewChatPerPrompt) {
+      const tab = await chrome.tabs.get(tabId);
+      const site = detectSiteFromUrl(tab?.url);
+      const baseUrl = baseUrlForSite(site);
+      const targetUrl = session.options.openNewChatPerPromptUrl || baseUrl;
+      if (!targetUrl) {
+        throw new Error('Active tab not supported for new chat navigation.');
+      }
+      await chrome.tabs.update(tabId, { url: targetUrl });
+      await waitForTabLoad(tabId);
+      await ensureContentScriptReady(tabId);
+    } else if (session.options?.refreshTabBeforeEachPrompt) {
+      await refreshTabInBackgroundBeforeSend(tabId);
+    }
+
+    await sendToContent(tabId, {
+      type: 'SEND_PROMPT',
+      text: promptText,
+      index: session.currentIndex,
+      total: session.prompts.length,
+      options: session.options,
+      promptId: session.currentPromptId,
+    });
+  } catch (err) {
+    const sendError = String(err?.message || err);
+    console.error('[TabSession] Error sending prompt:', {
+      tabId,
+      promptIndex: session.currentIndex,
+      error: sendError,
+    });
+    const retried = await scheduleTabSessionRetry(tabId, sendError, 'sendNextPromptForTabSession');
+    if (retried) {
+      return;
+    }
+    await emitTabSessionError(tabId, sendError);
+    await stopTabSession(tabId, { reason: 'completedWithErrors', emitComplete: true });
+  }
+}
+
+async function startTabSession({ prompts, tabId, options }) {
+  if (!Number.isInteger(tabId)) {
+    throw new Error('Missing tabId for tab session.');
+  }
+  const tab = await chrome.tabs.get(tabId);
+  if (!isSupportedUrl(tab?.url)) {
+    throw new Error('Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.');
+  }
+  const session = {
+    prompts: Array.isArray(prompts) ? prompts.slice() : [],
+    currentIndex: 0,
+    running: true,
+    paused: false,
+    tabId,
+    options: validateSettings(options || state.options),
+    lastActivityTime: Date.now(),
+    processing: false,
+    currentPromptId: null,
+    currentRetryCount: 0,
+    promptStartTime: 0,
+    stableCountdownMs: 0,
+    recoveryAttempts: 0,
+  };
+  tabSessions.set(tabId, session);
+  await saveTabSessions();
+  await emitTabSessionProgress(tabId);
+  await injectContentScript(tabId);
+  await sendNextPromptForTabSession(tabId);
+}
+
+function resolveTabSessionForMessage(message, sender) {
+  const senderTabId = sender?.tab?.id;
+  if (Number.isInteger(senderTabId) && tabSessions.has(senderTabId)) {
+    return { tabId: senderTabId, session: tabSessions.get(senderTabId) };
+  }
+  const promptId = message?.promptId ? String(message.promptId) : '';
+  if (!promptId) return { tabId: null, session: null };
+  for (const [tabId, session] of tabSessions.entries()) {
+    if (String(session.currentPromptId || '') === promptId) {
+      return { tabId, session };
+    }
+  }
+  return { tabId: null, session: null };
+}
+
 // ============ TAB & CONNECTION HEALTH ============
 
 async function isTabAlive(tabId) {
@@ -2053,6 +2419,10 @@ function makeHistorySignature(item) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
+      if (!hasHydratedTabSessions) {
+        await loadTabSessions();
+        await pruneClosedTabSessions();
+      }
       // Rehydrate state on demand. Replacing in-memory state during active runs can
       // invalidate worker references held by launch/dispatch loops.
       if (!state.running && !hasHydratedPersistentState) {
@@ -2061,6 +2431,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
       switch (message?.type) {
         case "CONTENT_READY": {
+          const senderTabId = sender?.tab?.id;
+          if (Number.isInteger(senderTabId) && tabSessions.has(senderTabId)) {
+            const session = tabSessions.get(senderTabId);
+            session.lastActivityTime = Date.now();
+            await saveTabSessions();
+            return;
+          }
           state.lastActivityTime = Date.now();
           await saveState();
           return;
@@ -2086,13 +2463,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             currentIndex: state.currentIndex,
             promptsInRequest: message.prompts?.length,
             tabGroupsInRequest: message.tabPromptGroups?.length,
+            activeTabSessions: tabSessions.size,
           });
-          // Prevent starting a new automation while one is already running
-          if (state.running) {
-            console.log('[StartAutomation] Automation already running, REJECTING new start request');
-            sendResponse({ ok: false, error: "Automation is already running. Stop the current automation first." });
-            return;
-          }
           
           const prompts = Array.isArray(message.prompts) ? message.prompts.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
           const tabPromptGroups = Array.isArray(message.tabPromptGroups) ? message.tabPromptGroups : null;
@@ -2126,6 +2498,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             sendResponse({ ok: false, error: 'Unable to read active tab.' });
             return;
           }
+
+          const useParallel = shouldUseParallelMode(effectiveOptions, tabPromptGroups);
+
+          if (!useParallel) {
+            const existingTabSession = tabSessions.get(tabId);
+            if (existingTabSession?.running) {
+              sendResponse({ ok: false, error: "Automation is already running in this tab. Stop the current automation first." });
+              return;
+            }
+            if (state.running) {
+              sendResponse({ ok: false, error: "A global automation run is active. Stop it before starting tab-scoped automation." });
+              return;
+            }
+            sendResponse({ ok: true });
+            try {
+              await startTabSession({ prompts, tabId, options: effectiveOptions });
+            } catch (e) {
+              console.error('[StartAutomation][TabSession] Error:', e);
+              await emitTabSessionError(tabId, e);
+            }
+            return;
+          }
+
+          if (tabSessions.size > 0) {
+            sendResponse({ ok: false, error: "Tab-scoped automations are already running. Stop them before starting a tab-group parallel run." });
+            return;
+          }
+          if (state.running) {
+            console.log('[StartAutomation] Automation already running, REJECTING new start request');
+            sendResponse({ ok: false, error: "Automation is already running. Stop the current automation first." });
+            return;
+          }
+
           sendResponse({ ok: true });
           try {
             await startAutomation({ prompts, tabId, options: effectiveOptions, tabPromptGroups });
@@ -2140,6 +2545,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "STOP_AUTOMATION": {
+          const targetTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          if (Number.isInteger(targetTabId) && tabSessions.has(targetTabId)) {
+            await stopTabSession(targetTabId);
+            sendResponse({ ok: true });
+            return;
+          }
+          if (Number.isInteger(targetTabId) && state.running && state.tabId !== targetTabId) {
+            sendResponse({ ok: false, error: "No automation is running in this tab." });
+            return;
+          }
           state.running = false;
           state.paused = false;
           await clearState();
@@ -2147,6 +2564,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "PAUSE_AUTOMATION": {
+          const targetTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          if (Number.isInteger(targetTabId) && tabSessions.has(targetTabId)) {
+            const session = tabSessions.get(targetTabId);
+            if (!session.running) {
+              sendResponse({ ok: false, error: "Automation not running" });
+              return;
+            }
+            session.paused = true;
+            session.lastActivityTime = Date.now();
+            await saveTabSessions();
+            await emitTabSessionProgress(targetTabId);
+            sendResponse({ ok: true });
+            return;
+          }
+          if (Number.isInteger(targetTabId) && state.running && state.tabId !== targetTabId) {
+            sendResponse({ ok: false, error: "No automation is running in this tab." });
+            return;
+          }
           if (!state.running) {
             sendResponse({ ok: false, error: "Automation not running" });
             return;
@@ -2158,6 +2595,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "RESUME_AUTOMATION": {
+          const targetTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          if (Number.isInteger(targetTabId) && tabSessions.has(targetTabId)) {
+            const session = tabSessions.get(targetTabId);
+            if (!session.running) {
+              sendResponse({ ok: false, error: "Automation not running" });
+              return;
+            }
+            session.paused = false;
+            session.lastActivityTime = Date.now();
+            await saveTabSessions();
+            await emitTabSessionProgress(targetTabId);
+            if (!session.processing) {
+              await sendNextPromptForTabSession(targetTabId);
+            }
+            sendResponse({ ok: true });
+            return;
+          }
+          if (Number.isInteger(targetTabId) && state.running && state.tabId !== targetTabId) {
+            sendResponse({ ok: false, error: "No automation is running in this tab." });
+            return;
+          }
           if (!state.running) {
             sendResponse({ ok: false, error: "Automation not running" });
             return;
@@ -2178,6 +2638,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case "AUTOMATION_STATUS_REQUEST": {
           await loadSettings();
+          const targetTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          if (Number.isInteger(targetTabId) && tabSessions.has(targetTabId)) {
+            sendResponse({ ok: true, status: buildTabSessionStatus(tabSessions.get(targetTabId)) });
+            return;
+          }
+          if (Number.isInteger(targetTabId)) {
+            if (state.running && state.tabId === targetTabId) {
+              sendResponse({ ok: true, status: getStatus() });
+              return;
+            }
+            sendResponse({ ok: true, status: createIdleStatusForTab(targetTabId, state.options) });
+            return;
+          }
           sendResponse({ ok: true, status: getStatus() });
           return;
         }
@@ -2286,6 +2761,49 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             error: message.error
           });
           sendResponse({ ok: true });
+
+          const tabSessionRef = resolveTabSessionForMessage(message, sender);
+          if (tabSessionRef.session) {
+            const tabId = tabSessionRef.tabId;
+            const session = tabSessionRef.session;
+            if (!session.running || !session.processing) {
+              return;
+            }
+            if (message.promptId && session.currentPromptId && String(message.promptId) !== String(session.currentPromptId)) {
+              return;
+            }
+
+            session.processing = false;
+            session.promptStartTime = 0;
+            session.lastActivityTime = Date.now();
+            session.recoveryAttempts = 0;
+
+            if (message.error) {
+              const retried = await scheduleTabSessionRetry(tabId, String(message.error), 'RESPONSE_COMPLETE');
+              if (retried) {
+                return;
+              }
+              await emitTabSessionError(tabId, message.error);
+              await stopTabSession(tabId, { reason: 'completedWithErrors', emitComplete: true });
+              return;
+            }
+
+            if (message.stoppedByStopWord) {
+              await stopTabSession(tabId, { reason: 'stoppedByStopWord', emitComplete: true });
+              return;
+            }
+
+            session.currentRetryCount = 0;
+            session.currentIndex += 1;
+            await saveTabSessions();
+            await emitTabSessionProgress(tabId);
+            if (session.paused) {
+              return;
+            }
+            await new Promise((resolve) => setTimeout(resolve, 500));
+            await sendNextPromptForTabSession(tabId);
+            return;
+          }
 
           if (state.mode === 'parallel') {
             if (!state.running || !state.parallel) {
@@ -2604,6 +3122,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.runtime.onStartup.addListener(async () => {
   console.log('[Startup] Service worker started');
+  await loadTabSessions();
+  await pruneClosedTabSessions();
   const restored = await loadState();
   await loadTranscriptionState();
   if (transcriptionState.isEnabled && transcriptionState.watchFolder) {
@@ -2618,6 +3138,8 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.runtime.onInstalled.addListener(async () => {
   console.log('[Install] Extension installed/updated');
+  await loadTabSessions();
+  await pruneClosedTabSessions();
   await loadState();
   await loadTranscriptionState();
   if (transcriptionState.isEnabled && transcriptionState.watchFolder) {
@@ -2652,6 +3174,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     if (!state.options?.autoConfirmDialogs) return;
     if (!isSupportedUrl(tab?.url)) return;
     await ensureContentScriptReady(tabId);
+  })();
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  (async () => {
+    openSidePanels.delete(tabId);
+    if (tabSessions.has(tabId)) {
+      await stopTabSession(tabId);
+    }
   })();
 });
 
