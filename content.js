@@ -71,7 +71,14 @@
   const RESPONSE_CAPTURE_CHARS = 20000;
 
   function detectSite() {
-    const host = location.hostname;
+    let host = location.hostname || '';
+    if (!host && location.href) {
+      try {
+        host = new URL(location.href).hostname;
+      } catch (_) {
+        host = '';
+      }
+    }
     if (host.includes('chat.openai.com') || host.includes('chatgpt.com')) return 'chatgpt';
     if (host.includes('gemini.google.com')) return 'gemini';
     if (host.includes('grok.x.ai')) return 'grok';
@@ -194,7 +201,9 @@
 
   function isButtonEnabled(btn) {
     if (!btn) return false;
-    const disabled = btn.getAttribute('disabled') !== null || btn.ariaDisabled === 'true';
+    const disabled = btn.getAttribute('disabled') !== null
+      || btn.getAttribute('aria-disabled') === 'true'
+      || btn.ariaDisabled === 'true';
     const opacity = parseFloat(getComputedStyle(btn).opacity || '1');
     return !disabled && opacity > 0.5;
   }
@@ -304,7 +313,7 @@
 
   function setTextInInput(el, text) {
     if (!el) throw new Error('Input element not found');
-    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
+    const isContentEditable = (el.getAttribute && el.getAttribute('contenteditable') === 'true') || el.isContentEditable === true || el.contentEditable === 'true';
     if (isContentEditable) {
       if (el.id === 'prompt-textarea' || el.classList.contains('ProseMirror')) {
         setProseMirrorText(el, text);
@@ -1514,6 +1523,17 @@
       clearTimeout(timeoutId);
       currentPromptId = null;
     }
+  }
+
+  if (window.__PROMPT_QUEUE_TEST__) {
+    window.PromptQueueContentTest = {
+      clickSend,
+      detectSite,
+      isButtonEnabled,
+      setTextInInput,
+      waitForCompletion,
+      waitForStreamsToStop,
+    };
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

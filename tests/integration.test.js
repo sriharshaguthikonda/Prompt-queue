@@ -116,7 +116,7 @@ describe('Content Script Integration', () => {
         enableTimeout: true
       });
 
-      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(3000);
       
       const result = await promise;
       expect(result).toBeUndefined();
@@ -137,7 +137,7 @@ describe('Content Script Integration', () => {
       // Remove button
       document.querySelector('.stop-btn').remove();
       
-      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(3000);
       
       const result = await promise;
       expect(result).toBeUndefined();
@@ -174,7 +174,7 @@ describe('Content Script Integration', () => {
       // Remove button
       document.querySelector('.stop-btn').remove();
       
-      jest.advanceTimersByTime(1000);
+      jest.advanceTimersByTime(3000);
       
       const result = await promise;
       expect(result).toBeUndefined();

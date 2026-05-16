@@ -1,5 +1,10 @@
 # OS/editor artifacts
 .DS_Store
+node_modules/
+coverage/
+__pycache__/
+tests/__pycache__/
+*.pyc
 
 # Local native host manifest (machine-specific path + extension IDs)
 native_host.json

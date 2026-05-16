@@ -120,6 +120,7 @@ Default auth uses the native host `com.aipromptqueue.transcription`, which reads
   - `node --check content.js`
   - `node --check popup.js`
   - `node --check popup-memory.js`
+  - `npm test -- --runInBand`
   - `python -m unittest tests.test_native_host_memory tests.test_memory_extension_static -v`
 
 ## License
