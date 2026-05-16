@@ -1,6 +1,6 @@
 {
   "name": "com.aipromptqueue.transcription",
-  "description": "AI Prompt Queue Transcription Monitor",
+  "description": "AI Prompt Queue Transcription Monitor and Read-Only Memory Bridge",
   "path": "C:\\path\\to\\Prompt-queue\\run_host.bat",
   "type": "stdio",
   "allowed_origins": [

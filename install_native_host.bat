@@ -1,5 +1,6 @@
 @echo off
 echo Installing AI Prompt Queue Native Host...
+echo This host supports transcription monitoring and read-only local memory bridge requests.
 
 REM Get the directory where this script is located
 set SCRIPT_DIR=%~dp0
@@ -19,7 +20,7 @@ echo "%SCRIPT_DIR%\\native_host.json" >> temp.reg
 REM Create the native host manifest file
 echo { > "%SCRIPT_DIR%\native_host.json"
 echo   "name": "com.aipromptqueue.transcription", >> "%SCRIPT_DIR%\native_host.json"
-echo   "description": "AI Prompt Queue Transcription Monitor", >> "%SCRIPT_DIR%\native_host.json"
+echo   "description": "AI Prompt Queue Transcription Monitor and Read-Only Memory Bridge", >> "%SCRIPT_DIR%\native_host.json"
 echo   "path": "%SCRIPT_DIR%\\native_host.py", >> "%SCRIPT_DIR%\native_host.json"
 echo   "type": "stdio", >> "%SCRIPT_DIR%\native_host.json"
 echo   "allowed_origins": [ >> "%SCRIPT_DIR%\native_host.json"
@@ -44,5 +45,6 @@ echo Replace "YOUR_EXTENSION_ID" and "YOUR_EDGE_EXTENSION_ID" in:
 echo %SCRIPT_DIR%\native_host.json
 echo.
 echo Note: If you only use one browser, you can remove the other entry from allowed_origins.
+echo Memory bridge requests are read-only and use C:\.memory\config\local_token at request time.
 echo.
 pause
