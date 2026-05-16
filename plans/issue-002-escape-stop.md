@@ -2,6 +2,10 @@
 
 GitHub: https://github.com/sriharshaguthikonda/Prompt-queue/issues/2
 
+## Status
+
+Implemented in `popup.js`; Escape now reuses the existing stop automation path.
+
 ## Goal
 
 Pressing Escape in the side panel stops the current automation for the panel's context tab.

@@ -2,6 +2,10 @@
 
 GitHub: https://github.com/sriharshaguthikonda/Prompt-queue/issues/3
 
+## Status
+
+Implemented in `background.js` status payloads and rendered from `popup.js`.
+
 ## Goal
 
 The side panel shows a short preview of the prompt currently being processed.

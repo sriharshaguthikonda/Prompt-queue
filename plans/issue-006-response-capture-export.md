@@ -2,6 +2,10 @@
 
 GitHub: https://github.com/sriharshaguthikonda/Prompt-queue/issues/6
 
+## Status
+
+Implemented as best-effort response capture plus JSON and Markdown history exports.
+
 ## Goal
 
 Capture completed assistant responses and export prompt history plus response records to JSON and Markdown.

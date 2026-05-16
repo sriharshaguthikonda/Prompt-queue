@@ -2,6 +2,10 @@
 
 GitHub: https://github.com/sriharshaguthikonda/Prompt-queue/issues/5
 
+## Status
+
+Implemented in separate `popup-queue.js` module to avoid growing `popup.js`.
+
 ## Goal
 
 The side panel can reorder parsed prompts before starting a run without making `popup.js` larger.

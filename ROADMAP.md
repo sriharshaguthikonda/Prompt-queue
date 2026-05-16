@@ -16,19 +16,19 @@ Current sidepanel branch:
 
 | Phase | Plan | Status |
 |---|---|---|
-| Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; manual browser smokes pending |
+| Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; automated tests pass; manual browser smokes pending |
 
 ## Open Issue Phases
 
 | Issue | Plan | Status |
 |---|---|---|
-| [#2 Escape-to-stop](https://github.com/sriharshaguthikonda/Prompt-queue/issues/2) | [plans/issue-002-escape-stop.md](plans/issue-002-escape-stop.md) | planned |
-| [#3 Current prompt preview](https://github.com/sriharshaguthikonda/Prompt-queue/issues/3) | [plans/issue-003-current-prompt-preview.md](plans/issue-003-current-prompt-preview.md) | planned |
-| [#4 ETA](https://github.com/sriharshaguthikonda/Prompt-queue/issues/4) | [plans/issue-004-eta.md](plans/issue-004-eta.md) | planned |
-| [#5 Drag-and-drop reorder](https://github.com/sriharshaguthikonda/Prompt-queue/issues/5) | [plans/issue-005-drag-drop-reorder.md](plans/issue-005-drag-drop-reorder.md) | planned |
-| [#6 Response capture/export](https://github.com/sriharshaguthikonda/Prompt-queue/issues/6) | [plans/issue-006-response-capture-export.md](plans/issue-006-response-capture-export.md) | planned |
-| [#7 Shared constants](https://github.com/sriharshaguthikonda/Prompt-queue/issues/7) | [plans/issue-007-shared-constants.md](plans/issue-007-shared-constants.md) | planned |
-| [#8 Test coverage](https://github.com/sriharshaguthikonda/Prompt-queue/issues/8) | [plans/issue-008-test-coverage.md](plans/issue-008-test-coverage.md) | planned |
+| [#2 Escape-to-stop](https://github.com/sriharshaguthikonda/Prompt-queue/issues/2) | [plans/issue-002-escape-stop.md](plans/issue-002-escape-stop.md) | implemented; static checks passed |
+| [#3 Current prompt preview](https://github.com/sriharshaguthikonda/Prompt-queue/issues/3) | [plans/issue-003-current-prompt-preview.md](plans/issue-003-current-prompt-preview.md) | implemented; static checks passed |
+| [#4 ETA](https://github.com/sriharshaguthikonda/Prompt-queue/issues/4) | [plans/issue-004-eta.md](plans/issue-004-eta.md) | implemented; static checks passed |
+| [#5 Drag-and-drop reorder](https://github.com/sriharshaguthikonda/Prompt-queue/issues/5) | [plans/issue-005-drag-drop-reorder.md](plans/issue-005-drag-drop-reorder.md) | implemented; static checks passed |
+| [#6 Response capture/export](https://github.com/sriharshaguthikonda/Prompt-queue/issues/6) | [plans/issue-006-response-capture-export.md](plans/issue-006-response-capture-export.md) | implemented; static checks passed |
+| [#7 Shared constants](https://github.com/sriharshaguthikonda/Prompt-queue/issues/7) | [plans/issue-007-shared-constants.md](plans/issue-007-shared-constants.md) | implemented; static checks passed |
+| [#8 Test coverage](https://github.com/sriharshaguthikonda/Prompt-queue/issues/8) | [plans/issue-008-test-coverage.md](plans/issue-008-test-coverage.md) | implemented; Jest and Python tests passed |
 
 ## Memory Pack Direction
 

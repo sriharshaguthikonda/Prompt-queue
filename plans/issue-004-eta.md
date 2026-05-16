@@ -2,6 +2,10 @@
 
 GitHub: https://github.com/sriharshaguthikonda/Prompt-queue/issues/4
 
+## Status
+
+Implemented with observed-duration tracking in `background.js` and compact ETA display in `popup.js`.
+
 ## Goal
 
 The side panel shows an estimated time remaining based on observed prompt completion times.

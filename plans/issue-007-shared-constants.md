@@ -2,6 +2,10 @@
 
 GitHub: https://github.com/sriharshaguthikonda/Prompt-queue/issues/7
 
+## Status
+
+Implemented through `prompt-queue-constants.js` without converting the service worker to an ES module.
+
 ## Goal
 
 Reduce duplicated message/storage constants without risky service-worker module conversion.

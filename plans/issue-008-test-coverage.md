@@ -2,6 +2,10 @@
 
 GitHub: https://github.com/sriharshaguthikonda/Prompt-queue/issues/8
 
+## Status
+
+Implemented with a runnable Jest/jsdom harness and focused helper-module coverage.
+
 ## Goal
 
 Make the test command runnable and add focused coverage for recently split planning/parallel helper modules.
