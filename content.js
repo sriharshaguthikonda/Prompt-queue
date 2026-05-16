@@ -131,6 +131,67 @@
     return null;
   }
 
+  function isEditableElement(el) {
+    if (!el) return false;
+    const tag = (el.tagName || '').toLowerCase();
+    return tag === 'textarea' || tag === 'input' || el.getAttribute?.('contenteditable') === 'true';
+  }
+
+  function isVisible(el) {
+    if (!el) return false;
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+  }
+
+  function findPromptInput() {
+    const site = detectSite();
+    const active = document.activeElement;
+    if (isEditableElement(active) && isVisible(active)) return active;
+    const cfg = selectorsForSite(site);
+    const siteInput = queryFirst(cfg.inputCandidates);
+    if (siteInput && isVisible(siteInput)) return siteInput;
+    const fallback = queryFirst([
+      '#prompt-textarea',
+      '.ProseMirror[contenteditable="true"]',
+      '[contenteditable="true"]',
+      'textarea',
+      'input[type="text"]',
+    ]);
+    return fallback && isVisible(fallback) ? fallback : null;
+  }
+
+  function getTextFromInput(el) {
+    if (!el) return '';
+    if (el.getAttribute?.('contenteditable') === 'true') {
+      return (el.innerText || el.textContent || '').trim();
+    }
+    return (el.value || '').trim();
+  }
+
+  function getVisiblePageContext() {
+    const root = document.querySelector('main') || document.body;
+    return (root?.innerText || document.body.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 8000);
+  }
+
+  function getMemorySource(source) {
+    if (source === 'selection') {
+      return {
+        source,
+        text: String(window.getSelection?.().toString() || '').trim(),
+      };
+    }
+    if (source === 'page') {
+      return { source, text: getVisiblePageContext() };
+    }
+    const inputEl = findPromptInput();
+    return {
+      source: 'prompt_box',
+      text: getTextFromInput(inputEl),
+      found: Boolean(inputEl),
+    };
+  }
+
   function isButtonEnabled(btn) {
     if (!btn) return false;
     const disabled = btn.getAttribute('disabled') !== null || btn.ariaDisabled === 'true';
@@ -184,6 +245,35 @@
     el.focus();
     el.dispatchEvent(new InputEvent('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function escapeRegExp(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function insertMemoryPack(markdown, behavior) {
+    const inputEl = findPromptInput();
+    if (!inputEl) {
+      throw new Error('Could not find chat input on this page.');
+    }
+    const begin = '<!-- BEGIN C_MEMORY_BROWSER_PACK -->';
+    const end = '<!-- END C_MEMORY_BROWSER_PACK -->';
+    const blockRe = new RegExp(`${escapeRegExp(begin)}[\\s\\S]*?${escapeRegExp(end)}\\n*`, 'm');
+    const current = getTextFromInput(inputEl);
+    const cleanMarkdown = String(markdown || '').trim();
+    if (!cleanMarkdown.includes(begin) || !cleanMarkdown.includes(end)) {
+      throw new Error('Memory pack is missing managed block markers.');
+    }
+    let nextText;
+    if (blockRe.test(current)) {
+      nextText = current.replace(blockRe, `${cleanMarkdown}\n\n`);
+    } else if (behavior === 'append') {
+      nextText = current ? `${current}\n\n${cleanMarkdown}` : cleanMarkdown;
+    } else {
+      nextText = current ? `${cleanMarkdown}\n\n${current}` : cleanMarkdown;
+    }
+    setTextInInput(inputEl, nextText);
+    return { inserted: true, replaced: blockRe.test(current), source: 'prompt_box' };
   }
 
   async function clickSend(btn, inputEl) {
@@ -328,9 +418,26 @@
         }
         return;
       }
+      if (message?.type === 'GET_MEMORY_SOURCE') {
+        try {
+          sendResponse({ ok: true, ...getMemorySource(message.source || 'prompt_box') });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e) });
+        }
+        return;
+      }
+      if (message?.type === 'INSERT_MEMORY_PACK') {
+        try {
+          const result = insertMemoryPack(message.markdown, message.behavior);
+          sendResponse({ ok: true, ...result });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e) });
+        }
+        return;
+      }
     })();
     return true;
   });
 
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
-})(); 
+})();

@@ -57,6 +57,15 @@ If you have more ideas to improve efficiency with these AI products, open an iss
 - Use Load to restore a specific history
 - Use Delete to remove entries
 
+## Memory Pack
+- Open the Memory Pack tab to preview local `C:\.memory` hits for the active prompt
+- Default source is the active prompt box; selected text, clipboard, page context, manual query, and combined source are also available
+- Set bridge URL, auth mode, token fallback, project, token budget, top-K, minimum score, pinned preference policy, class filters, and insertion behavior in Memory Settings
+- Preview shows memory id, class/type, score, source, snippet, and include checkboxes
+- Insert writes a managed `C_MEMORY_BROWSER_PACK` block into the active prompt box; a later insert replaces that block instead of duplicating it
+- Copy pack uses the editable markdown preview without touching the page
+- Raw prompt text, clipboard text, tokens, and memory contents are not stored in prompt history
+
 ## Notes and tips
 - UIs of AI sites change frequently. If detection breaks, update selectors in `content.js`
 - ChatGPT uses a ProseMirror editor; we insert text using editor-safe events

@@ -22,7 +22,33 @@ const DEFAULT_SETTINGS = {
   systemPrompt: '',
   prependSystemPrompt: true,
   theme: 'dark',
+  memory: {
+    enabled: true,
+    bridgeBaseUrl: 'http://127.0.0.1:5599',
+    authMode: 'native_host',
+    nativeHostName: 'com.prompt_queue.memory',
+    storedToken: '',
+    querySource: 'prompt_box',
+    project: 'global',
+    mode: 'smart',
+    maxTokens: 800,
+    topK: 8,
+    minScore: 0.2,
+    pinnedPolicy: 'relevant_only',
+    includeClasses: [],
+    excludeClasses: [],
+    insertBehavior: 'prepend_or_replace_managed_block',
+    debug: false,
+  },
 };
+
+const MEMORY_CLASSES = [
+  'beliefs_preferences',
+  'world_facts',
+  'entity_observations',
+  'agent_experiences',
+  'reflections',
+];
 
 function coerceNumber(v, min, max, fallback) {
   const n = Number(v);
@@ -35,6 +61,27 @@ function coerceNumber(v, min, max, fallback) {
 }
 
 function validateSettings(input = {}) {
+  const memoryInput = input.memory || {};
+  const defaultMemory = DEFAULT_SETTINGS.memory;
+  const authMode = memoryInput.authMode === 'stored_token' ? 'stored_token' : 'native_host';
+  const pinnedPolicy = ['core_only', 'relevant_only', 'all', 'none'].includes(memoryInput.pinnedPolicy)
+    ? memoryInput.pinnedPolicy
+    : defaultMemory.pinnedPolicy;
+  const mode = ['smart', 'compact_hits', 'full_pack', 'debug'].includes(memoryInput.mode)
+    ? memoryInput.mode
+    : defaultMemory.mode;
+  const querySource = ['prompt_box', 'selection', 'clipboard', 'page', 'manual', 'combined'].includes(memoryInput.querySource)
+    ? memoryInput.querySource
+    : defaultMemory.querySource;
+  const insertBehavior = ['prepend_or_replace_managed_block', 'append', 'replace_selected_text', 'copy_only'].includes(memoryInput.insertBehavior)
+    ? memoryInput.insertBehavior
+    : defaultMemory.insertBehavior;
+  const includeClasses = Array.isArray(memoryInput.includeClasses)
+    ? memoryInput.includeClasses.filter((c) => MEMORY_CLASSES.includes(c))
+    : [];
+  const excludeClasses = Array.isArray(memoryInput.excludeClasses)
+    ? memoryInput.excludeClasses.filter((c) => MEMORY_CLASSES.includes(c))
+    : [];
   return {
     stableMs: coerceNumber(input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMs),
     maxWaitMs: coerceNumber(input.maxWaitMs, 5000, 600000, DEFAULT_SETTINGS.maxWaitMs),
@@ -42,7 +89,46 @@ function validateSettings(input = {}) {
     systemPrompt: typeof input.systemPrompt === 'string' ? input.systemPrompt : DEFAULT_SETTINGS.systemPrompt,
     prependSystemPrompt: input.prependSystemPrompt !== false,
     theme: input.theme === 'light' ? 'light' : 'dark',
+    memory: {
+      enabled: memoryInput.enabled !== false,
+      bridgeBaseUrl: typeof memoryInput.bridgeBaseUrl === 'string' && memoryInput.bridgeBaseUrl.trim()
+        ? memoryInput.bridgeBaseUrl.replace(/\/+$/, '')
+        : defaultMemory.bridgeBaseUrl,
+      authMode,
+      nativeHostName: typeof memoryInput.nativeHostName === 'string' && memoryInput.nativeHostName.trim()
+        ? memoryInput.nativeHostName.trim()
+        : defaultMemory.nativeHostName,
+      storedToken: typeof memoryInput.storedToken === 'string' ? memoryInput.storedToken.trim() : '',
+      querySource,
+      project: typeof memoryInput.project === 'string' && memoryInput.project.trim() ? memoryInput.project.trim() : defaultMemory.project,
+      mode,
+      maxTokens: coerceNumber(memoryInput.maxTokens, 300, 3000, defaultMemory.maxTokens),
+      topK: coerceNumber(memoryInput.topK, 3, 20, defaultMemory.topK),
+      minScore: coerceNumber(memoryInput.minScore, 0, 1, defaultMemory.minScore),
+      pinnedPolicy,
+      includeClasses,
+      excludeClasses,
+      insertBehavior,
+      debug: memoryInput.debug === true,
+    },
   };
+}
+
+function publicSettings(settings) {
+  const safe = JSON.parse(JSON.stringify(settings || state.options));
+  if (safe.memory) {
+    safe.memory.hasStoredToken = Boolean(safe.memory.storedToken);
+    safe.memory.storedToken = '';
+  }
+  return safe;
+}
+
+function sanitizeSettingsForHistory(settings) {
+  const safe = JSON.parse(JSON.stringify(settings || {}));
+  if (safe.memory) {
+    safe.memory.storedToken = safe.memory.storedToken ? '<stored>' : '';
+  }
+  return safe;
 }
 
 function getStatus() {
@@ -56,19 +142,36 @@ function getStatus() {
 }
 
 async function loadSettings() {
-  const { aiTaskSequencerSettings } = await chrome.storage.sync.get('aiTaskSequencerSettings');
-  const merged = validateSettings({ ...DEFAULT_SETTINGS, ...(aiTaskSequencerSettings || {}) });
+  const local = await chrome.storage.local.get('aiTaskSequencerSettings');
+  let stored = local.aiTaskSequencerSettings;
+  if (!stored) {
+    const sync = await chrome.storage.sync.get('aiTaskSequencerSettings');
+    if (sync.aiTaskSequencerSettings) {
+      stored = sync.aiTaskSequencerSettings;
+      await chrome.storage.local.set({ aiTaskSequencerSettings: stored });
+    }
+  }
+  const merged = validateSettings({ ...DEFAULT_SETTINGS, ...(stored || {}) });
   state.options = merged;
 }
 
 async function saveSettings(newSettings) {
-  const merged = validateSettings({ ...state.options, ...newSettings });
+  const currentMemory = state.options.memory || DEFAULT_SETTINGS.memory;
+  const incomingMemory = newSettings?.memory || {};
+  const memory = {
+    ...currentMemory,
+    ...incomingMemory,
+  };
+  if (!Object.prototype.hasOwnProperty.call(incomingMemory, 'storedToken')) {
+    memory.storedToken = currentMemory.storedToken || '';
+  }
+  const merged = validateSettings({ ...state.options, ...newSettings, memory });
   state.options = merged;
-  await chrome.storage.sync.set({ aiTaskSequencerSettings: merged });
+  await chrome.storage.local.set({ aiTaskSequencerSettings: merged });
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'sync' && changes.aiTaskSequencerSettings) {
+  if (area === 'local' && changes.aiTaskSequencerSettings) {
     const next = validateSettings({ ...state.options, ...(changes.aiTaskSequencerSettings.newValue || {}) });
     state.options = next;
   }
@@ -121,6 +224,15 @@ async function sendToContent(tabId, message) {
   }
 }
 
+async function sendToContentForResponse(tabId, message) {
+  const tab = await chrome.tabs.get(tabId);
+  if (!isSupportedUrl(tab?.url)) {
+    throw new Error('Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.');
+  }
+  await injectContentScript(tabId);
+  return chrome.tabs.sendMessage(tabId, message);
+}
+
 async function startAutomation({ prompts, tabId, options }) {
   await loadSettings();
   if (options) {
@@ -149,6 +261,77 @@ function buildMessageText(text) {
     return `${systemPrompt}\n\n${text}`;
   }
   return text;
+}
+
+async function callNativeMemory(operation, payload) {
+  return chrome.runtime.sendNativeMessage(
+    state.options.memory.nativeHostName,
+    { operation, payload },
+  );
+}
+
+async function callDirectBridge(path, options = {}) {
+  const memory = state.options.memory || DEFAULT_SETTINGS.memory;
+  if (!memory.storedToken) {
+    throw new Error('Memory token missing. Set stored-token fallback or install native host.');
+  }
+  const headers = {
+    ...(options.headers || {}),
+    'X-Memory-Token': memory.storedToken,
+  };
+  const response = await fetch(`${memory.bridgeBaseUrl}${path}`, { ...options, headers });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = await response.json();
+      detail = body?.detail?.error || body?.error || JSON.stringify(body);
+    } catch (_) {}
+    throw new Error(`Memory bridge ${response.status}: ${detail}`);
+  }
+  return response;
+}
+
+async function callMemoryPack(body) {
+  await loadSettings();
+  const memory = state.options.memory || DEFAULT_SETTINGS.memory;
+  if (memory.authMode === 'native_host') {
+    try {
+      const nativeResult = await callNativeMemory('pack_browser', body);
+      if (nativeResult?.ok) return nativeResult.result;
+      if (!memory.storedToken) {
+        throw new Error(nativeResult?.error || 'Native host unavailable');
+      }
+    } catch (err) {
+      if (!memory.storedToken) throw err;
+    }
+  }
+  const response = await callDirectBridge('/pack/browser', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return response.json();
+}
+
+async function memoryHealthCheck() {
+  await loadSettings();
+  const memory = state.options.memory || DEFAULT_SETTINGS.memory;
+  let health = null;
+  try {
+    const response = await fetch(`${memory.bridgeBaseUrl}/healthz`);
+    health = await response.json();
+  } catch (err) {
+    return { ok: false, error: `Health check failed: ${String(err)}` };
+  }
+  let projects = [];
+  if (memory.storedToken) {
+    try {
+      const response = await callDirectBridge('/memory/projects');
+      const data = await response.json();
+      projects = data.projects || [];
+    } catch (_) {}
+  }
+  return { ok: true, health, projects };
 }
 
 async function sendNextPrompt() {
@@ -241,10 +424,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const historyItem = message.item;
         if (historyItem && typeof historyItem === 'object') {
           const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
-          const sig = makeHistorySignature(historyItem);
+          const safeHistoryItem = {
+            ...historyItem,
+            settings: sanitizeSettingsForHistory(historyItem.settings),
+          };
+          const sig = makeHistorySignature(safeHistoryItem);
           const exists = aiTaskSequencerHistory.some((h) => h.__sig === sig);
           if (!exists) {
-            aiTaskSequencerHistory.unshift({ ...historyItem, savedAt: Date.now(), __sig: sig });
+            aiTaskSequencerHistory.unshift({ ...safeHistoryItem, savedAt: Date.now(), __sig: sig });
             const trimmed = aiTaskSequencerHistory.slice(0, 50);
             await chrome.storage.local.set({ aiTaskSequencerHistory: trimmed });
           }
@@ -273,12 +460,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case "SAVE_SETTINGS": {
         await saveSettings(message.settings || {});
-        sendResponse({ ok: true, settings: state.options });
+        sendResponse({ ok: true, settings: publicSettings(state.options) });
         return;
       }
       case "GET_SETTINGS": {
         await loadSettings();
-        sendResponse({ ok: true, settings: state.options });
+        sendResponse({ ok: true, settings: publicSettings(state.options) });
+        return;
+      }
+      case "GET_MEMORY_SOURCE": {
+        try {
+          const result = await sendToContentForResponse(message.tabId, {
+            type: 'GET_MEMORY_SOURCE',
+            source: message.source,
+          });
+          sendResponse({ ok: true, result });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e) });
+        }
+        return;
+      }
+      case "PREVIEW_MEMORY_PACK": {
+        try {
+          const result = await callMemoryPack(message.body || {});
+          sendResponse({ ok: true, result });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e) });
+        }
+        return;
+      }
+      case "INSERT_MEMORY_PACK": {
+        try {
+          const result = await sendToContentForResponse(message.tabId, {
+            type: 'INSERT_MEMORY_PACK',
+            markdown: message.markdown,
+            behavior: message.behavior,
+          });
+          sendResponse({ ok: true, result });
+        } catch (e) {
+          sendResponse({ ok: false, error: String(e) });
+        }
+        return;
+      }
+      case "MEMORY_HEALTH_CHECK": {
+        const result = await memoryHealthCheck();
+        sendResponse(result);
         return;
       }
       default:
@@ -326,4 +552,4 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // No-op
-}); 
+});

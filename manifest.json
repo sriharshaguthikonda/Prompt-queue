@@ -8,9 +8,12 @@
     "scripting",
     "storage",
     "tabs",
-    "notifications"
+    "notifications",
+    "nativeMessaging",
+    "clipboardRead"
   ],
   "host_permissions": [
+    "http://127.0.0.1/*",
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
@@ -37,4 +40,4 @@
       "128": "images/icon.png"
     }
   }
-} 
+}
