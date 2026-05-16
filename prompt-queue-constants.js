@@ -1,0 +1,44 @@
+(function registerPromptQueueConstants(root) {
+  if (!root || root.PromptQueueConstants) return;
+
+  const MESSAGE_TYPES = Object.freeze({
+    AUTOMATION_STATUS_REQUEST: 'AUTOMATION_STATUS_REQUEST',
+    CONTENT_READY: 'CONTENT_READY',
+    GET_CAPTURED_RESPONSES: 'GET_CAPTURED_RESPONSES',
+    GET_MEMORY_SOURCE: 'GET_MEMORY_SOURCE',
+    GET_PROMPT_HISTORY: 'GET_PROMPT_HISTORY',
+    GET_SETTINGS: 'GET_SETTINGS',
+    INSERT_MEMORY_PACK: 'INSERT_MEMORY_PACK',
+    MEMORY_HEALTH_CHECK: 'MEMORY_HEALTH_CHECK',
+    PAUSE_AUTOMATION: 'PAUSE_AUTOMATION',
+    PREVIEW_MEMORY_PACK: 'PREVIEW_MEMORY_PACK',
+    PROMPT_SUBMITTED: 'PROMPT_SUBMITTED',
+    RESPONSE_COMPLETE: 'RESPONSE_COMPLETE',
+    RESUME_AUTOMATION: 'RESUME_AUTOMATION',
+    SAVE_PROMPT_HISTORY: 'SAVE_PROMPT_HISTORY',
+    SAVE_SETTINGS: 'SAVE_SETTINGS',
+    START_AUTOMATION: 'START_AUTOMATION',
+    STOP_AUTOMATION: 'STOP_AUTOMATION',
+  });
+
+  const STORAGE_KEYS = Object.freeze({
+    HISTORY: 'aiTaskSequencerHistory',
+    PARALLEL_WALKTHROUGH_VISIBLE: 'parallelWalkthroughVisible',
+    RESPONSES: 'aiTaskSequencerResponses',
+    SETTINGS: 'aiTaskSequencerSettings',
+    STATE: 'aiTaskSequencerState',
+    TAB_SESSIONS: 'aiTaskSequencerTabSessions',
+  });
+
+  const LIMITS = Object.freeze({
+    PROMPT_PREVIEW_CHARS: 120,
+    RESPONSE_RECORD_LIMIT: 200,
+    RESPONSE_TEXT_CHARS: 20000,
+  });
+
+  root.PromptQueueConstants = Object.freeze({
+    LIMITS,
+    MESSAGE_TYPES,
+    STORAGE_KEYS,
+  });
+})(typeof globalThis !== 'undefined' ? globalThis : self);

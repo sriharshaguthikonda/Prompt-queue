@@ -68,6 +68,7 @@
     pollIntervalMs: 1500,
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   };
+  const RESPONSE_CAPTURE_CHARS = 20000;
 
   function detectSite() {
     const host = location.hostname;
@@ -346,6 +347,111 @@
     return text;
   }
 
+  function getInputCurrentTextQuiet(el) {
+    if (!el) return '';
+    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
+    if (isContentEditable) return el.textContent || '';
+    if (typeof el.value === 'string') return el.value;
+    return el.textContent || '';
+  }
+
+  function findPromptInput() {
+    const active = document.activeElement;
+    if (active) {
+      const isTextarea = active.tagName === 'TEXTAREA';
+      const isContentEditable = active.getAttribute && active.getAttribute('contenteditable') === 'true';
+      if (isTextarea || isContentEditable) {
+        return active;
+      }
+    }
+    const site = detectSite();
+    const cfg = selectorsForSite(site);
+    return queryFirst(cfg.inputCandidates)
+      || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"], textarea');
+  }
+
+  function getVisiblePageContext() {
+    const root = document.querySelector('main') || document.body;
+    return (root?.innerText || document.body?.innerText || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 8000);
+  }
+
+  function getMemorySource(source) {
+    const requested = source || 'prompt_box';
+    if (requested === 'selection') {
+      return { source: requested, text: String(window.getSelection?.() || '').trim() };
+    }
+    if (requested === 'page') {
+      return { source: requested, text: getVisiblePageContext() };
+    }
+    const inputEl = findPromptInput();
+    const promptText = getInputCurrentTextQuiet(inputEl).trim();
+    if (requested === 'combined') {
+      const selectionText = String(window.getSelection?.() || '').trim();
+      return {
+        source: requested,
+        text: [promptText, selectionText].filter(Boolean).join('\n\n'),
+      };
+    }
+    return { source: 'prompt_box', text: promptText };
+  }
+
+  function replaceSelectedTextInInput(inputEl, markdown) {
+    if (!inputEl) return false;
+    const isTextarea = inputEl.tagName === 'TEXTAREA' || typeof inputEl.value === 'string';
+    if (isTextarea && Number.isFinite(inputEl.selectionStart) && inputEl.selectionStart !== inputEl.selectionEnd) {
+      const before = inputEl.value.slice(0, inputEl.selectionStart);
+      const after = inputEl.value.slice(inputEl.selectionEnd);
+      setTextInInput(inputEl, `${before}${markdown}${after}`);
+      return true;
+    }
+    const isContentEditable = inputEl.getAttribute && inputEl.getAttribute('contenteditable') === 'true';
+    const selection = window.getSelection?.();
+    if (isContentEditable && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0);
+      if (inputEl.contains(range.commonAncestorContainer)) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(markdown));
+        inputEl.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function insertMemoryPack(markdown, behavior) {
+    const pack = String(markdown || '').trim();
+    if (!pack) throw new Error('Memory pack is empty.');
+    const begin = '<!-- BEGIN C_MEMORY_BROWSER_PACK -->';
+    const end = '<!-- END C_MEMORY_BROWSER_PACK -->';
+    if (!pack.includes(begin) || !pack.includes(end)) {
+      throw new Error('Memory pack is missing managed block markers.');
+    }
+    const inputEl = findPromptInput();
+    if (!inputEl) throw new Error('Could not find prompt input.');
+    if (behavior === 'replace_selected_text' && replaceSelectedTextInInput(inputEl, pack)) {
+      return { ok: true, replaced: true, behavior };
+    }
+
+    const current = getInputCurrentTextQuiet(inputEl);
+    const blockPattern = new RegExp(`${begin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${end.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n*`, 'm');
+    let nextText = '';
+    let replaced = false;
+    if (blockPattern.test(current)) {
+      nextText = current.replace(blockPattern, `${pack}\n\n`);
+      replaced = true;
+    } else if (behavior === 'append') {
+      nextText = current.trim() ? `${current.trimEnd()}\n\n${pack}` : pack;
+    } else {
+      nextText = current.trim() ? `${pack}\n\n${current.trimStart()}` : pack;
+    }
+    setTextInInput(inputEl, nextText);
+    return { ok: true, replaced, behavior: behavior || 'prepend_or_replace_managed_block' };
+  }
+
   function normalizeWhitespace(text) {
     return (text || '').replace(/\s+/g, ' ').trim();
   }
@@ -375,6 +481,83 @@
       }
     }
     return null;
+  }
+
+  function cleanCapturedResponseText(text) {
+    const cleaned = String(text || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (cleaned.length <= RESPONSE_CAPTURE_CHARS) return cleaned;
+    return `${cleaned.slice(0, RESPONSE_CAPTURE_CHARS - 28)}\n\n[response truncated]`;
+  }
+
+  function responseCandidateSelectors(site) {
+    if (site === 'chatgpt') {
+      return [
+        'article[data-testid^="conversation-turn-"]',
+        '[data-message-author-role="assistant"]',
+        'main .markdown',
+      ];
+    }
+    if (site === 'claude') {
+      return [
+        '[data-testid*="conversation"]',
+        '[data-testid*="message"]',
+        'main .font-claude-message',
+        'main article',
+      ];
+    }
+    if (site === 'gemini') {
+      return [
+        'message-content',
+        'model-response',
+        'main [id^="model-response"]',
+        'main article',
+      ];
+    }
+    if (site === 'grok') {
+      return [
+        'main article',
+        '[data-testid*="message"]',
+        '[class*="message"]',
+      ];
+    }
+    return ['main article', '[data-testid*="message"]', '.markdown'];
+  }
+
+  function captureLatestAssistantResponse(promptText) {
+    const site = detectSite();
+    const seen = new Set();
+    const candidates = [];
+    for (const selector of responseCandidateSelectors(site)) {
+      let nodes = [];
+      try {
+        nodes = Array.from(document.querySelectorAll(selector));
+      } catch (_) {
+        nodes = [];
+      }
+      for (const node of nodes) {
+        if (!node || seen.has(node)) continue;
+        seen.add(node);
+        candidates.push(node);
+      }
+    }
+
+    for (let i = candidates.length - 1; i >= 0; i -= 1) {
+      const text = cleanCapturedResponseText(candidates[i].innerText || candidates[i].textContent || '');
+      if (!text) continue;
+      if (fuzzyIncludes(text, promptText)) continue;
+      return {
+        ok: true,
+        site,
+        url: location.href,
+        responseText: text,
+        responseLength: text.length,
+      };
+    }
+    return { ok: false, site, url: location.href, responseText: '', responseLength: 0 };
   }
 
   async function verifyPromptRendered({ text, promptId, attempts = 4, delayMs = 600 }) {
@@ -1286,9 +1469,20 @@
         throw e;
       }
       
-      console.log('[PromptQueue] Completion detected, sending RESPONSE_COMPLETE', { promptId });
+      const capturedResponse = captureLatestAssistantResponse(text);
+      console.log('[PromptQueue] Completion detected, sending RESPONSE_COMPLETE', {
+        promptId,
+        responseCaptured: capturedResponse.ok,
+        responseLength: capturedResponse.responseLength,
+      });
       try {
-        const resp = await chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
+        const resp = await chrome.runtime.sendMessage({
+          type: 'RESPONSE_COMPLETE',
+          promptId,
+          responseText: capturedResponse.responseText,
+          site: capturedResponse.site,
+          url: capturedResponse.url,
+        });
         console.log('[PromptQueue] RESPONSE_COMPLETE sent, got response', { promptId, resp });
       } catch (e) {
         console.error('[PromptQueue] Failed to send RESPONSE_COMPLETE', { promptId, error: e?.message });
@@ -1335,6 +1529,18 @@
           setAutoConfirmDialogs(message.settings.autoConfirmDialogs === true, 'settings_updated');
           setDebugLoggingEnabled(message.settings.debugLoggingEnabled === true);
           sendResponse({ ok: true });
+          return;
+        }
+
+        if (message?.type === 'GET_MEMORY_SOURCE') {
+          const result = getMemorySource(message.source || 'prompt_box');
+          sendResponse({ ok: true, source: result.source, text: result.text, textLength: result.text.length });
+          return;
+        }
+
+        if (message?.type === 'INSERT_MEMORY_PACK') {
+          const result = insertMemoryPack(message.markdown, message.behavior);
+          sendResponse(result);
           return;
         }
 

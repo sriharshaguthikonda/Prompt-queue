@@ -41,6 +41,7 @@ Prompts (one per line)"></textarea>
                 </span>
               </span>
             </div>
+            <div id="promptQueueReorder" class="prompt-reorder-list" aria-live="polite"></div>
           </div>
           <div class="prompts-right">
             <div class="inline">
@@ -191,6 +192,138 @@ Prompts (one per line)"></textarea>
         </div>
       </div>
 
+      <div class="card memory-card">
+        <div class="collapsible-header" id="memoryHeader">
+          <span class="collapsible-toggle">▼</span>
+          <span class="section-title" style="margin: 0;">Memory Pack</span>
+          <span id="memoryStatus" class="memory-status">Idle</span>
+        </div>
+        <div class="collapsible-content" id="memoryContent">
+          <div class="row">
+            <div>
+              <label for="memorySource">Source</label>
+              <select id="memorySource">
+                <option value="prompt_box">Prompt box</option>
+                <option value="selection">Selected text</option>
+                <option value="clipboard">Clipboard</option>
+                <option value="page">Page context</option>
+                <option value="manual">Manual query</option>
+                <option value="combined">Prompt + selection</option>
+              </select>
+            </div>
+            <div>
+              <label for="memoryProject">Project</label>
+              <input id="memoryProject" list="memoryProjects" type="text" placeholder="global" />
+              <datalist id="memoryProjects"></datalist>
+            </div>
+          </div>
+          <textarea id="memoryManualQuery" class="memory-query" placeholder="Preview query appears here. Edit before fetching if needed."></textarea>
+          <div class="row">
+            <div>
+              <label for="memoryMode">Mode</label>
+              <select id="memoryMode">
+                <option value="smart">Smart pack</option>
+                <option value="compact_hits">Compact hits</option>
+                <option value="full_pack">Full pack</option>
+                <option value="debug">Debug preview</option>
+              </select>
+            </div>
+            <div>
+              <label for="memoryPinnedPolicy">Pinned</label>
+              <select id="memoryPinnedPolicy">
+                <option value="relevant_only">Relevant only</option>
+                <option value="core_only">Core only</option>
+                <option value="none">None</option>
+                <option value="all">All retrieved</option>
+              </select>
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="memoryMaxTokens">Max tokens</label>
+              <input id="memoryMaxTokens" type="number" min="300" max="3000" step="100" placeholder="800" />
+            </div>
+            <div>
+              <label for="memoryTopK">Top-K</label>
+              <input id="memoryTopK" type="number" min="3" max="20" step="1" placeholder="8" />
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="memoryMinScore">Min score <span id="memoryMinScoreValue">0.20</span></label>
+              <input id="memoryMinScore" type="range" min="0" max="1" step="0.01" />
+            </div>
+            <div>
+              <label for="memoryInsertBehavior">Insert</label>
+              <select id="memoryInsertBehavior">
+                <option value="prepend_or_replace_managed_block">Prepend / replace block</option>
+                <option value="append">Append</option>
+                <option value="replace_selected_text">Replace selected text</option>
+                <option value="copy_only">Copy only</option>
+              </select>
+            </div>
+          </div>
+          <div class="memory-class-grid">
+            <label><input type="checkbox" data-memory-class="beliefs_preferences" checked /> Prefs</label>
+            <label><input type="checkbox" data-memory-class="world_facts" checked /> Facts</label>
+            <label><input type="checkbox" data-memory-class="entity_observations" checked /> Entities</label>
+            <label><input type="checkbox" data-memory-class="agent_experiences" checked /> Bugs</label>
+            <label><input type="checkbox" data-memory-class="reflections" checked /> Reflections</label>
+          </div>
+          <div class="history-buttons">
+            <button id="memoryHealthBtn" class="preset-btn" type="button">Health</button>
+            <button id="memoryPreviewBtn" class="preset-btn" type="button">Preview</button>
+            <button id="memoryInsertBtn" class="preset-btn" type="button">Insert</button>
+            <button id="memoryCopyBtn" class="preset-btn" type="button">Copy</button>
+          </div>
+          <div id="memoryPreview" class="memory-preview-list"></div>
+          <textarea id="memoryPackMarkdown" class="memory-pack-markdown" placeholder="Preview markdown appears here and can be edited before insert."></textarea>
+          <div class="collapsible-header memory-settings-header" id="memorySettingsHeader">
+            <span class="collapsible-toggle">▼</span>
+            <span class="section-title" style="margin: 0;">Memory Settings</span>
+          </div>
+          <div class="collapsible-content" id="memorySettingsContent">
+            <div class="row">
+              <div>
+                <label for="memoryBridgeBaseUrl">Bridge URL</label>
+                <input id="memoryBridgeBaseUrl" type="text" placeholder="http://127.0.0.1:5599" />
+              </div>
+              <div>
+                <label for="memoryAuthMode">Auth</label>
+                <select id="memoryAuthMode">
+                  <option value="native_host">Native host</option>
+                  <option value="stored_token">Stored token fallback</option>
+                </select>
+              </div>
+            </div>
+            <div class="row">
+              <div>
+                <label for="memoryNativeHostName">Native host</label>
+                <input id="memoryNativeHostName" type="text" placeholder="com.aipromptqueue.transcription" />
+              </div>
+              <div>
+                <label for="memoryDefaultProject">Default project</label>
+                <input id="memoryDefaultProject" type="text" placeholder="global" />
+              </div>
+            </div>
+            <div>
+              <label for="memoryStoredToken">Fallback token</label>
+              <input id="memoryStoredToken" type="password" placeholder="Only used when auth fallback is selected" />
+              <div id="memoryTokenStatus" class="desc">No stored token</div>
+            </div>
+            <div class="inline memory-settings-inline">
+              <input id="memoryDebug" type="checkbox" />
+              <label for="memoryDebug">Memory debug metadata</label>
+            </div>
+            <div class="history-buttons">
+              <button id="memorySaveSettingsBtn" class="preset-btn" type="button">Save settings</button>
+              <button id="memoryClearTokenBtn" class="preset-btn" type="button">Clear token</button>
+              <button id="memoryResetDefaultsBtn" class="preset-btn" type="button">Reset defaults</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="section-title">Saved prompt histories</div>
       
       <div class="card">
@@ -240,6 +373,7 @@ Prompts (one per line)"></textarea>
         </div>
         <div class="history-buttons">
           <button id="exportBtn" class="preset-btn">📥 Export</button>
+          <button id="exportMarkdownBtn" class="preset-btn">Export MD</button>
           <button id="importBtn" class="preset-btn">📤 Import</button>
           <input id="importFile" type="file" accept=".json" />
         </div>
@@ -339,6 +473,7 @@ Prompts (one per line)"></textarea>
       </div>
     </div>
 
+    <script src="prompt-queue-constants.js"></script>
     <script type="module" src="popup.js"></script>
   </body>
 </html>

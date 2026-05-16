@@ -11,14 +11,16 @@
     "notifications",
     "sidePanel",
     "offscreen",
-    "nativeMessaging"
+    "nativeMessaging",
+    "clipboardRead"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
     "https://grok.x.ai/*",
-    "https://claude.ai/*"
+    "https://claude.ai/*",
+    "http://127.0.0.1/*"
   ],
   "icons": {
     "16": "images/icon-16.png",
@@ -48,4 +50,4 @@
       "matches": ["<all_urls>"]
     }
   ]
-} 
+}

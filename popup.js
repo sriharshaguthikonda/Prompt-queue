@@ -1,11 +1,16 @@
 import { applyConsolePatch } from './popup-console-patch.js';
 import { setStatus, setProgress, showToast, showError, hideError, clearError, setButtonsDisabled, secToMs } from './popup-dom-utils.js';
 import { loadSettingsIntoUI, saveSettingsFromUI, initSettingsUI } from './popup-settings.js';
-import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, saveHistoryItem } from './popup-history.js';
+import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, exportHistoryMarkdown, saveHistoryItem } from './popup-history.js';
 import { NEW_TAB_MARKER, resolveSeparator, buildPromptLaunchPlan } from './popup-prompt-plan.js';
+import { initMemoryPackUI, loadMemorySettingsIntoUI } from './popup-memory.js';
+import { initPromptQueueReorder, refreshPromptQueueReorder } from './popup-queue.js';
 
 applyConsolePatch();
 
+const PQ_CONSTANTS = globalThis.PromptQueueConstants || {};
+const MESSAGE_TYPES = PQ_CONSTANTS.MESSAGE_TYPES || {};
+const STORAGE_KEYS = PQ_CONSTANTS.STORAGE_KEYS || {};
 const separatorInput = document.getElementById('separatorInput');
 let latestAutomationStatus = null;
 let currentPanelTabId = null;
@@ -97,6 +102,10 @@ function initInfoPopovers() {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       closeOpenInfoPopovers();
+      if (latestAutomationStatus?.running === true) {
+        event.preventDefault();
+      }
+      stopAutomationFromUI({ reason: 'escape' });
     }
   });
 }
@@ -161,6 +170,8 @@ function getRunningStatusText(status = {}) {
     parallelCompleted = 0,
     parallelFailed = 0,
     parallelActive = 0,
+    currentPromptPreview = '',
+    etaMs = 0,
   } = status;
 
   if (mode === 'parallel') {
@@ -170,17 +181,26 @@ function getRunningStatusText(status = {}) {
     return `Parallel running - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, failed ${parallelFailed}`;
   }
 
+  const details = [];
+  if (Number(etaMs || 0) > 0 && !paused) {
+    details.push(`ETA ${formatDuration(etaMs)}`);
+  }
+  if (currentPromptPreview) {
+    details.push(`Now: ${currentPromptPreview}`);
+  }
+  const suffix = details.length > 0 ? ` - ${details.join(' - ')}` : '';
+
   if (paused) {
-    return `Paused at prompt ${currentIndex + 1} of ${total}`;
+    return `Paused at prompt ${currentIndex + 1} of ${total}${suffix}`;
   }
   if (recoveryAttempts > 0) {
-    return `Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`;
+    return `Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}${suffix}`;
   }
   if (currentRetryCount > 0) {
     const maxRetries = Number(options?.maxRetriesPerPrompt || 0);
-    return `Retrying prompt ${currentIndex + 1} of ${total} (${currentRetryCount}/${maxRetries || '?'})`;
+    return `Retrying prompt ${currentIndex + 1} of ${total} (${currentRetryCount}/${maxRetries || '?'})${suffix}`;
   }
-  return `Running prompt ${currentIndex + 1} of ${total}...`;
+  return `Running prompt ${currentIndex + 1} of ${total}${suffix}`;
 }
 
 function getProgressPosition(status = {}) {
@@ -190,6 +210,14 @@ function getProgressPosition(status = {}) {
     return completed + failed;
   }
   return Number(status.currentIndex || 0);
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
 async function refreshStatus() {
@@ -330,11 +358,14 @@ if (resumeBtn) {
   });
 }
 
-document.getElementById('stopBtn').addEventListener('click', async () => {
+async function stopAutomationFromUI({ reason = 'button' } = {}) {
   try {
+    if (reason === 'escape' && latestAutomationStatus?.running !== true) {
+      return;
+    }
     const tabId = await getContextTabId();
-    await chrome.runtime.sendMessage({ type: 'STOP_AUTOMATION', tabId });
-    setStatus('Stopped');
+    await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.STOP_AUTOMATION || 'STOP_AUTOMATION', tabId });
+    setStatus(reason === 'escape' ? 'Stopped by Escape' : 'Stopped');
     updateControlButtons({ running: false, paused: false });
     // Refresh to clear any recovery status
     await refreshStatus();
@@ -342,6 +373,10 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
     console.error('[StopBtn] Error:', e);
     setStatus('Stop failed');
   }
+}
+
+document.getElementById('stopBtn').addEventListener('click', async () => {
+  await stopAutomationFromUI({ reason: 'button' });
 });
 
 // Save current prompts to history
@@ -406,10 +441,34 @@ if (exportBtn) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast(`✓ Exported ${exportData.history.length} items`, 'success');
+      showToast(`✓ Exported ${exportData.history.length} items and ${exportData.responses.length} responses`, 'success');
     } catch (e) {
       console.error('[ExportBtn] Error:', e);
       showToast('Export failed', 'error');
+    }
+  });
+}
+
+const exportMarkdownBtn = document.getElementById('exportMarkdownBtn');
+if (exportMarkdownBtn) {
+  exportMarkdownBtn.addEventListener('click', async () => {
+    try {
+      const exportData = await exportHistory();
+      if (!exportData) return;
+      const markdown = exportHistoryMarkdown(exportData);
+      const blob = new Blob([markdown], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `prompt-queue-export-${Date.now()}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`✓ Exported Markdown with ${exportData.responses.length} responses`, 'success');
+    } catch (e) {
+      console.error('[ExportMarkdownBtn] Error:', e);
+      showToast('Markdown export failed', 'error');
     }
   });
 }
@@ -654,6 +713,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     initInfoPopovers();
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
+    await loadMemorySettingsIntoUI();
+    initMemoryPackUI({ getContextTabId });
+    initPromptQueueReorder({
+      textarea: promptsTextarea,
+      separatorInput,
+      appendInput: document.getElementById('appendPromptText'),
+      prependInput: document.getElementById('systemPrompt'),
+      onChange: updatePromptCount,
+    });
     refreshWrapperPromptTextareaHeights();
     await loadHistoryIntoUI(updatePromptCount);
     await loadStateIntoUI();
@@ -681,6 +749,20 @@ document.getElementById('optionsHeader')?.addEventListener('click', () => {
   content.classList.toggle('collapsed');
 });
 
+document.getElementById('memoryHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#memoryHeader .collapsible-toggle');
+  const content = document.getElementById('memoryContent');
+  toggle?.classList.toggle('collapsed');
+  content?.classList.toggle('collapsed');
+});
+
+document.getElementById('memorySettingsHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#memorySettingsHeader .collapsible-toggle');
+  const content = document.getElementById('memorySettingsContent');
+  toggle?.classList.toggle('collapsed');
+  content?.classList.toggle('collapsed');
+});
+
 
 // Prompt counter
 const promptsTextarea = document.getElementById('prompts');
@@ -699,6 +781,7 @@ const updatePromptCount = () => {
       ? `${base} · ${tabGroups} tab set${tabGroups !== 1 ? 's' : ''}`
       : base;
   }
+  refreshPromptQueueReorder();
 };
 
 async function loadStateIntoUI() {
