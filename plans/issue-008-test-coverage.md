@@ -19,6 +19,10 @@ Make the test command runnable and add focused coverage for recently split plann
 
 ## Acceptance
 
-- `npm test -- --runInBand` runs after dependencies are installed.
-- New tests cover `popup-prompt-plan.js` and `background-parallel-utils.js`.
-- Existing test files are not broadened into brittle browser E2E claims.
+- [x] `npm test -- --runInBand` runs after dependencies are installed.
+- [x] New tests cover `popup-prompt-plan.js` and `background-parallel-utils.js`.
+- [x] Existing test files are not broadened into brittle browser E2E claims.
+
+## Evidence
+
+- `npm test -- --runInBand`: 5 suites, 99 tests passed.

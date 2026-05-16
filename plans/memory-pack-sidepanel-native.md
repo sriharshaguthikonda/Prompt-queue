@@ -10,7 +10,8 @@ Done when:
 - Native messaging host proxies read-only memory bridge calls using `C:\.memory\config\local_token`.
 - Stored-token mode remains fallback only.
 - Insert replaces an existing `C_MEMORY_BROWSER_PACK` managed block.
-- ChatGPT and Claude manual smokes pass.
+- Automated extension/native/backend tests pass.
+- ChatGPT and Claude manual smokes are the remaining release gate.
 - Existing queue automation, sidepanel lifecycle, and transcription monitor still work.
 
 ## Existing Architecture
@@ -41,28 +42,28 @@ Exit: repo-local plan and mother/phase docs all name the sidepanel/native-host t
 
 ## T2. Native Host Memory Proxy
 
-- [ ] Extend `native_host.py` with read-only memory operations:
+- [x] Extend `native_host.py` with read-only memory operations:
   - `memory_healthz`
   - `memory_pack_browser`
   - `memory_projects`
   - `memory_get`
-- [ ] Read token from `C:\.memory\config\local_token` at request time.
-- [ ] Allow override via message field only for tests, not normal extension UI.
-- [ ] Reject unknown/write-like operations.
-- [ ] Do not log raw prompt, clipboard, token, or memory content to stdout/stderr.
-- [ ] Update install docs/manifest example for native host reuse.
-- [ ] Add a host self-test that frames native messaging requests over stdin/stdout.
+- [x] Read token from `C:\.memory\config\local_token` at request time.
+- [x] Allow override via message field only for tests, not normal extension UI.
+- [x] Reject unknown/write-like operations.
+- [x] Do not log raw prompt, clipboard, token, or memory content to stdout/stderr.
+- [x] Update install docs/manifest example for native host reuse.
+- [x] Add a host self-test that frames native messaging requests over stdin/stdout.
 
 Exit: native host can call `/healthz`, `/pack/browser`, and project/list read APIs without browser-stored token.
 
 ## T3. Background Bridge Client
 
-- [ ] Add memory settings defaults under existing `DEFAULT_SETTINGS`.
-- [ ] Keep existing timing/retry/sidepanel settings intact.
-- [ ] Sanitize `GET_SETTINGS` so raw stored token is not returned to UI.
-- [ ] Preserve stored token on settings saves where token field is omitted.
-- [ ] Add native-first memory bridge calls with direct loopback fallback.
-- [ ] Add message handlers:
+- [x] Add memory settings defaults under existing `DEFAULT_SETTINGS`.
+- [x] Keep existing timing/retry/sidepanel settings intact.
+- [x] Sanitize `GET_SETTINGS` so raw stored token is not returned to UI.
+- [x] Preserve stored token on settings saves where token field is omitted.
+- [x] Add native-first memory bridge calls with direct loopback fallback.
+- [x] Add message handlers:
   - `GET_MEMORY_SOURCE`
   - `PREVIEW_MEMORY_PACK`
   - `INSERT_MEMORY_PACK`
@@ -72,34 +73,34 @@ Exit: sidepanel can request previews through native host, and fallback direct mo
 
 ## T4. Content Script Source and Insert
 
-- [ ] Add prompt-box/selection/page source extraction.
-- [ ] Use existing input detection/selectors; do not replace current queue send logic.
-- [ ] Add managed block insertion/replacement.
-- [ ] Implement append and copy-only paths.
-- [ ] Do not auto-submit after memory insertion.
+- [x] Add prompt-box/selection/page source extraction.
+- [x] Use existing input detection/selectors; do not replace current queue send logic.
+- [x] Add managed block insertion/replacement.
+- [x] Implement append and copy-only paths.
+- [x] Do not auto-submit after memory insertion.
 
 Exit: prompt text remains editable after insert, and second insert replaces the old pack.
 
 ## T5. Sidepanel UI
 
-- [ ] Add a collapsible `Memory Pack` card in `popup.html`.
-- [ ] Add compact controls for source, project, mode, token budget, top-K, min score, pinned policy, class filters, and insert behavior.
-- [ ] Add preview list with checkbox, id, class/type, score, source, snippet.
-- [ ] Add editable markdown textarea.
-- [ ] Add health, preview, insert, copy, save settings, clear token controls.
-- [ ] Put UI logic in `popup-memory.js` and import it from `popup.js`.
-- [ ] Add styles to `styles.css`.
+- [x] Add a collapsible `Memory Pack` card in `popup.html`.
+- [x] Add compact controls for source, project, mode, token budget, top-K, min score, pinned policy, class filters, and insert behavior.
+- [x] Add preview list with checkbox, id, class/type, score, source, snippet.
+- [x] Add editable markdown textarea.
+- [x] Add health, preview, insert, copy, save settings, clear token controls.
+- [x] Put UI logic in `popup-memory.js` and import it from `popup.js`.
+- [x] Add styles to `styles.css`.
 
 Exit: memory flow stays in sidepanel, no popup reopen loop.
 
 ## T6. Verification
 
-- [ ] `node --check background.js`
-- [ ] `node --check content.js`
-- [ ] `node --check popup.js`
-- [ ] `node --check popup-memory.js`
-- [ ] Native host self-test.
-- [ ] `npm test` or explain missing dependency blocker.
+- [x] `node --check background.js`
+- [x] `node --check content.js`
+- [x] `node --check popup.js`
+- [x] `node --check popup-memory.js`
+- [x] Native host self-test.
+- [x] `npm test -- --runInBand`.
 - [ ] Live bridge health smoke.
 - [ ] ChatGPT prompt-box source -> preview -> insert -> second insert replaces old pack.
 - [ ] ChatGPT selected text source -> preview.
@@ -110,8 +111,8 @@ Exit: memory flow stays in sidepanel, no popup reopen loop.
 
 ## T7. Closeout
 
-- [ ] Update README / TESTING with native-host and sidepanel memory-pack flow.
+- [x] Update README / TESTING with native-host and sidepanel memory-pack flow.
 - [ ] Update `.memory` handoff.
-- [ ] Commit roadmap/plan separately from implementation.
-- [ ] Commit implementation after tests.
+- [x] Commit roadmap/plan separately from implementation.
+- [x] Commit implementation after tests.
 - [ ] Push branch.
