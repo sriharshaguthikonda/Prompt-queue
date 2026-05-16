@@ -35,8 +35,8 @@ Do not stage or overwrite these unless explicitly asked.
 
 - [x] Add `ROADMAP.md`.
 - [x] Add this phase plan.
-- [ ] Sync `.memory` Phase 9B docs to say current sidepanel branch is authoritative.
-- [ ] Sync `.memory` external Prompt Queue notes.
+- [x] Sync `.memory` Phase 9B docs to say current sidepanel branch is authoritative.
+- [x] Sync `.memory` external Prompt Queue notes.
 
 Exit: repo-local plan and mother/phase docs all name the sidepanel/native-host target.
 
@@ -101,18 +101,18 @@ Exit: memory flow stays in sidepanel, no popup reopen loop.
 - [x] `node --check popup-memory.js`
 - [x] Native host self-test.
 - [x] `npm test -- --runInBand`.
-- [ ] Live bridge health smoke.
+- [x] Live bridge health smoke.
 - [ ] ChatGPT prompt-box source -> preview -> insert -> second insert replaces old pack.
 - [ ] ChatGPT selected text source -> preview.
 - [ ] Clipboard source -> preview.
 - [ ] Claude prompt-box source -> preview -> insert.
-- [ ] Bridge down -> clean sidepanel error.
-- [ ] Wrong token -> auth error.
+- [x] Bridge down -> clean native/sidepanel error path.
+- [x] Wrong token -> auth error.
 
 ## T7. Closeout
 
 - [x] Update README / TESTING with native-host and sidepanel memory-pack flow.
-- [ ] Update `.memory` handoff.
+- [x] Update `.memory` handoff.
 - [x] Commit roadmap/plan separately from implementation.
 - [x] Commit implementation after tests.
 - [ ] Push branch.
