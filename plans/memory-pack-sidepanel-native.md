@@ -115,4 +115,4 @@ Exit: memory flow stays in sidepanel, no popup reopen loop.
 - [x] Update `.memory` handoff.
 - [x] Commit roadmap/plan separately from implementation.
 - [x] Commit implementation after tests.
-- [ ] Push branch.
+- [x] Push branch.
