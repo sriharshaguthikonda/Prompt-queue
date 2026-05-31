@@ -66,6 +66,21 @@ class MemoryExtensionStaticTests(unittest.TestCase):
         ]
         self.assertNotIn("clickSend(", insert_block)
 
+    def test_native_host_installer_uses_launcher_and_validated_origins(self):
+        batch = read_text("install_native_host.bat")
+        installer = read_text("install_native_host.ps1")
+        launcher = read_text("run_host.bat")
+        example = json.loads(read_text("native_host.example.json"))
+
+        self.assertIn("install_native_host.ps1", batch)
+        self.assertIn("run_host.bat", installer)
+        self.assertIn("allowed_origins", installer)
+        self.assertIn("Test-ExtensionId", installer)
+        self.assertIn("NativeMessagingHosts", installer)
+        self.assertNotIn('"path": "%SCRIPT_DIR%\\\\native_host.py"', batch)
+        self.assertIn("native_host.py", launcher)
+        self.assertTrue(example["path"].endswith("run_host.bat"))
+
 
 if __name__ == "__main__":
     unittest.main()
