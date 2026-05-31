@@ -16,6 +16,7 @@ Current sidepanel branch:
 
 | Phase | Plan | Status |
 |---|---|---|
+| ChatGPT send regression + native host install incident | [plans/incident-2026-05-31-chatgpt-send-native-host.md](plans/incident-2026-05-31-chatgpt-send-native-host.md) | in progress |
 | Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; automated tests pass; manual browser smokes pending |
 
 ## Open Issue Phases
