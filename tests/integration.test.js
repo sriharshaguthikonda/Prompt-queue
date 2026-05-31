@@ -339,6 +339,18 @@ describe('Content Script Integration', () => {
       document.body.removeChild(div);
     });
 
+    it('should set text in plaintext-only contenteditable', () => {
+      const div = document.createElement('div');
+      div.id = 'prompt-textarea';
+      div.setAttribute('contenteditable', 'plaintext-only');
+      document.body.appendChild(div);
+
+      setTextInInput(div, 'Test text');
+
+      expect(div.textContent).toBe('Test text');
+      document.body.removeChild(div);
+    });
+
     it('should trigger input event', () => {
       const textarea = document.createElement('textarea');
       let eventFired = false;
@@ -387,6 +399,39 @@ describe('Content Script Integration', () => {
       
       expect(keyEventFired).toBe(true);
       document.body.removeChild(div);
+    });
+  });
+
+  describe('ChatGPT selectors', () => {
+    it('should find the current ChatGPT plaintext composer', () => {
+      document.body.innerHTML = '<div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>';
+
+      const selector = selectorsForSite('chatgpt').inputCandidates.find((candidate) => document.querySelector(candidate));
+
+      expect(selector).toBeDefined();
+      expect(document.querySelector(selector).id).toBe('prompt-textarea');
+    });
+
+    it('should find unscoped ChatGPT send buttons', () => {
+      document.body.innerHTML = '<button aria-label="Send prompt"></button>';
+
+      const button = findSendButtonForSite('chatgpt', null);
+
+      expect(button).toBe(document.querySelector('button'));
+    });
+
+    it('should treat a typed draft as send-ready even when the button is recreated late', () => {
+      document.body.innerHTML = '<div id="prompt-textarea" contenteditable="plaintext-only">hello</div>';
+
+      expect(isChatGPTReadyToSend(document.getElementById('prompt-textarea'))).toBe(true);
+    });
+
+    it('should verify rendered user messages without whitespace-pre-wrap', () => {
+      document.body.innerHTML = '<article data-testid="conversation-turn-1"><div data-message-author-role="user">Hello from queued prompt</div></article>';
+
+      const match = findRenderedMessageMatch('Hello from queued prompt');
+
+      expect(match).not.toBeNull();
     });
   });
 });

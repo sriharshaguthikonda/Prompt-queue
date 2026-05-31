@@ -91,17 +91,33 @@
       case 'chatgpt':
         return {
           inputCandidates: [
-            '#prompt-textarea.ProseMirror[contenteditable="true"]',
-            'div#prompt-textarea[contenteditable="true"]',
-            '.ProseMirror[contenteditable="true"]',
+            '#prompt-textarea[contenteditable]',
+            '#prompt-textarea.ProseMirror[contenteditable]',
+            '[data-testid="prompt-textarea"][contenteditable]',
+            'div#prompt-textarea[contenteditable]',
+            'div[contenteditable][role="textbox"]',
+            'form [contenteditable][role="textbox"]',
+            '.ProseMirror[contenteditable]',
+            'textarea#prompt-textarea',
+            'textarea[data-testid="prompt-textarea"]',
             'form textarea[name="prompt-textarea"]',
             'form textarea[aria-label*="message"]',
+            'form textarea[aria-label*="Message"]',
+            'form textarea[placeholder*="message"]',
+            'form textarea[placeholder*="Message"]',
             'form textarea',
           ],
           sendButtonCandidates: [
+            'button[data-testid="send-button"]',
             'form button[data-testid="send-button"]',
             'form button[aria-label="Send message"]',
+            'button[aria-label="Send message"]',
+            'button[aria-label*="Send"]',
+            'button[aria-label*="send"]',
+            'button[aria-label*="Submit"]',
+            'button[aria-label*="submit"]',
             'form button[type="submit"]',
+            'button[type="submit"]',
           ],
           stopButtonCandidates: [
             'button[data-testid="stop-button"]',
@@ -181,7 +197,7 @@
         };
       default:
         return {
-          inputCandidates: ['textarea', '[contenteditable="true"]'],
+          inputCandidates: ['textarea', '[contenteditable]'],
           sendButtonCandidates: ['button[type="submit"]', 'button[aria-label*="Send"]', 'button:has(svg[aria-label*="send"])'],
           stopButtonCandidates: ['button[aria-label*="Stop"]'],
           messagesContainerCandidates: ['main', 'body'],
@@ -199,6 +215,57 @@
     return null;
   }
 
+  function buttonLooksLikeSend(el) {
+    if (!el || el.tagName !== 'BUTTON') return false;
+    const label = normalizeButtonText(el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '');
+    const testId = normalizeButtonText(el.getAttribute('data-testid') || '');
+    const type = normalizeButtonText(el.getAttribute('type') || '');
+    return label.includes('send')
+      || label.includes('submit')
+      || testId.includes('send')
+      || testId.includes('submit')
+      || type === 'submit';
+  }
+
+  function findChatGPTSendButton(inputEl) {
+    const roots = [
+      inputEl?.closest?.('form'),
+      inputEl?.closest?.('[data-testid*="composer"]'),
+      inputEl?.closest?.('[class*="composer"]'),
+      document,
+    ].filter(Boolean);
+    const selectors = [
+      'button[data-testid*="send"]',
+      'button[data-testid*="submit"]',
+      'button[aria-label*="Send"]',
+      'button[aria-label*="send"]',
+      'button[aria-label*="Submit"]',
+      'button[aria-label*="submit"]',
+      'button[type="submit"]',
+    ];
+    for (const root of roots) {
+      for (const selector of selectors) {
+        let candidates = [];
+        try {
+          candidates = Array.from(root.querySelectorAll(selector));
+        } catch (_) {
+          candidates = [];
+        }
+        const match = candidates.find((candidate) => buttonLooksLikeSend(candidate));
+        if (match) return match;
+      }
+    }
+    return null;
+  }
+
+  function findSendButtonForSite(site, inputEl) {
+    if (site === 'chatgpt') {
+      const direct = queryFirst(selectorsForSite(site).sendButtonCandidates);
+      return direct || findChatGPTSendButton(inputEl);
+    }
+    return queryFirst(selectorsForSite(site).sendButtonCandidates);
+  }
+
   function isButtonEnabled(btn) {
     if (!btn) return false;
     const disabled = btn.getAttribute('disabled') !== null
@@ -214,6 +281,17 @@
     if (style.display === 'none' || style.visibility === 'hidden') return false;
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
+  }
+
+  function isContentEditableElement(el) {
+    if (!el || !el.getAttribute) return false;
+    const attr = el.getAttribute('contenteditable');
+    return attr === ''
+      || attr === 'true'
+      || attr === 'plaintext-only'
+      || el.isContentEditable === true
+      || el.contentEditable === 'true'
+      || el.contentEditable === 'plaintext-only';
   }
 
   function normalizeButtonText(text) {
@@ -276,12 +354,27 @@
 
   function setProseMirrorText(el, text) {
     el.focus({ preventScroll: true });
+    if (typeof document.execCommand !== 'function') {
+      el.textContent = text;
+      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
     const selection = window.getSelection();
     const range = document.createRange();
     range.selectNodeContents(el);
     selection.removeAllRanges();
     selection.addRange(range);
     document.execCommand('delete', false, null);
+
+    if (el.getAttribute('contenteditable') === 'plaintext-only') {
+      const insertTextOk = document.execCommand('insertText', false, String(text || ''));
+      if (insertTextOk) return;
+      el.textContent = text;
+      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return;
+    }
 
     const paragraphs = String(text || '')
       .replace(/\r\n/g, '\n')
@@ -313,7 +406,7 @@
 
   function setTextInInput(el, text) {
     if (!el) throw new Error('Input element not found');
-    const isContentEditable = (el.getAttribute && el.getAttribute('contenteditable') === 'true') || el.isContentEditable === true || el.contentEditable === 'true';
+    const isContentEditable = isContentEditableElement(el);
     if (isContentEditable) {
       if (el.id === 'prompt-textarea' || el.classList.contains('ProseMirror')) {
         setProseMirrorText(el, text);
@@ -342,7 +435,7 @@
       console.warn('[GetInputCurrentText] Called with null/undefined element');
       return '';
     }
-    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
+    const isContentEditable = isContentEditableElement(el);
     let text = '';
     if (isContentEditable) {
       text = el.textContent || '';
@@ -358,7 +451,7 @@
 
   function getInputCurrentTextQuiet(el) {
     if (!el) return '';
-    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
+    const isContentEditable = isContentEditableElement(el);
     if (isContentEditable) return el.textContent || '';
     if (typeof el.value === 'string') return el.value;
     return el.textContent || '';
@@ -368,7 +461,7 @@
     const active = document.activeElement;
     if (active) {
       const isTextarea = active.tagName === 'TEXTAREA';
-      const isContentEditable = active.getAttribute && active.getAttribute('contenteditable') === 'true';
+      const isContentEditable = isContentEditableElement(active);
       if (isTextarea || isContentEditable) {
         return active;
       }
@@ -376,7 +469,7 @@
     const site = detectSite();
     const cfg = selectorsForSite(site);
     return queryFirst(cfg.inputCandidates)
-      || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"], textarea');
+      || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable], form textarea, [contenteditable], textarea');
   }
 
   function getVisiblePageContext() {
@@ -416,7 +509,7 @@
       setTextInInput(inputEl, `${before}${markdown}${after}`);
       return true;
     }
-    const isContentEditable = inputEl.getAttribute && inputEl.getAttribute('contenteditable') === 'true';
+    const isContentEditable = isContentEditableElement(inputEl);
     const selection = window.getSelection?.();
     if (isContentEditable && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
       const range = selection.getRangeAt(0);
@@ -482,7 +575,25 @@
   function findRenderedMessageMatch(targetText) {
     const target = normalizeWhitespace(targetText);
     if (!target) return null;
-    const candidates = Array.from(document.querySelectorAll('div.whitespace-pre-wrap'));
+    const selectors = [
+      'div.whitespace-pre-wrap',
+      '[data-message-author-role="user"]',
+      'article[data-testid^="conversation-turn-"]',
+      'article[data-turn-id]',
+      'main [data-testid*="message"]',
+    ];
+    const seen = new Set();
+    const candidates = [];
+    for (const selector of selectors) {
+      try {
+        for (const el of document.querySelectorAll(selector)) {
+          if (!seen.has(el)) {
+            seen.add(el);
+            candidates.push(el);
+          }
+        }
+      } catch (_) {}
+    }
     for (const el of candidates) {
       const content = normalizeWhitespace(el.textContent || '');
       if (fuzzyIncludes(content, target)) {
@@ -570,32 +681,36 @@
   }
 
   async function verifyPromptRendered({ text, promptId, attempts = 4, delayMs = 600 }) {
-    const target = normalizeWhitespace(text);
     for (let attempt = 1; attempt <= attempts; attempt++) {
-      const nodes = Array.from(document.querySelectorAll('div.whitespace-pre-wrap'));
-      const matchNode = nodes.find((node) => fuzzyIncludes(node.textContent, target));
-      if (matchNode) {
-        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt, nodesChecked: nodes.length, contentPreview: normalizeWhitespace(matchNode.textContent).slice(0, 120) });
+      const match = findRenderedMessageMatch(text);
+      if (match) {
+        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt, contentPreview: match.contentPreview });
         return true;
       }
-      console.warn('[PromptQueue] Prompt render not found yet, retrying', { promptId, attempt, attempts, nodesChecked: nodes.length });
+      console.warn('[PromptQueue] Prompt render not found yet, retrying', { promptId, attempt, attempts });
       await new Promise((r) => setTimeout(r, delayMs));
     }
     throw new Error('Prompt text not found in chat after send');
   }
 
   async function clickSend(btn, inputEl) {
-    if (!btn) {
+    if (btn && isButtonEnabled(btn)) {
       inputEl?.focus();
-      const down = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
-      const press = new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
-      const up = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
-      inputEl?.dispatchEvent(down);
-      inputEl?.dispatchEvent(press);
-      inputEl?.dispatchEvent(up);
+      btn.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+        btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      }
+      btn.click();
       return;
     }
-    btn.click();
+
+    inputEl?.focus();
+    const down = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true });
+    const press = new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true });
+    const up = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true });
+    inputEl?.dispatchEvent(down);
+    inputEl?.dispatchEvent(press);
+    inputEl?.dispatchEvent(up);
   }
 
   function getTailConversationTurns(maxTurns = 2) {
@@ -671,7 +786,7 @@
     return !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible;
   }
 
-  function waitForChatGPTSendWindow({ sendButton, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
+  function waitForChatGPTSendWindow({ sendButton, inputEl, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
     return new Promise((resolve, reject) => {
       const start = Date.now();
       let readySince = null;
@@ -680,8 +795,9 @@
         maybeClickConfirmButtons('waitForChatGPTSendWindow');
         const elapsed = Date.now() - start;
         const busy = isChatGPTThinking();
-        const directReady = sendButton ? isButtonEnabled(sendButton) : false;
-        const canSend = directReady || isChatGPTReadyToSend();
+        const currentSendButton = findSendButtonForSite('chatgpt', inputEl) || sendButton;
+        const directReady = currentSendButton ? isButtonEnabled(currentSendButton) : false;
+        const canSend = directReady || isChatGPTReadyToSend(inputEl);
 
         if (!busy && canSend) {
           if (readySince === null) {
@@ -754,18 +870,19 @@
     return blockAutoConfirmForStopWord(source);
   }
 
-  function isChatGPTReadyToSend() {
+  function isChatGPTReadyToSend(inputEl) {
     // Check if send button is enabled or if we're in a state where we can send
-    const sendBtn = document.querySelector('[data-testid="send-button"]');
+    const sendBtn = findSendButtonForSite('chatgpt', inputEl);
     if (sendBtn && isButtonEnabled(sendBtn)) return true;
     const regenPresent = document.querySelector('button:has([data-testid="regenerate-response-button"]) , button[aria-label*="Regenerate"]');
     const isThinking = isChatGPTThinking();
-    return (!!sendBtn || !!regenPresent) && !isThinking;
+    const hasDraft = getInputTextLengthQuiet(inputEl || findPromptInput()) > 0;
+    return (!!sendBtn || !!regenPresent || hasDraft) && !isThinking;
   }
 
   function getInputTextLengthQuiet(el) {
     if (!el) return 0;
-    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
+    const isContentEditable = isContentEditableElement(el);
     if (isContentEditable) {
       return (el.textContent || '').length;
     }
@@ -777,7 +894,7 @@
 
   function buildPromptQueueDebugSnapshot({ site, inputEl, sendBtn, stopButtonSelector, promptId, attempt }) {
     const resolvedSite = site || detectSite();
-    const resolvedSendBtn = sendBtn || queryFirst(selectorsForSite(resolvedSite).sendButtonCandidates);
+    const resolvedSendBtn = sendBtn || findSendButtonForSite(resolvedSite, inputEl);
     const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
     const inputLength = getInputTextLengthQuiet(inputEl);
     return {
@@ -1187,7 +1304,7 @@
       const cfg = selectorsForSite(site);
 
       let inputEl = queryFirst(cfg.inputCandidates);
-      let sendBtn = queryFirst(cfg.sendButtonCandidates);
+      let sendBtn = findSendButtonForSite(site, inputEl);
       const stopBtnSel = cfg.stopButtonCandidates?.[0] || null;
       let messagesContainer = queryFirst(cfg.messagesContainerCandidates);
       
@@ -1200,12 +1317,12 @@
 
       if ((site === 'chatgpt' || site === 'gemini' || site === 'claude') && !inputEl) {
         console.log('[PromptQueue] Input not found, attempting to locate and focus');
-        const composer = document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+        const composer = document.querySelector('#prompt-textarea, .ProseMirror[contenteditable], form textarea, [contenteditable]');
         composer?.scrollIntoView({ block: 'end' });
         composer?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await new Promise((r) => setTimeout(r, 150));
-        inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
-        sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
+        inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable], form textarea, [contenteditable]');
+        sendBtn = sendBtn || findSendButtonForSite(site, inputEl);
         messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
         console.log('[PromptQueue] After focus attempt', { hasInputEl: !!inputEl, hasSendBtn: !!sendBtn });
       }
@@ -1271,6 +1388,7 @@
         throw new Error('Input field empty before sending');
       }
       console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length, preview: finalNormalized.slice(0, 120) });
+      sendBtn = findSendButtonForSite(site, inputEl) || sendBtn;
 
       if (site === 'chatgpt') {
         const preSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
@@ -1278,6 +1396,7 @@
         try {
           await waitForChatGPTSendWindow({
             sendButton: sendBtn,
+            inputEl,
             maxWaitMs: preSendMaxWaitMs,
             quietWindowMs: 1200,
             pollMs: 250,
@@ -1299,6 +1418,7 @@
       }
       
       console.log('[PromptQueue] Clicking send button', { promptId });
+      sendBtn = findSendButtonForSite(site, inputEl) || sendBtn;
       await clickSend(sendBtn, inputEl);
 
       let attempt = 0;
@@ -1350,6 +1470,7 @@
             try {
               await waitForChatGPTSendWindow({
                 sendButton: sendBtn,
+                inputEl,
                 maxWaitMs: retryPreSendMaxWaitMs,
                 quietWindowMs: 1200,
                 pollMs: 250,
@@ -1371,6 +1492,7 @@
               throw retryPreSendErr;
             }
           }
+          sendBtn = findSendButtonForSite(site, inputEl) || sendBtn;
           await clickSend(sendBtn, inputEl);
         }
       }
@@ -1529,7 +1651,11 @@
     window.PromptQueueContentTest = {
       clickSend,
       detectSite,
+      findRenderedMessageMatch,
+      findSendButtonForSite,
       isButtonEnabled,
+      isChatGPTReadyToSend,
+      selectorsForSite,
       setTextInInput,
       waitForCompletion,
       waitForStreamsToStop,
