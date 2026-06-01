@@ -1,5 +1,12 @@
 import { applyConsolePatch, setDebugLoggingEnabled } from './popup-console-patch.js';
-import { msToSec, secToMs, applyTheme } from './popup-dom-utils.js';
+import { msToSec, secToMs, applyTheme, showToast } from './popup-dom-utils.js';
+import {
+  applyTargetSelectorErrors,
+  ensureTargetSettingsUI,
+  initTargetSettingsUI,
+  loadTargetSettingsIntoUI,
+  validateAndNormalizeTargetSettingsFromUI,
+} from './popup-target-settings.js';
 
 // Initialization and helpers for settings UI
 export async function loadSettingsIntoUI() {
@@ -7,6 +14,7 @@ export async function loadSettingsIntoUI() {
     const res = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
     if (res?.ok && res.settings) {
       const s = res.settings;
+      ensureTargetSettingsUI();
       applyTheme(s.theme || 'dark');
       document.getElementById('maxWaitSec').value = msToSec(s.maxWaitMs);
       document.getElementById('stableMinSec').value = msToSec(s.stableMinMs ?? s.stableMs);
@@ -34,6 +42,7 @@ export async function loadSettingsIntoUI() {
       document.getElementById('debugLoggingEnabled').checked = s.debugLoggingEnabled === true;
       document.getElementById('openNewChatPerPrompt').checked = s.openNewChatPerPrompt === true;
       document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
+      loadTargetSettingsIntoUI(s);
       setDebugLoggingEnabled(s.debugLoggingEnabled === true);
 
       const stopWordContainer = document.getElementById('stopWordContainer');
@@ -63,6 +72,12 @@ export async function saveSettingsFromUI() {
     const stableMinOrdered = Math.min(stableMinSec, stableMaxSec || stableMinSec);
     const stableMaxOrdered = Math.max(stableMinSec || stableMaxSec, stableMaxSec || stableMinSec);
     const pollSec = Number(document.getElementById('pollSec').value);
+    const targetValidation = validateAndNormalizeTargetSettingsFromUI({ applyNormalized: true });
+    applyTargetSelectorErrors(targetValidation.errors);
+    if (Object.keys(targetValidation.errors).length > 0) {
+      throw new Error('Invalid selector in custom targets');
+    }
+
     settings = {
       maxWaitMs: secToMs(maxWaitSec),
       stableMinMs: secToMs(stableMinOrdered),
@@ -87,17 +102,27 @@ export async function saveSettingsFromUI() {
       debugLoggingEnabled: document.getElementById('debugLoggingEnabled').checked,
       openNewChatPerPrompt: document.getElementById('openNewChatPerPrompt').checked,
       openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
+      targetSelectors: targetValidation.targetSelectors,
     };
-    await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
+    settings.watchedElementSelector = settings.targetSelectors.watchedElement || settings.watchedElementSelector;
+    const response = await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
+    if (!response?.ok) {
+      if (response?.validationErrors) {
+        applyTargetSelectorErrors(response.validationErrors);
+      }
+      throw new Error(response?.error || 'Failed to save settings');
+    }
     return settings;
   } catch (e) {
     console.error('[SaveSettings] Error:', e);
+    showToast(e?.message || 'Failed to save settings', 'error');
     return settings;
   }
 }
 
 export function initSettingsUI() {
   applyConsolePatch(undefined, false);
+  ensureTargetSettingsUI();
 
   const themeSelect = document.getElementById('themeSelect');
   if (themeSelect) {
@@ -196,4 +221,6 @@ export function initSettingsUI() {
     openNewChatPerPromptUrlInput.addEventListener('change', saveSettingsFromUI);
     openNewChatPerPromptUrlInput.addEventListener('blur', saveSettingsFromUI);
   }
+
+  initTargetSettingsUI({ onSettingsChanged: saveSettingsFromUI });
 }

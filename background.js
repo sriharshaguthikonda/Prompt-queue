@@ -99,6 +99,12 @@ const state = {
     autoConfirmDialogs: false,
     enableWatchedElementGate: false,
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
+    targetSelectors: {
+      promptInput: '',
+      sendButton: '',
+      stopButton: '',
+      watchedElement: 'button[data-testid="copy-turn-action-button"]',
+    },
     refreshTabBeforeEachPrompt: false,
     parallelOneTabPerPrompt: false,
     enableRetryOnFailure: true,
@@ -164,6 +170,12 @@ const DEFAULT_SETTINGS = {
   autoConfirmDialogs: false,
   enableWatchedElementGate: false,
   watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
+  targetSelectors: {
+    promptInput: '',
+    sendButton: '',
+    stopButton: '',
+    watchedElement: 'button[data-testid="copy-turn-action-button"]',
+  },
   refreshTabBeforeEachPrompt: false,
   parallelOneTabPerPrompt: false,
   enableRetryOnFailure: true,
@@ -228,6 +240,93 @@ function sanitizeMemoryBridgeBaseUrl(url) {
   return DEFAULT_MEMORY_SETTINGS.bridgeBaseUrl;
 }
 
+const BUTTON_CONTEXT_SELECTOR_ROLES = new Set(['sendButton', 'stopButton', 'watchedElement']);
+
+function normalizeCommonDataTestIdPattern(rawValue, role) {
+  const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
+  if (!trimmed) return { value: '', normalized: false };
+
+  const hashMatch = trimmed.match(/^data-testid#([a-zA-Z0-9_.:-]+)$/);
+  if (hashMatch) {
+    const base = `[data-testid="${hashMatch[1]}"]`;
+    return { value: BUTTON_CONTEXT_SELECTOR_ROLES.has(role) ? `button${base}` : base, normalized: true };
+  }
+
+  const equalsMatch = trimmed.match(/^data-testid\s*=\s*["']?([a-zA-Z0-9_.:-]+)["']?$/);
+  if (equalsMatch) {
+    const base = `[data-testid="${equalsMatch[1]}"]`;
+    return { value: BUTTON_CONTEXT_SELECTOR_ROLES.has(role) ? `button${base}` : base, normalized: true };
+  }
+
+  return { value: trimmed, normalized: false };
+}
+
+function isValidCssSelector(selector) {
+  if (!selector) return true;
+  try {
+    if (typeof document !== 'undefined' && document?.createDocumentFragment) {
+      document.createDocumentFragment().querySelector(selector);
+      return true;
+    }
+    if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function') {
+      return CSS.supports(`selector(:is(${selector}))`);
+    }
+  } catch (_) {
+    return false;
+  }
+  return isSupportedSelectorWithoutEngine(selector);
+}
+
+function isRecognizedSimpleDataTestIdSelector(selector) {
+  const trimmed = typeof selector === 'string' ? selector.trim() : '';
+  if (!trimmed) return true;
+  const tag = '(?:[a-zA-Z][a-zA-Z0-9_-]*)?';
+  const value = '(?:"[a-zA-Z0-9_.:-]+"|\'[a-zA-Z0-9_.:-]+\'|[a-zA-Z0-9_.:-]+)';
+  return new RegExp(`^${tag}\\[\\s*data-testid\\s*=\\s*${value}\\s*\\]$`).test(trimmed);
+}
+
+function isSupportedSelectorWithoutEngine(selector) {
+  const trimmed = typeof selector === 'string' ? selector.trim() : '';
+  if (!trimmed) return true;
+
+  const tokenPattern = '(?:[#.][a-zA-Z_][a-zA-Z0-9_-]*|[a-zA-Z][a-zA-Z0-9_-]*|\\[\\s*[a-zA-Z_][a-zA-Z0-9_-]*(?:\\s*=\\s*(?:"[^"\\n\\r\\f\\\\]*"|\'[^\'\\n\\r\\f\\\\]*\'|[^\\s\\]]+))?\\s*\\])';
+  const segmentPattern = `${tokenPattern}(?:${tokenPattern})*`;
+  const selectorPattern = `^${segmentPattern}(?:\\s+${segmentPattern})*$`;
+  return new RegExp(selectorPattern).test(trimmed);
+}
+
+function normalizeRoleSelector(rawValue, role, strict, errors) {
+  const normalized = normalizeCommonDataTestIdPattern(rawValue, role);
+  if (!normalized.value) return '';
+  if (isValidCssSelector(normalized.value)) return normalized.value;
+  if (strict && errors) errors[role] = 'Invalid CSS selector';
+  return '';
+}
+
+function validateTargetSelectors(input = {}, legacy = {}, options = {}) {
+  const strict = options?.strict === true;
+  const errors = {};
+  const raw = input && typeof input === 'object' ? input : {};
+  const old = legacy && typeof legacy === 'object' ? legacy : {};
+  const watchedFallback = typeof old.watchedElementSelector === 'string' && old.watchedElementSelector.trim()
+    ? old.watchedElementSelector.trim()
+    : DEFAULT_SETTINGS.targetSelectors.watchedElement;
+
+  const selectors = {
+    promptInput: normalizeRoleSelector(raw.promptInput, 'promptInput', strict, errors),
+    sendButton: normalizeRoleSelector(raw.sendButton, 'sendButton', strict, errors),
+    stopButton: normalizeRoleSelector(raw.stopButton, 'stopButton', strict, errors),
+    watchedElement: '',
+  };
+
+  const watchedRaw = typeof raw.watchedElement === 'string' && raw.watchedElement.trim()
+    ? raw.watchedElement.trim()
+    : watchedFallback;
+  selectors.watchedElement = normalizeRoleSelector(watchedRaw, 'watchedElement', strict, errors) || DEFAULT_SETTINGS.targetSelectors.watchedElement;
+
+  return { selectors, errors };
+}
+
 function validateMemorySettings(input = {}) {
   const memoryInput = input && typeof input === 'object' ? input : {};
   const includeClasses = Array.isArray(memoryInput.includeClasses)
@@ -272,8 +371,15 @@ function validateMemorySettings(input = {}) {
   };
 }
 
-function validateSettings(input = {}) {
+function validateSettings(input = {}, options = {}) {
   const sanitizedUrl = sanitizeUrlOrEmpty(input.openNewChatPerPromptUrl);
+  const targetResult = validateTargetSelectors(input.targetSelectors, input, options);
+  const targetSelectors = targetResult.selectors;
+  if (options?.strict === true && Object.keys(targetResult.errors || {}).length > 0) {
+    const err = new Error('Invalid target selector');
+    err.validationErrors = targetResult.errors;
+    throw err;
+  }
   const rawStableMin = coerceNumber(input.stableMinMs ?? input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMinMs);
   const rawStableMax = coerceNumber(input.stableMaxMs ?? input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMaxMs);
   const stableMinMs = Math.min(rawStableMin, rawStableMax);
@@ -292,9 +398,8 @@ function validateSettings(input = {}) {
     theme: input.theme === 'light' ? 'light' : 'dark',
     autoConfirmDialogs: input.autoConfirmDialogs === true,
     enableWatchedElementGate: input.enableWatchedElementGate === true,
-    watchedElementSelector: typeof input.watchedElementSelector === 'string'
-      ? input.watchedElementSelector.trim()
-      : DEFAULT_SETTINGS.watchedElementSelector,
+    watchedElementSelector: targetSelectors.watchedElement,
+    targetSelectors,
     refreshTabBeforeEachPrompt: input.refreshTabBeforeEachPrompt === true,
     parallelOneTabPerPrompt: input.parallelOneTabPerPrompt === true,
     enableRetryOnFailure: input.enableRetryOnFailure !== false,
@@ -891,8 +996,7 @@ async function sendNextPromptForTabSession(tabId) {
       if (!targetUrl) {
         throw new Error('Active tab not supported for new chat navigation.');
       }
-      await chrome.tabs.update(tabId, { url: targetUrl });
-      await waitForTabLoad(tabId);
+      await waitForTriggeredTabLoad(tabId, () => chrome.tabs.update(tabId, { url: targetUrl }));
       await ensureContentScriptReady(tabId);
     } else if (session.options?.refreshTabBeforeEachPrompt) {
       await refreshTabInBackgroundBeforeSend(tabId);
@@ -1194,7 +1298,7 @@ async function saveSettings(newSettings) {
   if (!Object.prototype.hasOwnProperty.call(incomingMemory, 'storedToken')) {
     nextMemory.storedToken = currentMemory.storedToken || '';
   }
-  const merged = validateSettings({ ...state.options, ...newSettings, memory: nextMemory });
+  const merged = validateSettings({ ...state.options, ...newSettings, memory: nextMemory }, { strict: true });
   state.options = merged;
   applyDebugLoggingSetting(state.options?.debugLoggingEnabled === true);
   try {
@@ -1205,6 +1309,16 @@ async function saveSettings(newSettings) {
   }
   await broadcastSettingsUpdate();
   await ensureAutoConfirmContentScript();
+}
+
+if (self.__PROMPT_QUEUE_TEST__) {
+  self.PromptQueueBackgroundTest = {
+    DEFAULT_SETTINGS,
+    saveSettings,
+    validateSettings,
+    validateTargetSelectors,
+    waitForTriggeredTabLoad,
+  };
 }
 
 async function broadcastSettingsUpdate() {
@@ -1352,7 +1466,7 @@ async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
-      files: ["content.js"],
+      files: ["content-targets.js", "content.js"],
     });
   } catch (err) {
     console.error("Failed to inject content script:", err);
@@ -1428,6 +1542,55 @@ function waitForTabLoad(tabId) {
   });
 }
 
+function waitForTriggeredTabLoad(tabId, triggerLoad, { timeoutMs = 20000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let triggerStarted = false;
+    let sawLoading = false;
+    let timeoutId = null;
+
+    const cleanup = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      chrome.tabs.onUpdated.removeListener(listener);
+    };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId !== tabId || !triggerStarted) return;
+      if (changeInfo.status === 'loading') {
+        sawLoading = true;
+        return;
+      }
+      if (changeInfo.status === 'complete' && sawLoading) {
+        finish(true);
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+    timeoutId = setTimeout(() => finish(false), timeoutMs);
+
+    Promise.resolve()
+      .then(async () => {
+        triggerStarted = true;
+        await triggerLoad();
+      })
+      .catch(fail);
+  });
+}
+
 async function refreshTabInBackgroundBeforeSend(tabId) {
   const before = await chrome.tabs.get(tabId);
   if (!isSupportedUrl(before?.url)) {
@@ -1442,8 +1605,7 @@ async function refreshTabInBackgroundBeforeSend(tabId) {
     discarded: before.discarded === true,
   });
 
-  await chrome.tabs.reload(tabId);
-  const loaded = await waitForTabLoad(tabId);
+  const loaded = await waitForTriggeredTabLoad(tabId, () => chrome.tabs.reload(tabId));
   if (!loaded) {
     throw new Error('Timed out waiting for background tab reload.');
   }
@@ -2590,8 +2752,7 @@ async function sendNextPrompt() {
       if (!targetUrl) {
         throw new Error('Active tab not supported for new chat navigation.');
       }
-      await chrome.tabs.update(state.tabId, { url: targetUrl });
-      await waitForTabLoad(state.tabId);
+      await waitForTriggeredTabLoad(state.tabId, () => chrome.tabs.update(state.tabId, { url: targetUrl }));
       await ensureContentScriptReady(state.tabId);
     } else if (state.options?.refreshTabBeforeEachPrompt) {
       await refreshTabInBackgroundBeforeSend(state.tabId);
@@ -3379,8 +3540,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "SAVE_SETTINGS": {
-          await saveSettings(message.settings || {});
-          sendResponse({ ok: true, settings: publicSettings() });
+          try {
+            await saveSettings(message.settings || {});
+            sendResponse({ ok: true, settings: publicSettings() });
+          } catch (error) {
+            sendResponse({
+              ok: false,
+              error: error?.message || 'Failed to save settings',
+              validationErrors: error?.validationErrors || null,
+            });
+          }
           return;
         }
         case "GET_SETTINGS": {
@@ -3418,6 +3587,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             behavior: message.behavior || 'prepend_or_replace_managed_block',
           });
           sendResponse({ ok: result?.ok !== false, result });
+          return;
+        }
+        case "START_TARGET_PICKER": {
+          const tabId = Number(message?.tabId);
+          if (!Number.isInteger(tabId)) {
+            sendResponse({ ok: false, error: 'Missing tabId' });
+            return;
+          }
+          const result = await sendToContent(tabId, {
+            type: 'START_TARGET_PICKER',
+            role: message.role || 'promptInput',
+          });
+          sendResponse(result);
+          return;
+        }
+        case "CANCEL_TARGET_PICKER": {
+          const tabId = Number(message?.tabId);
+          if (!Number.isInteger(tabId)) {
+            sendResponse({ ok: false, error: 'Missing tabId' });
+            return;
+          }
+          const result = await sendToContent(tabId, {
+            type: 'CANCEL_TARGET_PICKER',
+            role: message.role || '',
+          });
+          sendResponse(result);
           return;
         }
         case "MEMORY_HEALTH_CHECK": {
