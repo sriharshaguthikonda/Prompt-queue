@@ -1,5 +1,6 @@
 (function () {
-  if (window.PromptQueueTargets) return;
+  const TARGETS_VERSION = '2026-06-01.no-reload-v2';
+  if (window.PromptQueueTargets?.version === TARGETS_VERSION) return;
 
   const DEFAULT_TARGET_SELECTORS = Object.freeze({
     promptInput: '',
@@ -43,9 +44,11 @@
         'button[type="submit"]',
       ],
       stopButtonCandidates: [
+        'button#composer-submit-button[aria-label*="Stop"]',
         'button[data-testid="stop-button"]',
         'button[aria-label="Stop streaming"]',
         'button[aria-label="Stop generating"]',
+        'button[aria-label*="Stop"]',
       ],
       watchedElementCandidates: [
         'button[data-testid="copy-turn-action-button"]',
@@ -490,6 +493,7 @@
   }
 
   window.PromptQueueTargets = {
+    version: TARGETS_VERSION,
     DEFAULT_TARGET_SELECTORS,
     buildCssSelector,
     canonicalizeRoleElement,

@@ -190,6 +190,8 @@ const DEFAULT_SETTINGS = {
   openNewChatPerPromptUrl: '',
   memory: DEFAULT_MEMORY_SETTINGS,
 };
+const CONTENT_SCRIPT_VERSION = '2026-06-01.no-reload-v2';
+const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
 const HISTORY_STORAGE_KEY = STORAGE_KEYS.HISTORY || 'aiTaskSequencerHistory';
@@ -1003,7 +1005,7 @@ async function sendNextPromptForTabSession(tabId) {
     }
 
     await sendToContent(tabId, {
-      type: 'SEND_PROMPT',
+      type: CONTENT_SEND_PROMPT_MESSAGE,
       text: promptText,
       index: session.currentIndex,
       total: session.prompts.length,
@@ -1095,14 +1097,21 @@ async function testContentScriptConnection(tabId) {
 
       chrome.tabs.sendMessage(
         tabId,
-        { type: "PING" },
+        { type: "PING_CURRENT", expectedVersion: CONTENT_SCRIPT_VERSION },
         (response) => {
           clearTimeout(timeoutId);
           if (chrome.runtime.lastError) {
             console.error('[TestConnection] Error:', chrome.runtime.lastError);
             resolve(false);
           } else {
-            resolve(response?.ok === true);
+            const versionMatches = response?.ok === true && response?.version === CONTENT_SCRIPT_VERSION;
+            if (!versionMatches) {
+              console.warn('[TestConnection] Content script stale or missing version', {
+                expectedVersion: CONTENT_SCRIPT_VERSION,
+                actualVersion: response?.version || null,
+              });
+            }
+            resolve(versionMatches);
           }
         }
       );
@@ -1113,16 +1122,37 @@ async function testContentScriptConnection(tabId) {
   });
 }
 
+async function waitForContentScriptReady(tabId, { timeoutMs = 6000, pollMs = 150 } = {}) {
+  const startedAt = Date.now();
+  let attempts = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    attempts += 1;
+    if (await testContentScriptConnection(tabId)) {
+      console.log('[EnsureContentScript] Current content script ready', {
+        tabId,
+        attempts,
+        elapsedMs: Date.now() - startedAt,
+        version: CONTENT_SCRIPT_VERSION,
+      });
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+  console.error('[EnsureContentScript] Timed out waiting for current content script', {
+    tabId,
+    attempts,
+    timeoutMs,
+    version: CONTENT_SCRIPT_VERSION,
+  });
+  return false;
+}
+
 async function ensureContentScriptReady(tabId) {
   const isConnected = await testContentScriptConnection(tabId);
-  if (!isConnected) {
-    await injectContentScript(tabId);
-    // Wait a bit for injection
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const stillConnected = await testContentScriptConnection(tabId);
-    return stillConnected;
-  }
-  return true;
+  if (isConnected) return true;
+
+  await injectContentScript(tabId);
+  return waitForContentScriptReady(tabId);
 }
 
 // ============ RECOVERY LOGIC ============
@@ -1318,6 +1348,8 @@ if (self.__PROMPT_QUEUE_TEST__) {
     validateSettings,
     validateTargetSelectors,
     waitForTriggeredTabLoad,
+    testContentScriptConnection,
+    ensureContentScriptReady,
   };
 }
 
@@ -2250,14 +2282,14 @@ async function dispatchParallelWorkerPrompt(workerId) {
     );
 
     const sendAck = await sendToContent(worker.tabId, {
-      type: 'SEND_PROMPT',
+      type: CONTENT_SEND_PROMPT_MESSAGE,
       text: promptText,
       index: promptIndex,
       total: worker.prompts.length,
       options: getParallelDispatchOptions(),
       promptId,
     });
-    console.log('[Parallel] SEND_PROMPT acknowledged by content script', {
+    console.log('[Parallel] SEND_PROMPT_CURRENT acknowledged by content script', {
       workerId,
       tabId: worker.tabId,
       promptIndex,
@@ -2759,7 +2791,7 @@ async function sendNextPrompt() {
     }
 
     await sendToContent(state.tabId, { 
-      type: "SEND_PROMPT", 
+      type: CONTENT_SEND_PROMPT_MESSAGE,
       text: promptText, 
       index: state.currentIndex, 
       total: state.prompts.length, 

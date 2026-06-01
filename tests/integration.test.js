@@ -310,6 +310,41 @@ describe('Content Script Integration', () => {
 
       await expect(promise).resolves.toBeUndefined();
     });
+
+    it('should complete from a stable ChatGPT response when the empty composer keeps send disabled', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt" disabled>Send</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+            Assistant answer
+            <button data-testid="copy-turn-action-button" aria-label="Copy response">Copy response</button>
+          </article>
+        </main>
+      `;
+      const sendBtn = document.querySelector('#composer-submit-button');
+      const messagesContainer = document.querySelector('main');
+
+      const promise = waitForCompletion({
+        sendButton: sendBtn,
+        stopButtonSelector: 'button[data-testid="stop-button"]',
+        messagesContainer,
+        stableMs: 500,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableMaxWaitTimeout: false,
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+      });
+
+      jest.advanceTimersByTime(700);
+      await expect(promise).resolves.toBeUndefined();
+    });
   });
 
   describe('Message Listener', () => {
@@ -395,6 +430,8 @@ describe('Content Script Integration', () => {
       setTextInInput(textarea, 'Test text');
 
       expect(textarea.value).toBe('Test text');
+      expect(textarea.selectionStart).toBe('Test text'.length);
+      expect(textarea.selectionEnd).toBe('Test text'.length);
       document.body.removeChild(textarea);
     });
 
@@ -406,6 +443,29 @@ describe('Content Script Integration', () => {
       setTextInInput(div, 'Test text');
 
       expect(div.textContent).toBe('Test text');
+      document.body.removeChild(div);
+    });
+
+    it('should replace selected text in plain contenteditable using editor input semantics', () => {
+      const div = document.createElement('div');
+      div.contentEditable = 'true';
+      div.textContent = 'old text';
+      document.body.appendChild(div);
+      const originalExecCommand = document.execCommand;
+      document.execCommand = jest.fn(() => false);
+      let inputEventFired = false;
+      div.addEventListener('input', () => {
+        inputEventFired = true;
+      });
+
+      try {
+        setTextInInput(div, 'new text');
+      } finally {
+        document.execCommand = originalExecCommand;
+      }
+
+      expect(div.textContent).toBe('new text');
+      expect(inputEventFired).toBe(true);
       document.body.removeChild(div);
     });
 
@@ -747,6 +807,35 @@ describe('Background settings sanitization', () => {
       stopButton: 'button[data-testid="stop-button"]',
       watchedElement: 'button[data-testid="copy-turn-action-button"]',
     });
+  });
+
+  it('should reinject when an already-open tab has a stale content script version', async () => {
+    const sendResponses = [
+      { ok: true, version: 'old-version' },
+      { ok: true, version: '2026-06-01.no-reload-v2' },
+    ];
+    chrome.tabs.sendMessage.mockImplementation((_tabId, _message, callback) => {
+      callback(sendResponses.shift() || { ok: true, version: '2026-06-01.no-reload-v2' });
+      return Promise.resolve();
+    });
+    chrome.scripting.executeScript.mockResolvedValue([]);
+
+    try {
+      await expect(global.PromptQueueBackgroundTest.ensureContentScriptReady(7)).resolves.toBe(true);
+
+      expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
+        target: { tabId: 7, allFrames: false },
+        files: ['content-targets.js', 'content.js'],
+      });
+      expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
+        7,
+        { type: 'PING_CURRENT', expectedVersion: '2026-06-01.no-reload-v2' },
+        expect.any(Function),
+      );
+    } finally {
+      chrome.tabs.sendMessage.mockReset();
+      chrome.scripting.executeScript.mockReset();
+    }
   });
 
   it('should wait for a fresh tab load cycle after a triggered reload', async () => {

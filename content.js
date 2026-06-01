@@ -41,8 +41,9 @@
 })();
 
 (function () {
-  if (window.__aiTaskSequencerInjected) return;
-  window.__aiTaskSequencerInjected = true;
+  const CONTENT_SCRIPT_VERSION = '2026-06-01.no-reload-v2';
+  if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
+  window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
   let currentPromptId = null; // Track per-prompt instead of global flag
   let automationAborted = false; // Signal to queued prompts to stop
@@ -288,8 +289,7 @@
     el.focus({ preventScroll: true });
     if (typeof document.execCommand !== 'function') {
       el.textContent = text;
-      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      dispatchComposerInputEvents(el, text);
       return;
     }
     const selection = window.getSelection();
@@ -301,10 +301,13 @@
 
     if (el.getAttribute('contenteditable') === 'plaintext-only') {
       const insertTextOk = document.execCommand('insertText', false, String(text || ''));
-      if (insertTextOk) return;
+      if (insertTextOk) {
+        dispatchComposerInputEvents(el, text);
+        collapseSelectionToEnd(el);
+        return;
+      }
       el.textContent = text;
-      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      dispatchComposerInputEvents(el, text);
       return;
     }
 
@@ -315,7 +318,11 @@
       .join('');
 
     const insertHtmlOk = document.execCommand('insertHTML', false, paragraphs);
-    if (insertHtmlOk) return;
+    if (insertHtmlOk) {
+      dispatchComposerInputEvents(el, text);
+      collapseSelectionToEnd(el);
+      return;
+    }
 
     // Fallback: chunked insertText to avoid length limits
     const chunks = [];
@@ -327,13 +334,89 @@
       for (const chunk of chunks) {
         document.execCommand('insertText', false, chunk);
       }
+      dispatchComposerInputEvents(el, text);
+      collapseSelectionToEnd(el);
       return;
     } catch (_) {
       // Last resort: set textContent and dispatch events
       el.textContent = text;
-      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
+      dispatchComposerInputEvents(el, text);
     }
+  }
+
+  function dispatchComposerInputEvents(el, text) {
+    const eventInit = {
+      data: String(text || ''),
+      inputType: 'insertText',
+      bubbles: true,
+      cancelable: true,
+    };
+    try {
+      el.dispatchEvent(new InputEvent('input', eventInit));
+    } catch (_) {
+      el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
+    }
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function collapseSelectionToEnd(el) {
+    try {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    } catch (_) {}
+  }
+
+  function replacePlainContentEditableText(el, text) {
+    const value = String(text || '');
+    el.focus({ preventScroll: true });
+    try {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, value)) {
+        dispatchComposerInputEvents(el, value);
+        collapseSelectionToEnd(el);
+        return;
+      }
+      range.deleteContents();
+      range.insertNode(document.createTextNode(value));
+      collapseSelectionToEnd(el);
+    } catch (_) {
+      el.textContent = value;
+      collapseSelectionToEnd(el);
+    }
+    dispatchComposerInputEvents(el, value);
+  }
+
+  function setNativeInputValue(el, text) {
+    const value = String(text || '');
+    const proto = el instanceof HTMLTextAreaElement
+      ? HTMLTextAreaElement.prototype
+      : el instanceof HTMLInputElement
+        ? HTMLInputElement.prototype
+        : null;
+    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
+    el.focus({ preventScroll: true });
+    if (descriptor && descriptor.set) {
+      descriptor.set.call(el, value);
+    } else {
+      el.value = value;
+    }
+    try {
+      if (typeof el.setSelectionRange === 'function') {
+        el.setSelectionRange(value.length, value.length);
+      } else if ('selectionStart' in el && 'selectionEnd' in el) {
+        el.selectionStart = value.length;
+        el.selectionEnd = value.length;
+      }
+    } catch (_) {}
+    dispatchComposerInputEvents(el, value);
   }
 
   function setTextInInput(el, text) {
@@ -343,23 +426,12 @@
       if (el.id === 'prompt-textarea' || el.classList.contains('ProseMirror')) {
         setProseMirrorText(el, text);
       } else {
-        el.focus();
-        el.textContent = text;
-        el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
+        replacePlainContentEditableText(el, text);
       }
       return;
     }
 
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(el, text);
-    } else {
-      el.value = text;
-    }
-    el.focus();
-    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+    setNativeInputValue(el, text);
   }
 
   function getInputCurrentText(el) {
@@ -1113,11 +1185,13 @@
         const stableFor = Date.now() - lastChange;
         const stopBtn = stopButtonSelector ? queryOneSafe(stopButtonSelector) : null;
         const stopBtnPresent = stopBtn && isButtonEnabled(stopBtn);
+        let activeGenerationPresent = stopBtnPresent;
 
         let currentSendButton = sendButton;
         let canSend = isButtonEnabled(currentSendButton);
         if (site === 'chatgpt') {
           currentSendButton = findSendButtonForSite('chatgpt', inputEl || findPromptInput()) || sendButton;
+          activeGenerationPresent = stopBtnPresent || isChatGPTThinking();
           canSend = isButtonEnabled(currentSendButton) || isChatGPTReadyToSend(inputEl || findPromptInput());
         } else if (site === 'gemini') {
           canSend = isGeminiDone();
@@ -1162,7 +1236,9 @@
 
         const domStableEnough = stableFor >= effectiveStableMs;
         const responseStableEnough = site === 'chatgpt' && responseSnapshot.ok && responseStableFor >= effectiveStableMs;
-        const completeEnough = (domStableEnough || responseStableEnough) && !stopBtnPresent && canSend && watchGateSatisfied;
+        const chatGptResponseComplete = responseStableEnough && !activeGenerationPresent && watchGateSatisfied;
+        const domComplete = domStableEnough && !activeGenerationPresent && canSend && watchGateSatisfied;
+        const completeEnough = site === 'chatgpt' ? (chatGptResponseComplete || domComplete) : domComplete;
 
         if (elapsed - lastStatusAt >= 5000) {
           lastStatusAt = elapsed;
@@ -1174,8 +1250,10 @@
             responseCaptured: responseSnapshot.ok,
             responseLength: responseSnapshot.responseLength || 0,
             stopBtnPresent,
+            activeGenerationPresent,
             hasCurrentSendButton: !!currentSendButton,
             canSend,
+            chatGptResponseComplete,
             watchGateSatisfied,
           });
         }
@@ -1188,7 +1266,9 @@
             responseStableFor,
             responseCaptured: responseSnapshot.ok,
             stopBtnPresent, 
+            activeGenerationPresent,
             canSend,
+            chatGptResponseComplete,
             watchGateSatisfied
           });
           cleanup();
@@ -1882,7 +1962,13 @@
       try {
         if (message?.type === 'PING') {
           console.log('[MessageListener] PING received');
-          sendResponse({ ok: true, timestamp: Date.now() });
+          sendResponse({ ok: true, timestamp: Date.now(), version: CONTENT_SCRIPT_VERSION });
+          return;
+        }
+
+        if (message?.type === 'PING_CURRENT') {
+          console.log('[MessageListener] PING_CURRENT received');
+          sendResponse({ ok: true, timestamp: Date.now(), version: CONTENT_SCRIPT_VERSION });
           return;
         }
 
@@ -1906,7 +1992,7 @@
           return;
         }
 
-        if (message?.type === 'SEND_PROMPT' && typeof message.text === 'string') {
+        if ((message?.type === 'SEND_PROMPT_CURRENT' || message?.type === 'SEND_PROMPT') && typeof message.text === 'string') {
           const promptId = message.promptId || Math.random();
           if (message.options && typeof message.options.autoConfirmDialogs === 'boolean') {
             setAutoConfirmDialogs(message.options.autoConfirmDialogs, 'send_prompt');
@@ -1954,6 +2040,6 @@
     return true;
   });
 
-  chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'CONTENT_READY', version: CONTENT_SCRIPT_VERSION }).catch(() => {});
   refreshAutoConfirmSetting('content_ready');
 })();
