@@ -1,0 +1,123 @@
+﻿{
+    "schemaVersion":  "repo-map-artifact-branch/v1",
+    "repo":  "sriharshaguthikonda/Prompt-queue",
+    "generatedAt":  "2026-06-01T06:06:44.0847698Z",
+    "source":  "Repo_maps GitHub footprint publish runner",
+    "publishBranch":  "repo-intel-artifacts",
+    "mapCount":  16,
+    "totalBytes":  6220178,
+    "maps":  [
+                 {
+                     "name":  "Messing-with-recovery-mechanism",
+                     "ref":  "refs/remotes/origin/Messing-with-recovery-mechanism",
+                     "commit":  "12aaec1f6a5432c3597591b1aaa46fe58c423fda",
+                     "path":  ".repo-intel/branches/remote-origin/messing-with-recovery-mechanism__12aaec1f6a54/repo-map-full.json",
+                     "bytes":  242665
+                 },
+                 {
+                     "name":  "codex-agent-worktree",
+                     "ref":  "refs/remotes/origin/codex-agent-worktree",
+                     "commit":  "cd6319d37bc9ae5ec631f90514a91e26a67916ad",
+                     "path":  ".repo-intel/branches/remote-origin/codex-agent-worktree__cd6319d37bc9/repo-map-full.json",
+                     "bytes":  463339
+                 },
+                 {
+                     "name":  "codex/memory-pack-sidepanel-native",
+                     "ref":  "refs/remotes/origin/codex/memory-pack-sidepanel-native",
+                     "commit":  "77c710e780a27a209deb7fcff33c006c4d69203c",
+                     "path":  ".repo-intel/branches/remote-origin/codex-memory-pack-sidepanel-native__77c710e780a2/repo-map-full.json",
+                     "bytes":  819528
+                 },
+                 {
+                     "name":  "codex/sidepanel-multisession",
+                     "ref":  "refs/remotes/origin/codex/sidepanel-multisession",
+                     "commit":  "e5b0ccefb1555dd9fe60a9fca01d9c2dd745d5d0",
+                     "path":  ".repo-intel/branches/remote-origin/codex-sidepanel-multisession__e5b0ccefb155/repo-map-full.json",
+                     "bytes":  527192
+                 },
+                 {
+                     "name":  "deletable",
+                     "ref":  "refs/remotes/origin/deletable",
+                     "commit":  "83a66465b80e616d20d0641062fb0d723fc16d6e",
+                     "path":  ".repo-intel/branches/remote-origin/deletable__83a66465b80e/repo-map-full.json",
+                     "bytes":  289748
+                 },
+                 {
+                     "name":  "fix-recovery-loop",
+                     "ref":  "refs/remotes/origin/fix-recovery-loop",
+                     "commit":  "4126af6a69ccbad4f47868d3cae662ebc6bc06ab",
+                     "path":  ".repo-intel/branches/remote-origin/fix-recovery-loop__4126af6a69cc/repo-map-full.json",
+                     "bytes":  53514
+                 },
+                 {
+                     "name":  "fix/parallel-completion-gating",
+                     "ref":  "refs/remotes/origin/fix/parallel-completion-gating",
+                     "commit":  "9bf01e1fd317725766e81a02e2f4412623bbc47d",
+                     "path":  ".repo-intel/branches/remote-origin/fix-parallel-completion-gating__9bf01e1fd317/repo-map-full.json",
+                     "bytes":  490179
+                 },
+                 {
+                     "name":  "main",
+                     "ref":  "refs/remotes/origin/main",
+                     "commit":  "8f3bfe4b5aaf22aa9386d4fd737938dc8ab18bec",
+                     "path":  ".repo-intel/branches/remote-origin/main__8f3bfe4b5aaf/repo-map-full.json",
+                     "bytes":  44260
+                 },
+                 {
+                     "name":  "memory-pack-ui",
+                     "ref":  "refs/remotes/origin/memory-pack-ui",
+                     "commit":  "486c6a411ff704758cfc101a149bbd1aa83661e3",
+                     "path":  ".repo-intel/branches/remote-origin/memory-pack-ui__486c6a411ff7/repo-map-full.json",
+                     "bytes":  89303
+                 },
+                 {
+                     "name":  "parallel-fanout-mode",
+                     "ref":  "refs/remotes/origin/parallel-fanout-mode",
+                     "commit":  "a9b88997e556a10dd3e4144ad61c67a866bec16b",
+                     "path":  ".repo-intel/branches/remote-origin/parallel-fanout-mode__a9b88997e556/repo-map-full.json",
+                     "bytes":  370739
+                 },
+                 {
+                     "name":  "parallel-foreground-send-option",
+                     "ref":  "refs/remotes/origin/parallel-foreground-send-option",
+                     "commit":  "54570ae76c3824966c1fc3a4a5fe0ca09c6b7187",
+                     "path":  ".repo-intel/branches/remote-origin/parallel-foreground-send-option__54570ae76c38/repo-map-full.json",
+                     "bytes":  398297
+                 },
+                 {
+                     "name":  "prompt-injection-research",
+                     "ref":  "refs/remotes/origin/prompt-injection-research",
+                     "commit":  "f6750e3b5e7562527a4bbe009168d660a75cf2a2",
+                     "path":  ".repo-intel/branches/remote-origin/prompt-injection-research__f6750e3b5e75/repo-map-full.json",
+                     "bytes":  400028
+                 },
+                 {
+                     "name":  "robust",
+                     "ref":  "refs/remotes/origin/robust",
+                     "commit":  "d3e92b4841ecea33c9aa35bfcbea7b9da54f6de1",
+                     "path":  ".repo-intel/branches/remote-origin/robust__d3e92b4841ec/repo-map-full.json",
+                     "bytes":  54399
+                 },
+                 {
+                     "name":  "sidebar",
+                     "ref":  "refs/remotes/origin/sidebar",
+                     "commit":  "7439a2702f112af90e1eec09b7fc5c118130e598",
+                     "path":  ".repo-intel/branches/remote-origin/sidebar__7439a2702f11/repo-map-full.json",
+                     "bytes":  214223
+                 },
+                 {
+                     "name":  "transcription-monitoring-feature",
+                     "ref":  "refs/remotes/origin/transcription-monitoring-feature",
+                     "commit":  "4d73c6dcab0de13f94c87b522ba4d87f9932c8c0",
+                     "path":  ".repo-intel/branches/remote-origin/transcription-monitoring-feature__4d73c6dcab0d/repo-map-full.json",
+                     "bytes":  299545
+                 },
+                 {
+                     "name":  "working-parallel-fanout-mode",
+                     "ref":  "refs/remotes/origin/working-parallel-fanout-mode",
+                     "commit":  "62f179b8f498073eb4c9d2aa1b0f5ed9c386adf8",
+                     "path":  ".repo-intel/branches/remote-origin/working-parallel-fanout-mode__62f179b8f498/repo-map-full.json",
+                     "bytes":  1402691
+                 }
+             ]
+}
