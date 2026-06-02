@@ -1,0 +1,78 @@
+# Phase: Send Timing + Cross-Tab Coordination + Status Controls
+
+Status: proposed
+
+## Goal
+
+Make send timing visible and configurable. Prevent simultaneous tab sends from stepping on each other. Disable duplicate-prompt typo mutation by default.
+
+## Current Gaps
+
+- Duplicate-prompt typo variation exists and is always applied by `popup-prompt-plan.js`.
+- Post-populate waits and pre-send quiet windows are hard-coded in `content.js`.
+- Parallel tab launch has random gaps, but there is no global cross-tab send lease around actual send dispatch.
+- Status badges exist, but timer/status UI does not show each wait step with clear color and countdown.
+
+## Default Settings
+
+- `enableDuplicateTypoVariants`: `false`
+- `postPopulateDelayMinMs`: `500`
+- `postPopulateDelayMaxMs`: `1500`
+- `crossTabSendLockEnabled`: `true`
+- `crossTabSendLockMinWaitMs`: `3000`
+- `crossTabSendLockMaxWaitMs`: `12000`
+
+Use the existing settings blob unless a durable live send-lock key is required.
+
+## Tasks
+
+### T1. Duplicate Prompt Variation Toggle
+
+- Add a checkbox in settings/options UI.
+- Default unchecked.
+- Thread the setting into `buildPromptLaunchPlan`.
+- Apply typo variants only when enabled.
+- Update prompt-plan tests for enabled and disabled behavior.
+
+### T2. Configurable Post-Populate/Pre-Send Delay
+
+- Add min/max delay controls.
+- Validate min <= max and clamp to safe bounds.
+- Pick a random delay per prompt after visible editor verification and before send click.
+- Show the countdown in the side panel.
+
+### T3. Global Cross-Tab Send Lease
+
+- Add UI controls for cross-tab random wait min/max.
+- Implement a background-owned send lease around actual `SEND_PROMPT` dispatch/start confirmation.
+- If another tab owns the lease, wait a random configurable delay before retrying lease acquisition.
+- Release the lease after send click is confirmed or after a timeout/error.
+- Avoid deadlocks when a tab closes, content script crashes, or automation stops.
+
+### T4. Step Status Timeline
+
+- Emit sanitized step updates: `waiting_for_tab`, `populating`, `post_populate_delay`, `pre_send_quiet_window`, `sending`, `waiting_for_response`, `completion_wait`, `retry_wait`, `paused`, `error`.
+- Include countdown/end timestamp when a timer is active.
+- Move debugging controls/status into the bottom debug collapsible panel.
+- Add per-step console logging toggle in the debug panel.
+- Add dry-run populate-without-send mode in the debug panel.
+- Add live selector health in the debug panel.
+- Render colors:
+  - gray: idle/complete
+  - blue: waiting/timer
+  - green: active send/populate
+  - amber: retry/pause
+  - red: error
+
+### T5. Later Candidate
+
+- Debug bundle export.
+
+## Acceptance
+
+- User can configure the post-populate/pre-send delay without editing code.
+- Duplicate prompts are not modified unless the checkbox is enabled.
+- Concurrent sending tabs do not click send at the same moment.
+- During every timer/wait, the side panel shows the current step and countdown.
+- Bottom debug panel owns selector health, dry-run, and per-step logging controls.
+- Tests cover settings validation, duplicate toggle, cross-tab lease timeout/release, and status rendering.

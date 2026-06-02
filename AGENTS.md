@@ -3,6 +3,18 @@
 ## Purpose
 This file defines baseline engineering workflow rules for contributors and coding agents in this repository.
 
+## Open Work
+See [TODO.md](TODO.md) for prioritized issues.
+Live query: `gh issue list --repo sriharshaguthikonda/Prompt-queue --state open`
+
+## Repo Intel
+<!-- BEGIN MANAGED REPO-INTEL -->
+- If `.repo-intel/manifest.json` exists, read it first.
+- For file-specific context, use `repo-map context slice --repo <repo> --path <file> --json`.
+- If `repo-map` is missing from PATH, use `C:\Users\deletable\.local\bin\repo-map.cmd` or `C:\AI\Repo_maps\.venv\Scripts\python.exe -m repo_maps.cli`.
+- Do not load whole maps by default.
+<!-- END MANAGED REPO-INTEL -->
+
 ## Daily Git Workflow
 1. Start from a clean state: `git status`.
 2. Sync local refs: `git fetch --all --prune`.
@@ -55,6 +67,7 @@ This file defines baseline engineering workflow rules for contributors and codin
 - Never commit secrets, tokens, credentials, or local machine paths unless required and reviewed.
 - Never use destructive Git commands on shared work without explicit approval.
 - Keep changes scoped to the task; do not rewrite unrelated files.
+- Keep generic scripts and UI files modular. Avoid growing catch-all files; put new reusable behavior in focused modules and wire it through the existing owner.
 
 ## PR Readiness Checklist
 - Branch is rebased or merged with latest `main`.

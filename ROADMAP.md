@@ -9,15 +9,33 @@ Current sidepanel branch:
 - Branch: `codex/sidepanel-multisession`
 - Working branch for this phase: `codex/memory-pack-sidepanel-native`
 - UI entry: `manifest.json` -> `side_panel.default_path = popup.html`
-- Main files: `background.js`, `content.js`, `popup.html`, `popup.js`, `popup-settings.js`, `popup-history.js`, `styles.css`
+- Main files: `background.js`, `content.js`, `content-targets.js`, `popup.html`, `popup.js`, `popup-settings.js`, `popup-history.js`, `styles.css`
 - Native messaging scaffold already exists for transcription monitoring: `native_host.py`, `install_native_host.bat`, `native_host.example.json`
 
 ## Active Phase
 
 | Phase | Plan | Status |
 |---|---|---|
-| ChatGPT send regression + native host install incident | [plans/incident-2026-05-31-chatgpt-send-native-host.md](plans/incident-2026-05-31-chatgpt-send-native-host.md) | in progress |
+| ChatGPT send regression + native host install incident | [plans/incident-2026-05-31-chatgpt-send-native-host.md](plans/incident-2026-05-31-chatgpt-send-native-host.md) | implemented in code; live verify + residual hardening pending |
+| ChatGPT send hardening + composer visibility | [plans/phase-chatgpt-send-hardening.md](plans/phase-chatgpt-send-hardening.md) | in progress |
 | Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; automated tests pass; manual browser smokes pending |
+
+## Planned Hardening Phases
+
+| Phase | Plan | Status |
+|---|---|---|
+| Content/send-path modularization | [plans/phase-content-script-modularization.md](plans/phase-content-script-modularization.md) | proposed |
+| Send timing + cross-tab coordination + status controls | [plans/phase-send-timing-status-controls.md](plans/phase-send-timing-status-controls.md) | proposed |
+
+Default choices for the timing/status phase unless overridden in `Q and A.md`:
+
+- Post-populate/pre-send delay: configurable random window, default 0.5-1.5 seconds.
+- Duplicate prompt typo variation: behind `enableDuplicateTypoVariants`, default off.
+- Cross-tab send lease: enabled for concurrent tab sends, with UI-configurable random wait range. Initial default: 3-12 seconds.
+- Step status colors: gray idle, blue waiting/timer, green active send, amber retry/pause, red error.
+- ChatGPT composer insertion: prefer visible ProseMirror/contenteditable editor and do not rely on hidden fallback textarea for success.
+
+User-approved debug-panel follow-ups captured in `Q and A.md`: move debugging controls/status into the bottom debug collapsible panel, add per-step console logging, add live selector health there, and add dry-run populate-without-send there. Debug bundle export remains a later candidate.
 
 ## Open Issue Phases
 
