@@ -345,6 +345,41 @@ describe('Content Script Integration', () => {
       jest.advanceTimersByTime(700);
       await expect(promise).resolves.toBeUndefined();
     });
+
+    it('should complete when ChatGPT leaves a stop-button-shaped composer button after response stability', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop answering">Stop</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+            Assistant answer
+            <button data-testid="copy-turn-action-button" aria-label="Copy response">Copy response</button>
+          </article>
+        </main>
+      `;
+      const composerButton = document.querySelector('#composer-submit-button');
+      const messagesContainer = document.querySelector('main');
+
+      const promise = waitForCompletion({
+        sendButton: composerButton,
+        stopButtonSelector: 'button[data-testid="stop-button"]',
+        messagesContainer,
+        stableMs: 500,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableMaxWaitTimeout: false,
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+      });
+
+      jest.advanceTimersByTime(700);
+      await expect(promise).resolves.toBeUndefined();
+    });
   });
 
   describe('Message Listener', () => {

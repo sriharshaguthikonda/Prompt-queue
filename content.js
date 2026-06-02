@@ -711,7 +711,7 @@
     return false;
   }
 
-  function isChatGPTThinking() {
+  function getChatGPTThinkingSignals() {
     // Ignore stale indicators in older turns; only tail turns can block sending.
     const tailTurns = getTailConversationTurns(2);
     const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
@@ -721,7 +721,18 @@
     const stopPresent = (stopSelector ? queryOneSafe(stopSelector) : null)
       || queryOneSafe('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
     const confirmVisible = isConfirmDialogVisible();
-    return !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible;
+    return {
+      loadingShimmer: !!loadingShimmer,
+      thinkingIndicator: !!thinkingIndicator,
+      activeToolStatus: !!activeToolStatus,
+      stopPresent: !!stopPresent,
+      confirmVisible,
+      active: !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible,
+    };
+  }
+
+  function isChatGPTThinking() {
+    return getChatGPTThinkingSignals().active;
   }
 
   function waitForChatGPTSendWindow({ sendButton, inputEl, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
@@ -1051,12 +1062,14 @@
         const stopBtn = stopButtonSelector ? queryOneSafe(stopButtonSelector) : null;
         const stopBtnPresent = stopBtn && isButtonEnabled(stopBtn);
         let activeGenerationPresent = stopBtnPresent;
+        let chatGptThinkingSignals = null;
 
         let currentSendButton = sendButton;
         let canSend = isButtonEnabled(currentSendButton);
         if (site === 'chatgpt') {
           currentSendButton = findSendButtonForSite('chatgpt', inputEl || findPromptInput()) || sendButton;
-          activeGenerationPresent = stopBtnPresent || isChatGPTThinking();
+          chatGptThinkingSignals = getChatGPTThinkingSignals();
+          activeGenerationPresent = stopBtnPresent || chatGptThinkingSignals.active;
           canSend = isButtonEnabled(currentSendButton) || isChatGPTReadyToSend(inputEl || findPromptInput());
         } else if (site === 'gemini') {
           canSend = isGeminiDone();
@@ -1101,7 +1114,19 @@
 
         const domStableEnough = stableFor >= effectiveStableMs;
         const responseStableEnough = site === 'chatgpt' && responseSnapshot.ok && responseStableFor >= effectiveStableMs;
-        const chatGptResponseComplete = responseStableEnough && !activeGenerationPresent && watchGateSatisfied;
+        const hardChatGptActivityPresent = !!(
+          chatGptThinkingSignals
+          && (chatGptThinkingSignals.loadingShimmer
+            || chatGptThinkingSignals.thinkingIndicator
+            || chatGptThinkingSignals.activeToolStatus
+            || chatGptThinkingSignals.confirmVisible)
+        );
+        const stopOnlyChatGptActivity = site === 'chatgpt'
+          && activeGenerationPresent
+          && !hardChatGptActivityPresent;
+        const chatGptResponseComplete = responseStableEnough
+          && watchGateSatisfied
+          && (!activeGenerationPresent || (stopOnlyChatGptActivity && canSend));
         const domComplete = domStableEnough && !activeGenerationPresent && canSend && watchGateSatisfied;
         const completeEnough = site === 'chatgpt' ? (chatGptResponseComplete || domComplete) : domComplete;
 
@@ -1123,6 +1148,8 @@
             responseLength: responseSnapshot.responseLength || 0,
             stopBtnPresent,
             activeGenerationPresent,
+            hardChatGptActivityPresent,
+            stopOnlyChatGptActivity,
             hasCurrentSendButton: !!currentSendButton,
             canSend,
             chatGptResponseComplete,
