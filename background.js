@@ -597,11 +597,24 @@ function emitProgressStatus(tabId, status) {
 
 function releaseSendLease(promptId, reason = 'unknown') {
   const leasePromptId = sendLease?.promptId ? String(sendLease.promptId) : '';
-  if (!sendLease || (promptId && leasePromptId && String(promptId) !== leasePromptId)) return false;
+  if (!sendLease) {
+    console.log('[SendLease] Release skipped; no active lease', { promptId: String(promptId || ''), reason });
+    return false;
+  }
+  if (promptId && leasePromptId && String(promptId) !== leasePromptId) {
+    console.log('[SendLease] Release skipped; prompt mismatch', {
+      requestedPromptId: String(promptId),
+      leasePromptId,
+      reason,
+      ownerTabId: sendLease.tabId,
+    });
+    return false;
+  }
   console.log('[SendLease] Released', {
     promptId: leasePromptId || String(promptId || ''),
     reason,
     heldMs: sendLease?.acquiredAt ? Date.now() - sendLease.acquiredAt : 0,
+    ownerTabId: sendLease.tabId,
   });
   if (sendLease.timeoutId) clearTimeout(sendLease.timeoutId);
   sendLease = null;
@@ -610,9 +623,27 @@ function releaseSendLease(promptId, reason = 'unknown') {
 
 async function acquireSendLease({ tabId, promptId, options = {}, statusTarget = null } = {}) {
   const enabled = options.crossTabSendLockEnabled !== false;
-  if (!enabled) return true;
+  if (!enabled) {
+    console.log('[SendLease] Disabled; dispatch proceeds without cross-tab wait', { tabId, promptId });
+    return true;
+  }
   const ownerId = `${tabId || 'tab'}:${promptId || Date.now()}`;
-  const leaseTimeoutMs = Math.max(30000, Number(options.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs) + 10000);
+  const wait = getSendLeaseWaitWindow(options);
+  const leaseTimeoutMs = Math.max(15000, wait.maxMs + 15000);
+  const startedAt = Date.now();
+  console.log('[SendLease] Acquire requested', {
+    tabId,
+    promptId,
+    waitMinMs: wait.minMs,
+    waitMaxMs: wait.maxMs,
+    leaseTimeoutMs,
+    activeLease: sendLease ? {
+      promptId: sendLease.promptId,
+      tabId: sendLease.tabId,
+      ageMs: Date.now() - sendLease.acquiredAt,
+      expiresInMs: Math.max(0, sendLease.expiresAt - Date.now()),
+    } : null,
+  });
   while (true) {
     if (!sendLease || sendLease.expiresAt <= Date.now() || sendLease.ownerId === ownerId) {
       if (sendLease?.expiresAt <= Date.now()) {
@@ -638,11 +669,16 @@ async function acquireSendLease({ tabId, promptId, options = {}, statusTarget = 
       };
       const progress = setStepStatusForPrompt({ promptId, senderTabId: tabId, status }) || statusTarget;
       if (progress?.status) emitProgressStatus(progress.tabId, progress.status);
-      console.log('[SendLease] Acquired', { tabId, promptId, leaseTimeoutMs });
+      console.log('[SendLease] Acquired', {
+        tabId,
+        promptId,
+        leaseTimeoutMs,
+        waitedMs: Date.now() - startedAt,
+        releaseTrigger: 'PROMPT_SUBMITTED',
+      });
       return true;
     }
 
-    const wait = getSendLeaseWaitWindow(options);
     const delayMs = randomBetweenMs(wait.minMs, wait.maxMs);
     const status = {
       step: 'waiting_for_tab',
@@ -659,7 +695,10 @@ async function acquireSendLease({ tabId, promptId, options = {}, statusTarget = 
       tabId,
       promptId,
       ownerTabId: sendLease.tabId,
+      ownerPromptId: sendLease.promptId,
       delayMs,
+      waitedMs: Date.now() - startedAt,
+      note: 'Wait is only for send-slot spacing, not response completion',
     });
     await new Promise((resolve) => setTimeout(resolve, delayMs));
   }
@@ -1530,6 +1569,14 @@ async function saveSettings(newSettings) {
 if (self.__PROMPT_QUEUE_TEST__) {
   self.PromptQueueBackgroundTest = {
     DEFAULT_SETTINGS,
+    acquireSendLease,
+    getSendLeaseSnapshot: () => sendLease ? {
+      promptId: sendLease.promptId,
+      tabId: sendLease.tabId,
+      expiresAt: sendLease.expiresAt,
+      acquiredAt: sendLease.acquiredAt,
+    } : null,
+    releaseSendLease,
     saveSettings,
     validateSettings,
     validateTargetSelectors,

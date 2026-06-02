@@ -1445,6 +1445,30 @@
       let sendBtn = findSendButtonForSite(site, inputEl, options);
       const stopBtnSel = resolveStopButtonSelector(site, options);
       let messagesContainer = queryFirst(cfg.messagesContainerCandidates);
+      let promptSubmittedNotified = false;
+
+      async function notifyPromptSubmitted(reason) {
+        if (promptSubmittedNotified) return;
+        promptSubmittedNotified = true;
+        try {
+          const submittedResp = await chrome.runtime.sendMessage({
+            type: 'PROMPT_SUBMITTED',
+            promptId,
+            reason,
+          });
+          console.log('[PromptQueue] PROMPT_SUBMITTED sent; background should release cross-tab send lock now', {
+            promptId,
+            reason,
+            response: submittedResp || null,
+          });
+        } catch (submissionErr) {
+          console.warn('[PromptQueue] Failed to send PROMPT_SUBMITTED', {
+            promptId,
+            reason,
+            error: submissionErr?.message || String(submissionErr),
+          });
+        }
+      }
       
       console.log('[PromptQueue] Initial element detection', { 
         hasInputEl: !!inputEl, 
@@ -1600,7 +1624,7 @@
             sendButton: sendBtn,
             inputEl,
             maxWaitMs: preSendMaxWaitMs,
-            quietWindowMs: 1200,
+            quietWindowMs: 120,
             pollMs: 250,
           });
         } catch (preSendErr) {
@@ -1635,6 +1659,7 @@
       });
       sendBtn = findSendButtonForSite(site, inputEl, options) || sendBtn;
       await clickSend(sendBtn, inputEl);
+      await notifyPromptSubmitted('send-click-dispatched');
 
       let attempt = 0;
       const maxAttempts = 2;
@@ -1719,6 +1744,7 @@
           }
           sendBtn = findSendButtonForSite(site, inputEl, options) || sendBtn;
           await clickSend(sendBtn, inputEl);
+          await notifyPromptSubmitted('retry-send-click-dispatched');
         }
       }
 
@@ -1739,19 +1765,7 @@
       }
       console.log('[PromptQueue] Stream detected or render found, proceeding to render verification', { promptId, streamStarted });
 
-      try {
-        const submittedResp = await chrome.runtime.sendMessage({
-          type: 'PROMPT_SUBMITTED',
-          promptId,
-          reason: 'stream-start-detected',
-        });
-        console.log('[PromptQueue] PROMPT_SUBMITTED sent', { promptId, response: submittedResp || null });
-      } catch (submissionErr) {
-        console.warn('[PromptQueue] Failed to send PROMPT_SUBMITTED', {
-          promptId,
-          error: submissionErr?.message || String(submissionErr),
-        });
-      }
+      await notifyPromptSubmitted('stream-start-detected');
 
       // Verify the prompt text appears in the rendered chat (e.g., ChatGPT message bubble)
       try {

@@ -432,13 +432,27 @@ describe('Content Script Integration', () => {
               maxWaitMs: 5000,
               pollIntervalMs: 50,
               enableMaxWaitTimeout: true,
+              postPopulateDelayMinMs: 0,
+              postPopulateDelayMaxMs: 0,
             },
           }),
         ).resolves.toMatchObject({ ok: true, accepted: true, promptId: '123' });
 
-        await jest.advanceTimersByTimeAsync(5000);
+        await jest.advanceTimersByTimeAsync(7000);
 
         expect(input.value).toBe('Test prompt');
+        const runtimeMessages = chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
+        const submittedIndex = runtimeMessages.findIndex((message) =>
+          message?.type === 'PROMPT_SUBMITTED'
+          && message?.promptId === '123'
+          && message?.reason === 'send-click-dispatched'
+        );
+        const completeIndex = runtimeMessages.findIndex((message) =>
+          message?.type === 'RESPONSE_COMPLETE'
+          && message?.promptId === '123'
+        );
+        expect(submittedIndex).toBeGreaterThan(-1);
+        expect(completeIndex === -1 || submittedIndex < completeIndex).toBe(true);
       } finally {
         jest.useRealTimers();
       }
@@ -965,6 +979,34 @@ describe('Background settings sanitization', () => {
       chrome.tabs.onUpdated.removeListener.mockReset();
       chrome.tabs.reload.mockReset();
     }
+  });
+
+  it('should release cross-tab send lease on prompt submission instead of response completion', async () => {
+    const helpers = global.PromptQueueBackgroundTest;
+    helpers.releaseSendLease(null, 'test-reset');
+
+    await helpers.acquireSendLease({
+      tabId: 101,
+      promptId: 'prompt-a',
+      options: {
+        crossTabSendLockEnabled: true,
+        crossTabSendLockMinWaitMs: 3000,
+        crossTabSendLockMaxWaitMs: 12000,
+      },
+    });
+
+    expect(helpers.getSendLeaseSnapshot()).toMatchObject({
+      tabId: 101,
+      promptId: 'prompt-a',
+    });
+    expect(helpers.releaseSendLease('wrong-prompt', 'prompt-submitted')).toBe(false);
+    expect(helpers.getSendLeaseSnapshot()).toMatchObject({
+      tabId: 101,
+      promptId: 'prompt-a',
+    });
+
+    expect(helpers.releaseSendLease('prompt-a', 'prompt-submitted')).toBe(true);
+    expect(helpers.getSendLeaseSnapshot()).toBeNull();
   });
 });
 });
