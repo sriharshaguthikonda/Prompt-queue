@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-06-01.no-reload-v2';
+  const CONTENT_SCRIPT_VERSION = '2026-06-02.modular-v1';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -82,6 +82,21 @@
   };
   const RESPONSE_CAPTURE_CHARS = 20000;
   const targetTools = window.PromptQueueTargets || {};
+  const inputTools = window.PromptQueueInput || {};
+  const {
+    getInputCurrentText,
+    getInputCurrentTextQuiet,
+    getInputTextLengthQuiet,
+    isContentEditableElement,
+    setTextInInput,
+  } = inputTools;
+  const statusTools = window.PromptQueueStatus || {};
+  const emitStepUpdate = typeof statusTools.emitStepUpdate === 'function'
+    ? statusTools.emitStepUpdate
+    : () => null;
+  const delayWithStatus = typeof statusTools.delayWithStatus === 'function'
+    ? statusTools.delayWithStatus
+    : ({ durationMs = 0 } = {}) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(durationMs) || 0)));
 
   function detectSite() {
     let host = location.hostname || '';
@@ -198,6 +213,28 @@
     return selectorsForSite(site).stopButtonCandidates?.[0] || null;
   }
 
+  function emitSelectorHealth(site, settings = currentTargetSettings) {
+    if (typeof targetTools.resolveSelector !== 'function') return;
+    const roles = ['promptInput', 'sendButton', 'stopButton', 'watchedElement'];
+    const health = {};
+    for (const role of roles) {
+      try {
+        const resolved = targetTools.resolveSelector(role, { site, settings });
+        health[role] = {
+          selector: resolved?.selector || '',
+          source: resolved?.source || 'none',
+          matchedCount: Number(resolved?.matchedCount || 0),
+          visible: !!resolved?.element,
+        };
+      } catch (error) {
+        health[role] = { selector: '', source: 'error', matchedCount: 0, visible: false, error: error?.message || String(error) };
+      }
+    }
+    try {
+      chrome.runtime.sendMessage({ type: 'SELECTOR_HEALTH', site, health });
+    } catch (_) {}
+  }
+
   function isButtonEnabled(btn) {
     if (!btn) return false;
     const disabled = btn.getAttribute('disabled') !== null
@@ -213,17 +250,6 @@
     if (style.display === 'none' || style.visibility === 'hidden') return false;
     const rect = el.getBoundingClientRect();
     return rect.width > 0 && rect.height > 0;
-  }
-
-  function isContentEditableElement(el) {
-    if (!el || !el.getAttribute) return false;
-    const attr = el.getAttribute('contenteditable');
-    return attr === ''
-      || attr === 'true'
-      || attr === 'plaintext-only'
-      || el.isContentEditable === true
-      || el.contentEditable === 'true'
-      || el.contentEditable === 'plaintext-only';
   }
 
   function normalizeButtonText(text) {
@@ -277,6 +303,7 @@
         setAutoConfirmDialogs(res.settings.autoConfirmDialogs === true, source);
         setDebugLoggingEnabled(res.settings.debugLoggingEnabled === true);
         currentTargetSettings = res.settings || {};
+        emitSelectorHealth(detectSite(), currentTargetSettings);
       }
     } catch (_) {}
   }
@@ -284,182 +311,6 @@
   setInterval(() => {
     maybeClickConfirmButtons('interval');
   }, 1000);
-
-  function setProseMirrorText(el, text) {
-    el.focus({ preventScroll: true });
-    if (typeof document.execCommand !== 'function') {
-      el.textContent = text;
-      dispatchComposerInputEvents(el, text);
-      return;
-    }
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    document.execCommand('delete', false, null);
-
-    if (el.getAttribute('contenteditable') === 'plaintext-only') {
-      const insertTextOk = document.execCommand('insertText', false, String(text || ''));
-      if (insertTextOk) {
-        dispatchComposerInputEvents(el, text);
-        collapseSelectionToEnd(el);
-        return;
-      }
-      el.textContent = text;
-      dispatchComposerInputEvents(el, text);
-      return;
-    }
-
-    const paragraphs = String(text || '')
-      .replace(/\r\n/g, '\n')
-      .split('\n')
-      .map((line) => line.length === 0 ? '<p><br></p>' : `<p>${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
-      .join('');
-
-    const insertHtmlOk = document.execCommand('insertHTML', false, paragraphs);
-    if (insertHtmlOk) {
-      dispatchComposerInputEvents(el, text);
-      collapseSelectionToEnd(el);
-      return;
-    }
-
-    // Fallback: chunked insertText to avoid length limits
-    const chunks = [];
-    const maxChunk = 4000;
-    for (let i = 0; i < text.length; i += maxChunk) {
-      chunks.push(text.slice(i, i + maxChunk));
-    }
-    try {
-      for (const chunk of chunks) {
-        document.execCommand('insertText', false, chunk);
-      }
-      dispatchComposerInputEvents(el, text);
-      collapseSelectionToEnd(el);
-      return;
-    } catch (_) {
-      // Last resort: set textContent and dispatch events
-      el.textContent = text;
-      dispatchComposerInputEvents(el, text);
-    }
-  }
-
-  function dispatchComposerInputEvents(el, text) {
-    const eventInit = {
-      data: String(text || ''),
-      inputType: 'insertText',
-      bubbles: true,
-      cancelable: true,
-    };
-    try {
-      el.dispatchEvent(new InputEvent('input', eventInit));
-    } catch (_) {
-      el.dispatchEvent(new Event('input', { bubbles: true, cancelable: true }));
-    }
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  function collapseSelectionToEnd(el) {
-    try {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      selection.removeAllRanges();
-      selection.addRange(range);
-    } catch (_) {}
-  }
-
-  function replacePlainContentEditableText(el, text) {
-    const value = String(text || '');
-    el.focus({ preventScroll: true });
-    try {
-      const selection = window.getSelection();
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      selection.removeAllRanges();
-      selection.addRange(range);
-      if (typeof document.execCommand === 'function' && document.execCommand('insertText', false, value)) {
-        dispatchComposerInputEvents(el, value);
-        collapseSelectionToEnd(el);
-        return;
-      }
-      range.deleteContents();
-      range.insertNode(document.createTextNode(value));
-      collapseSelectionToEnd(el);
-    } catch (_) {
-      el.textContent = value;
-      collapseSelectionToEnd(el);
-    }
-    dispatchComposerInputEvents(el, value);
-  }
-
-  function setNativeInputValue(el, text) {
-    const value = String(text || '');
-    const proto = el instanceof HTMLTextAreaElement
-      ? HTMLTextAreaElement.prototype
-      : el instanceof HTMLInputElement
-        ? HTMLInputElement.prototype
-        : null;
-    const descriptor = proto ? Object.getOwnPropertyDescriptor(proto, 'value') : null;
-    el.focus({ preventScroll: true });
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(el, value);
-    } else {
-      el.value = value;
-    }
-    try {
-      if (typeof el.setSelectionRange === 'function') {
-        el.setSelectionRange(value.length, value.length);
-      } else if ('selectionStart' in el && 'selectionEnd' in el) {
-        el.selectionStart = value.length;
-        el.selectionEnd = value.length;
-      }
-    } catch (_) {}
-    dispatchComposerInputEvents(el, value);
-  }
-
-  function setTextInInput(el, text) {
-    if (!el) throw new Error('Input element not found');
-    const isContentEditable = isContentEditableElement(el);
-    if (isContentEditable) {
-      if (el.id === 'prompt-textarea' || el.classList.contains('ProseMirror')) {
-        setProseMirrorText(el, text);
-      } else {
-        replacePlainContentEditableText(el, text);
-      }
-      return;
-    }
-
-    setNativeInputValue(el, text);
-  }
-
-  function getInputCurrentText(el) {
-    if (!el) {
-      console.warn('[GetInputCurrentText] Called with null/undefined element');
-      return '';
-    }
-    const isContentEditable = isContentEditableElement(el);
-    let text = '';
-    if (isContentEditable) {
-      text = el.textContent || '';
-    } else if (typeof el.value === 'string') {
-      text = el.value;
-    } else {
-      text = el.textContent || '';
-    }
-    const preview = text.length > 80 ? text.slice(0, 80) + '…' : text;
-    console.log('[GetInputCurrentText] Read text from input', { length: text.length, preview });
-    return text;
-  }
-
-  function getInputCurrentTextQuiet(el) {
-    if (!el) return '';
-    const isContentEditable = isContentEditableElement(el);
-    if (isContentEditable) return el.textContent || '';
-    if (typeof el.value === 'string') return el.value;
-    return el.textContent || '';
-  }
 
   function findPromptInput() {
     const active = document.activeElement;
@@ -490,7 +341,7 @@
       let readySince = null;
       let stableElement = null;
 
-      const getComposerCandidate = () => inputEl && inputEl.isConnected
+      const getComposerCandidate = () => inputEl && inputEl.isConnected && isElementVisible(inputEl)
         ? inputEl
         : (findPromptInputForSite(site, settings)
           || queryFirst(selectorsForSite(site).inputCandidates)
@@ -523,6 +374,26 @@
 
       check();
     });
+  }
+
+  function coerceDelayWindow(options = {}) {
+    const fallbackMin = 500;
+    const fallbackMax = 1500;
+    const rawMin = Number(options.postPopulateDelayMinMs);
+    const rawMax = Number(options.postPopulateDelayMaxMs);
+    const min = Number.isFinite(rawMin) ? Math.min(60000, Math.max(0, rawMin)) : fallbackMin;
+    const max = Number.isFinite(rawMax) ? Math.min(60000, Math.max(0, rawMax)) : fallbackMax;
+    return {
+      minMs: Math.min(min, max),
+      maxMs: Math.max(min, max),
+    };
+  }
+
+  function randomDelayFromWindow(windowConfig) {
+    const min = Math.max(0, Number(windowConfig?.minMs) || 0);
+    const max = Math.max(min, Number(windowConfig?.maxMs) || min);
+    if (max <= min) return Math.round(min);
+    return Math.round(min + Math.random() * (max - min));
   }
 
   function getVisiblePageContext() {
@@ -737,7 +608,7 @@
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const match = findRenderedMessageMatch(text);
       if (match) {
-        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt, contentPreview: match.contentPreview });
+        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt });
         return true;
       }
       console.warn('[PromptQueue] Prompt render not found yet, retrying', { promptId, attempt, attempts });
@@ -1055,18 +926,6 @@
     return (!!sendBtn || !!regenPresent || hasDraft) && !isThinking;
   }
 
-  function getInputTextLengthQuiet(el) {
-    if (!el) return 0;
-    const isContentEditable = isContentEditableElement(el);
-    if (isContentEditable) {
-      return (el.textContent || '').length;
-    }
-    if (typeof el.value === 'string') {
-      return el.value.length;
-    }
-    return (el.textContent || '').length;
-  }
-
   function buildPromptQueueDebugSnapshot({ site, inputEl, sendBtn, stopButtonSelector, promptId, attempt }) {
     const resolvedSite = site || detectSite();
     const resolvedSendBtn = sendBtn || findSendButtonForSite(resolvedSite, inputEl);
@@ -1153,6 +1012,12 @@
     const completionId = Math.random();
 
     console.log('[WaitForCompletion] Starting', { completionId, effectiveStableMs, effectiveMaxWaitMs, effectivePollMs, enableTimeout, stopWord, hasPromptText: !!promptText });
+    emitStepUpdate({
+      step: 'completion_wait',
+      detail: 'Waiting for assistant response stability',
+      durationMs: effectiveStableMs,
+      log: false,
+    });
 
     return new Promise((resolve) => {
       const startTime = Date.now();
@@ -1242,6 +1107,13 @@
 
         if (elapsed - lastStatusAt >= 5000) {
           lastStatusAt = elapsed;
+          emitStepUpdate({
+            step: 'completion_wait',
+            detail: responseSnapshot.ok ? 'Assistant response captured; waiting for stability' : 'Waiting for assistant response',
+            durationMs: enableTimeout ? Math.max(0, effectiveMaxWaitMs - elapsed) : 0,
+            endAt: enableTimeout ? Date.now() + Math.max(0, effectiveMaxWaitMs - elapsed) : 0,
+            log: false,
+          });
           console.log('[WaitForCompletion] Waiting status', {
             completionId,
             elapsed,
@@ -1539,6 +1411,7 @@
     try {
       const site = detectSite();
       console.log('[PromptQueue] Detected site:', site);
+      emitSelectorHealth(site, options);
       const cfg = selectorsForSite(site);
 
       let inputEl = findPromptInputForSite(site, options);
@@ -1569,6 +1442,7 @@
 
       // Wait for any active streaming/processing to complete before sending
       const streamWaitStartedAt = Date.now();
+      emitStepUpdate({ step: 'waiting_for_response', promptId, detail: 'Waiting for existing stream to stop', log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Waiting for streams to stop', { promptId, enableTimeout: false });
       try {
         await waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: undefined, enableTimeout: false });
@@ -1589,6 +1463,7 @@
       });
 
       const composerReadyMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 10000);
+      emitStepUpdate({ step: 'waiting_for_tab', promptId, detail: 'Waiting for visible composer', durationMs: composerReadyMaxWaitMs, endAt: Date.now() + composerReadyMaxWaitMs, log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Waiting for composer readiness', {
         promptId,
         composerReadyMaxWaitMs,
@@ -1619,6 +1494,7 @@
 
       if (!inputEl) throw new Error('Could not find chat input on this page.');
 
+      emitStepUpdate({ step: 'populating', promptId, detail: 'Writing prompt into visible composer', log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Setting text input', { promptId, textLength: text?.length });
       setTextInInput(inputEl, text);
       await new Promise((r) => setTimeout(r, 150));
@@ -1654,11 +1530,43 @@
         });
         throw new Error('Input field empty before sending');
       }
-      console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length, preview: finalNormalized.slice(0, 120) });
+      console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length });
+      if (options?.dryRunPopulateOnly === true) {
+        emitStepUpdate({ step: 'complete', promptId, detail: 'Dry-run populated composer', log: options?.perStepConsoleLogging === true });
+        console.log('[PromptQueue] Dry-run populate complete; send skipped', { promptId, finalLength: finalNormalized.length });
+        try {
+          await chrome.runtime.sendMessage({
+            type: 'RESPONSE_COMPLETE',
+            promptId,
+            dryRun: true,
+            site,
+            url: location.href,
+          });
+        } catch (_) {}
+        return;
+      }
+      const postPopulateDelayWindow = coerceDelayWindow(options);
+      const postPopulateDelayMs = randomDelayFromWindow(postPopulateDelayWindow);
+      if (postPopulateDelayMs > 0) {
+        console.log('[PromptQueue] Waiting post-populate delay before send', {
+          promptId,
+          postPopulateDelayMs,
+          minMs: postPopulateDelayWindow.minMs,
+          maxMs: postPopulateDelayWindow.maxMs,
+        });
+        await delayWithStatus({
+          step: 'post_populate_delay',
+          promptId,
+          durationMs: postPopulateDelayMs,
+          detail: 'Waiting before send click',
+          log: options?.perStepConsoleLogging === true,
+        });
+      }
       sendBtn = findSendButtonForSite(site, inputEl, options) || sendBtn;
 
       if (site === 'chatgpt') {
         const preSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
+        emitStepUpdate({ step: 'pre_send_quiet_window', promptId, detail: 'Waiting for ChatGPT send window', durationMs: preSendMaxWaitMs, endAt: Date.now() + preSendMaxWaitMs, log: options?.perStepConsoleLogging === true });
         console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', { promptId, preSendMaxWaitMs });
         try {
           await waitForChatGPTSendWindow({
@@ -1692,6 +1600,7 @@
         }
       }
       
+      emitStepUpdate({ step: 'sending', promptId, detail: 'Clicking send button', log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Clicking send button', {
         promptId,
         hasSendBtn: !!sendBtn,
@@ -1706,6 +1615,7 @@
 
       while (attempt < maxAttempts && !streamStarted) {
         attempt += 1;
+        emitStepUpdate({ step: 'waiting_for_response', promptId, detail: 'Verifying stream start', log: options?.perStepConsoleLogging === true });
         console.log('[PromptQueue] Verifying stream started', { promptId, attempt, maxAttempts });
         streamStarted = await waitForStreamStart({
           stopButtonSelector: stopBtnSel,
@@ -1720,7 +1630,7 @@
               promptId, 
               attempt, 
               maxAttempts, 
-              contentPreview: renderMatch.contentPreview 
+              matchedRenderedPrompt: true
             });
             streamStarted = true;
             break;
@@ -1828,6 +1738,7 @@
       const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
       const effectiveStopWord = options?.enableStopWord ? options?.stopWord : null;
       armStopWordGuard('PromptQueue');
+      emitStepUpdate({ step: 'completion_wait', promptId, detail: 'Waiting for completion', durationMs: options?.maxWaitMs || DEFAULTS.maxWaitMs, endAt: Date.now() + (options?.maxWaitMs || DEFAULTS.maxWaitMs), log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, enableStopWord: options?.enableStopWord, stopWord: effectiveStopWord, watchGate });
       try {
         let result;
@@ -1976,6 +1887,7 @@
           currentTargetSettings = message.settings || {};
           setAutoConfirmDialogs(message.settings.autoConfirmDialogs === true, 'settings_updated');
           setDebugLoggingEnabled(message.settings.debugLoggingEnabled === true);
+          emitSelectorHealth(detectSite(), currentTargetSettings);
           sendResponse({ ok: true });
           return;
         }

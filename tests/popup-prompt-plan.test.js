@@ -28,4 +28,21 @@ describe('popup prompt launch plan', () => {
     );
     expect(plan.prompts).toEqual(['head\n\nA\n\ntail', 'B']);
   });
+
+  it('leaves exact duplicates unchanged by default', () => {
+    const plan = mod.buildPromptLaunchPlan('A\nA', '\n', '', '');
+
+    expect(plan.prompts).toEqual(['A', 'A']);
+    expect(plan.duplicateChanged).toBe(0);
+  });
+
+  it('applies typo variants only when enabled', () => {
+    const plan = mod.buildPromptLaunchPlan('A\nA', '\n', '', '', {
+      enableDuplicateTypoVariants: true,
+    });
+
+    expect(plan.prompts[0]).toBe('A');
+    expect(plan.prompts[1]).not.toBe('A');
+    expect(plan.duplicateChanged).toBe(1);
+  });
 });

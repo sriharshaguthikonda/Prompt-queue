@@ -5,6 +5,7 @@ import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, exp
 import { NEW_TAB_MARKER, resolveSeparator, buildPromptLaunchPlan } from './popup-prompt-plan.js';
 import { initMemoryPackUI, loadMemorySettingsIntoUI } from './popup-memory.js';
 import { initPromptQueueReorder, refreshPromptQueueReorder } from './popup-queue.js';
+import { renderSelectorHealth, renderStepStatus } from './popup-send-settings.js';
 
 applyConsolePatch();
 
@@ -235,10 +236,13 @@ async function refreshStatus() {
       updateControlButtons(res.status);
       if (running) {
         setStatus(getRunningStatusText(res.status), res.status.paused ? 'paused' : 'running');
+        renderStepStatus(res.status.stepStatus || null);
       } else if (total > 0 && currentIndex >= total) {
         setStatus('Complete', 'idle');
+        renderStepStatus(null);
       } else {
         setStatus('Idle', 'idle');
+        renderStepStatus(null);
       }
     }
   } catch (e) {
@@ -255,7 +259,13 @@ async function startAutomation() {
     const separator = resolveSeparator(separatorInput?.value);
     const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
     const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
-    const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText);
+    const uiSettings = await saveSettingsFromUI();
+    let currentSettings = { ...(uiSettings || {}) };
+    if (!uiSettings) {
+      const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      currentSettings = { ...(settingsRes?.settings || {}) };
+    }
+    const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText, currentSettings);
     const prompts = launchPlan.prompts;
     if (prompts.length === 0) {
       setStatus('Please enter at least one prompt.');
@@ -281,13 +291,6 @@ async function startAutomation() {
 
     setStatus('Starting...');
     hideError(); // Clear any previous error
-    // Get current settings and include them in START_AUTOMATION to avoid race conditions
-    const uiSettings = await saveSettingsFromUI();
-    let currentSettings = { ...(uiSettings || {}) };
-    if (!uiSettings) {
-      const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      currentSettings = { ...(settingsRes?.settings || {}) };
-    }
     const parallelTabCount = launchPlan.hasTabMarkers ? launchPlan.tabPromptGroups.length : 0;
     if (launchPlan.hasTabMarkers) {
       showToast(`Detected ${parallelTabCount} tab group(s) using ${NEW_TAB_MARKER}`, 'info', 3000);
@@ -304,6 +307,7 @@ async function startAutomation() {
         ? { mode: 'parallel', running: true, paused: false, total: parallelTabCount, parallelLaunched: 0, parallelCompleted: 0, parallelFailed: 0, parallelActive: 0 }
         : { mode: 'sequential', running: true, paused: false, currentIndex: 0, total: prompts.length };
       setStatus(getRunningStatusText(initialStatus), 'running');
+      renderStepStatus({ step: 'waiting_for_tab', label: 'Starting', color: 'active' });
       setProgress(getProgressPosition(initialStatus), initialStatus.total);
       updateControlButtons({ running: true, paused: false });
       await chrome.runtime.sendMessage({
@@ -366,6 +370,7 @@ async function stopAutomationFromUI({ reason = 'button' } = {}) {
     const tabId = await getContextTabId();
     await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.STOP_AUTOMATION || 'STOP_AUTOMATION', tabId });
     setStatus(reason === 'escape' ? 'Stopped by Escape' : 'Stopped');
+    renderStepStatus(null);
     updateControlButtons({ running: false, paused: false });
     // Refresh to clear any recovery status
     await refreshStatus();
@@ -389,7 +394,8 @@ if (saveHistoryBtn) {
       const separator = resolveSeparator(separatorInput?.value);
       const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
       const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
-      const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText);
+      const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText, settings?.settings || {});
       const prompts = launchPlan.prompts;
       if (prompts.length === 0) {
         showToast('No prompts to save', 'error');
@@ -398,7 +404,6 @@ if (saveHistoryBtn) {
       if (launchPlan.duplicateChanged > 0) {
         showToast(`Adjusted ${launchPlan.duplicateChanged} duplicate prompt(s) before save`, 'info', 3500);
       }
-      const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
       await saveHistoryItem(launchPlan.promptsWithMarkers, settings?.settings);
       // Immediately refresh the history list
       await loadHistoryIntoUI(updatePromptCount);
@@ -520,6 +525,7 @@ chrome.runtime.onMessage.addListener((message) => {
       clearError();
       updateControlButtons(message.status);
       setStatus(getRunningStatusText(message.status), paused ? 'paused' : 'running');
+      renderStepStatus(message.status.stepStatus || null);
       setProgress(getProgressPosition(message.status), total);
     } else if (message?.type === 'AUTOMATION_COMPLETE') {
       const reason = message.reason;
@@ -551,6 +557,7 @@ chrome.runtime.onMessage.addListener((message) => {
       const toastKind = reason === 'completedWithErrors' ? 'info' : 'success';
       showToast(toastMessage, toastKind);
       stopCountdownTimer();
+      renderStepStatus(null);
       updateControlButtons({ running: false, paused: false });
     } else if (message?.type === 'AUTOMATION_ERROR') {
       latestAutomationStatus = { ...(latestAutomationStatus || {}), running: false, paused: false };
@@ -563,9 +570,14 @@ chrome.runtime.onMessage.addListener((message) => {
         message.stack || 'No stack trace available'
       );
       stopCountdownTimer();
+      renderStepStatus({ step: 'error', label: 'Error', color: 'error', detail: message.error || '' });
       // Refresh status after error to show proper state
       setTimeout(refreshStatus, 1000);
       updateControlButtons({ running: false, paused: false });
+    } else if (message?.type === 'PROMPT_STEP_STATUS') {
+      renderStepStatus(message.status || null);
+    } else if (message?.type === 'SELECTOR_HEALTH' || message?.type === 'SELECTOR_HEALTH_UPDATE') {
+      renderSelectorHealth(message.health || null);
     }
   } catch (e) {
     console.error('[MessageListener] Error handling message:', e);
@@ -771,7 +783,9 @@ const updatePromptCount = () => {
   const separator = resolveSeparator(separatorInput?.value);
   const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
   const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
-  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator, appendText, prependText);
+  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator, appendText, prependText, {
+    enableDuplicateTypoVariants: document.getElementById('enableDuplicateTypoVariants')?.checked === true,
+  });
   const prompts = launchPlan.prompts;
   const tabGroups = launchPlan.tabPromptGroups.length;
   const counter = document.querySelector('.prompt-counter');

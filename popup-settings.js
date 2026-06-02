@@ -7,6 +7,12 @@ import {
   loadTargetSettingsIntoUI,
   validateAndNormalizeTargetSettingsFromUI,
 } from './popup-target-settings.js';
+import {
+  ensureSendTimingSettingsUI,
+  initSendTimingSettingsUI,
+  loadSendTimingSettingsIntoUI,
+  readSendTimingSettingsFromUI,
+} from './popup-send-settings.js';
 
 // Initialization and helpers for settings UI
 export async function loadSettingsIntoUI() {
@@ -15,6 +21,7 @@ export async function loadSettingsIntoUI() {
     if (res?.ok && res.settings) {
       const s = res.settings;
       ensureTargetSettingsUI();
+      ensureSendTimingSettingsUI();
       applyTheme(s.theme || 'dark');
       document.getElementById('maxWaitSec').value = msToSec(s.maxWaitMs);
       document.getElementById('stableMinSec').value = msToSec(s.stableMinMs ?? s.stableMs);
@@ -42,6 +49,7 @@ export async function loadSettingsIntoUI() {
       document.getElementById('debugLoggingEnabled').checked = s.debugLoggingEnabled === true;
       document.getElementById('openNewChatPerPrompt').checked = s.openNewChatPerPrompt === true;
       document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
+      loadSendTimingSettingsIntoUI(s);
       loadTargetSettingsIntoUI(s);
       setDebugLoggingEnabled(s.debugLoggingEnabled === true);
 
@@ -103,6 +111,7 @@ export async function saveSettingsFromUI() {
       openNewChatPerPrompt: document.getElementById('openNewChatPerPrompt').checked,
       openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
       targetSelectors: targetValidation.targetSelectors,
+      ...readSendTimingSettingsFromUI(),
     };
     settings.watchedElementSelector = settings.targetSelectors.watchedElement || settings.watchedElementSelector;
     const response = await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings });
@@ -123,6 +132,7 @@ export async function saveSettingsFromUI() {
 export function initSettingsUI() {
   applyConsolePatch(undefined, false);
   ensureTargetSettingsUI();
+  ensureSendTimingSettingsUI();
 
   const themeSelect = document.getElementById('themeSelect');
   if (themeSelect) {
@@ -223,4 +233,5 @@ export function initSettingsUI() {
   }
 
   initTargetSettingsUI({ onSettingsChanged: saveSettingsFromUI });
+  initSendTimingSettingsUI({ onSettingsChanged: saveSettingsFromUI });
 }

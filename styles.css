@@ -256,6 +256,16 @@ button.secondary {
   color: #ef4444;
 }
 
+.status-waiting {
+  background: rgba(59, 130, 246, 0.18);
+  color: #60a5fa;
+}
+
+.status-active {
+  background: rgba(16, 185, 129, 0.2);
+  color: var(--accent);
+}
+
 .status-dot {
   width: 8px;
   height: 8px;
@@ -997,6 +1007,58 @@ button:disabled:hover {
 
 .prompt-reorder-note {
   grid-template-columns: 1fr;
+  color: var(--muted);
+}
+
+.send-timing-settings,
+.debug-panel-card {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.compact-title {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.debug-panel-card {
+  margin-bottom: 12px;
+}
+
+.debug-step-badge {
+  margin-left: auto;
+  padding: 3px 7px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.debug-controls {
+  display: grid;
+  gap: 6px;
+}
+
+.step-status-timeline {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.step-status-row,
+.selector-health-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 8px;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--panel);
+  white-space: pre-wrap;
+}
+
+.selector-health-panel {
+  margin-top: 10px;
   color: var(--muted);
 }
 

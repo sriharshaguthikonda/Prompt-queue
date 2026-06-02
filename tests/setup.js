@@ -231,6 +231,8 @@ beforeAll(async () => {
 
   window.__PROMPT_QUEUE_TEST__ = true;
   require(path.join(ROOT, 'content-targets.js'));
+  require(path.join(ROOT, 'content-input.js'));
+  require(path.join(ROOT, 'content-status.js'));
   require(path.join(ROOT, 'content.js'));
   Object.assign(global, window.PromptQueueContentTest || {});
   global.__setRuntimeListenerBaseline();

@@ -330,7 +330,10 @@
       if (selectorIsUnique(selector)) return selector;
     }
 
-    const classNames = (element.className || '')
+    const rawClassName = typeof element.className === 'string'
+      ? element.className
+      : (typeof element.getAttribute === 'function' ? (element.getAttribute('class') || '') : '');
+    const classNames = rawClassName
       .split(/\s+/)
       .map((name) => name.trim())
       .filter(Boolean)

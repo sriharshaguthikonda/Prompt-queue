@@ -508,6 +508,33 @@ describe('Content Script Integration', () => {
       await expect(readinessPromise).resolves.toBe(visibleComposer);
     });
 
+    it('should ignore a connected hidden fallback textarea while waiting for visible composer', async () => {
+      document.body.innerHTML = '<textarea id="prompt-textarea" style="display:none"></textarea>';
+      const hiddenFallback = document.getElementById('prompt-textarea');
+      hiddenFallback.getBoundingClientRect = jest.fn(() => ({ width: 0, height: 0 }));
+
+      const readinessPromise = waitForComposerReady({
+        site: 'chatgpt',
+        inputEl: hiddenFallback,
+        maxWaitMs: 1000,
+        stableWindowMs: 50,
+        pollMs: 10,
+      });
+
+      const visibleComposer = document.createElement('div');
+      visibleComposer.id = 'prompt-textarea';
+      visibleComposer.className = 'ProseMirror';
+      visibleComposer.setAttribute('contenteditable', 'true');
+      visibleComposer.setAttribute('role', 'textbox');
+      visibleComposer.getBoundingClientRect = jest.fn(() => ({ width: 320, height: 48 }));
+
+      setTimeout(() => {
+        document.body.appendChild(visibleComposer);
+      }, 10);
+
+      await expect(readinessPromise).resolves.toBe(visibleComposer);
+    });
+
     it('should trigger input event', () => {
       const textarea = document.createElement('textarea');
       let eventFired = false;
@@ -809,13 +836,29 @@ describe('Background settings sanitization', () => {
     });
   });
 
+  it('should default duplicate typo variants off and normalize send delay windows', () => {
+    const settings = global.PromptQueueBackgroundTest.validateSettings({
+      postPopulateDelayMinMs: 2000,
+      postPopulateDelayMaxMs: 500,
+      crossTabSendLockMinWaitMs: 12000,
+      crossTabSendLockMaxWaitMs: 3000,
+    });
+
+    expect(settings.enableDuplicateTypoVariants).toBe(false);
+    expect(settings.postPopulateDelayMinMs).toBe(500);
+    expect(settings.postPopulateDelayMaxMs).toBe(2000);
+    expect(settings.crossTabSendLockEnabled).toBe(true);
+    expect(settings.crossTabSendLockMinWaitMs).toBe(3000);
+    expect(settings.crossTabSendLockMaxWaitMs).toBe(12000);
+  });
+
   it('should reinject when an already-open tab has a stale content script version', async () => {
     const sendResponses = [
       { ok: true, version: 'old-version' },
-      { ok: true, version: '2026-06-01.no-reload-v2' },
+      { ok: true, version: '2026-06-02.modular-v1' },
     ];
     chrome.tabs.sendMessage.mockImplementation((_tabId, _message, callback) => {
-      callback(sendResponses.shift() || { ok: true, version: '2026-06-01.no-reload-v2' });
+      callback(sendResponses.shift() || { ok: true, version: '2026-06-02.modular-v1' });
       return Promise.resolve();
     });
     chrome.scripting.executeScript.mockResolvedValue([]);
@@ -825,11 +868,11 @@ describe('Background settings sanitization', () => {
 
       expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
         target: { tabId: 7, allFrames: false },
-        files: ['content-targets.js', 'content.js'],
+        files: ['content-targets.js', 'content-input.js', 'content-status.js', 'content.js'],
       });
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         7,
-        { type: 'PING_CURRENT', expectedVersion: '2026-06-01.no-reload-v2' },
+        { type: 'PING_CURRENT', expectedVersion: '2026-06-02.modular-v1' },
         expect.any(Function),
       );
     } finally {

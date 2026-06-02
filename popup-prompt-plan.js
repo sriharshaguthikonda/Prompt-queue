@@ -133,6 +133,7 @@ export function buildPromptLaunchPlan(
   separatorRaw,
   appendText = '',
   prependText = '',
+  options = {},
 ) {
   const separator = resolveSeparator(separatorRaw);
   const normalizedRawText = normalizeNewlines(typeof rawText === 'string' ? rawText : '');
@@ -213,7 +214,9 @@ export function buildPromptLaunchPlan(
   const promptTexts = processedPrompts
     .filter((item) => item.type === 'prompt')
     .map((item) => item.text);
-  const duplicateAdjusted = applyTypoVariantsToExactDuplicates(promptTexts);
+  const duplicateAdjusted = options?.enableDuplicateTypoVariants === true
+    ? applyTypoVariantsToExactDuplicates(promptTexts)
+    : { prompts: promptTexts, changed: 0 };
 
   const promptsWithMarkers = [];
   const prompts = [];
