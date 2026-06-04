@@ -6,6 +6,8 @@ Status: proposed
 
 Make send timing visible and configurable. Prevent simultaneous tab sends from stepping on each other. Disable duplicate-prompt typo mutation by default.
 
+Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extension-lifecycle-flow.md).
+
 ## Current Gaps
 
 - Duplicate-prompt typo variation exists and is always applied by `popup-prompt-plan.js`.
@@ -53,6 +55,7 @@ Use the existing settings blob unless a durable live send-lock key is required.
 
 - Emit sanitized step updates: `waiting_for_tab`, `populating`, `post_populate_delay`, `pre_send_quiet_window`, `sending`, `waiting_for_response`, `completion_wait`, `retry_wait`, `paused`, `error`.
 - Include countdown/end timestamp when a timer is active.
+- Keep the step sequence aligned with `docs/chatgpt-extension-lifecycle-flow.md`.
 - Move debugging controls/status into the bottom debug collapsible panel.
 - Add per-step console logging toggle in the debug panel.
 - Add dry-run populate-without-send mode in the debug panel.

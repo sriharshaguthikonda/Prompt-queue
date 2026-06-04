@@ -16,6 +16,8 @@ Current scope extension: close the no-reload ChatGPT composer path and the queue
 - Native host installer generated `native_host.json` with `path` pointing at `native_host.py` and placeholder extension IDs.
 - Send path relies on `content.js` ChatGPT selectors and a captured send-button reference.
 - Current ChatGPT composer DOM uses a visible `div#prompt-textarea.ProseMirror[contenteditable="true"]` and a hidden fallback `textarea[name="prompt-textarea"]`.
+- Current ChatGPT composer action uses `button#composer-submit-button`, whose attributes change between send, stop, and disabled states.
+- Latest completion blocker evidence: `responseCaptured: true`, `responseStableFor` over 600 seconds, `canSend: true`, `stopBtnPresent: null`, and `watchGateSatisfied: true`, while stale hard activity signals kept `chatGptResponseComplete: false`.
 - Existing code already has `content-targets.js`; future send-path changes should keep selector/editing logic modular instead of growing `content.js`.
 
 ## Sub-phases
@@ -39,7 +41,9 @@ Current scope extension: close the no-reload ChatGPT composer path and the queue
 - Prefer the visible ProseMirror/contenteditable composer over the hidden fallback textarea.
 - Populate the editor using browser/editor-native input semantics, then verify visible editor text, not only a hidden textarea value.
 - Keep the no-reload path active: if reload-before-send is unchecked, do not require page reload to populate or send.
-- Close the queue-advance blocker where completion waits on `canSend` after the assistant response is stable but the composer is empty and the send button is disabled.
+- Close queue-advance blockers by treating `button#composer-submit-button` as a role-changing composer action instead of a stable send-only button.
+- Treat stable latest assistant output plus copy/good/bad response action markers as completion evidence when no enabled stop-role composer action remains.
+- Scope response action markers to the assistant turn after the rendered queued prompt so old response buttons cannot complete a new prompt.
 - Surface pre-send quiet-window waits and completion waits as status events so the side panel shows what is happening during timers.
 - Preserve privacy: debug status can include step names, selectors, durations, and prompt lengths, but not raw prompt or response text.
 
@@ -60,6 +64,8 @@ Current scope extension: close the no-reload ChatGPT composer path and the queue
   - no-reload ChatGPT composer population
   - visible composer selection over hidden fallback textarea
   - completion from stable assistant response with disabled empty composer
+  - completion from stable assistant response with copy/good/bad response action markers
+  - no completion while `button#composer-submit-button` is actively stop-role
   - selector picker canonicalization
   - status event emission during waits
 

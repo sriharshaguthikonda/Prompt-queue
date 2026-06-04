@@ -6,7 +6,7 @@ Regenerate: `gh issue list --repo sriharshaguthikonda/Prompt-queue --state open`
 
 ## P0 — Critical
 - Verify/fix ChatGPT no-reload composer population against the visible ProseMirror editor, not hidden fallback textarea.
-- Verify/fix ChatGPT queue advancement after assistant response completion when the composer is empty and send is disabled.
+- Verify/fix ChatGPT queue advancement after assistant response completion when stale hard activity signals remain but copy/good/bad response actions prove completion.
 
 ## P1 — Important
 - Modularize `content.js` send path into focused content modules; keep selector logic, editor insertion, response detection, and runner orchestration separate.

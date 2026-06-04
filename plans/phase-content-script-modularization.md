@@ -18,7 +18,7 @@ Stop growing `content.js` as a catch-all file. Split send-path behavior into foc
 - `content-targets.js`: selector defaults, picker, selector sanitization, target resolution. Already exists; keep it as owner.
 - `content-input.js`: composer detection, editor population, input events, send-button click primitives.
 - `content-response-detect.js`: rendered user prompt detection, assistant response extraction, copy-action/stability detection.
-- `content-chat-state.js`: ChatGPT readiness, pre-send quiet window, stream/stop detection, completion wait.
+- `content-chat-state.js`: ChatGPT composer action-role detection, response action marker detection, readiness, pre-send quiet window, stream/stop detection, completion wait.
 - `content-runner.js`: message listener and prompt orchestration only.
 - `content-debug.js`: sanitized logging/status event helpers.
 
@@ -34,6 +34,8 @@ Stop growing `content.js` as a catch-all file. Split send-path behavior into foc
 
 - Move rendered prompt matching and assistant response stability helpers into a response module.
 - Keep stable-response completion independent from send-button enabled state.
+- Keep ChatGPT response action marker candidates centralized: copy response, good response, and bad response.
+- Keep composer action-role detection out of the runner; `button#composer-submit-button` can be send-ready, stop-active, or idle/disabled.
 
 ### T3. Extract Runner Orchestration
 
