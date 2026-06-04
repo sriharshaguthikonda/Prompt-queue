@@ -208,7 +208,7 @@ const DEFAULT_SETTINGS = {
   openNewChatPerPromptUrl: '',
   memory: DEFAULT_MEMORY_SETTINGS,
 };
-const CONTENT_SCRIPT_VERSION = '2026-06-02.modular-v1';
+const CONTENT_SCRIPT_VERSION = '2026-06-04.completion-stop-role-v2';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
@@ -1731,7 +1731,7 @@ async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
-      files: ["content-targets.js", "content-input.js", "content-status.js", "content.js"],
+      files: ["content-targets.js", "content-input.js", "content-status.js", "content-chat-state.js", "content.js"],
     });
   } catch (err) {
     console.error("Failed to inject content script:", err);

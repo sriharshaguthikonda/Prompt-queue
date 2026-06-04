@@ -233,6 +233,7 @@ beforeAll(async () => {
   require(path.join(ROOT, 'content-targets.js'));
   require(path.join(ROOT, 'content-input.js'));
   require(path.join(ROOT, 'content-status.js'));
+  require(path.join(ROOT, 'content-chat-state.js'));
   require(path.join(ROOT, 'content.js'));
   Object.assign(global, window.PromptQueueContentTest || {});
   global.__setRuntimeListenerBaseline();

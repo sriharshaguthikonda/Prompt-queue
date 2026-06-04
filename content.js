@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-06-02.modular-v1';
+  const CONTENT_SCRIPT_VERSION = '2026-06-04.completion-stop-role-v2';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -97,6 +97,7 @@
   const delayWithStatus = typeof statusTools.delayWithStatus === 'function'
     ? statusTools.delayWithStatus
     : ({ durationMs = 0 } = {}) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(durationMs) || 0)));
+  const chatStateTools = window.PromptQueueChatState || {};
 
   function detectSite() {
     let host = location.hostname || '';
@@ -588,20 +589,36 @@
         candidates.push(node);
       }
     }
+    candidates.sort((a, b) => {
+      if (a === b) return 0;
+      const position = a.compareDocumentPosition(b);
+      if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    });
+
+    const candidateTexts = candidates.map((candidate) => cleanCapturedResponseText(candidate.innerText || candidate.textContent || ''));
+    let promptIndex = -1;
+    for (let i = 0; i < candidateTexts.length; i += 1) {
+      if (fuzzyIncludes(candidateTexts[i], promptText)) promptIndex = i;
+    }
 
     for (let i = candidates.length - 1; i >= 0; i -= 1) {
-      const text = cleanCapturedResponseText(candidates[i].innerText || candidates[i].textContent || '');
+      if (site === 'chatgpt' && promptIndex >= 0 && i <= promptIndex) continue;
+      const text = candidateTexts[i];
       if (!text) continue;
       if (fuzzyIncludes(text, promptText)) continue;
+      const responseScope = candidates[i].closest?.('article[data-testid^="conversation-turn-"], article[data-turn-id], [data-message-author-role="assistant"]') || candidates[i];
       return {
         ok: true,
         site,
         url: location.href,
         responseText: text,
         responseLength: text.length,
+        responseScope,
       };
     }
-    return { ok: false, site, url: location.href, responseText: '', responseLength: 0 };
+    return { ok: false, site, url: location.href, responseText: '', responseLength: 0, responseScope: null };
   }
 
   async function verifyPromptRendered({ text, promptId, attempts = 4, delayMs = 600 }) {
@@ -712,14 +729,20 @@
   }
 
   function getChatGPTThinkingSignals() {
+    if (typeof chatStateTools.getChatGPTThinkingSignals === 'function') {
+      return chatStateTools.getChatGPTThinkingSignals({
+        stopButtonSelector: resolveStopButtonSelector('chatgpt', currentTargetSettings),
+        targetSettings: currentTargetSettings,
+      });
+    }
     // Ignore stale indicators in older turns; only tail turns can block sending.
     const tailTurns = getTailConversationTurns(2);
     const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
     const thinkingIndicator = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
     const activeToolStatus = hasActiveToolStatusInTailTurns(tailTurns);
     const stopSelector = resolveStopButtonSelector('chatgpt', currentTargetSettings);
-    const stopPresent = (stopSelector ? queryOneSafe(stopSelector) : null)
-      || queryOneSafe('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
+    const stopPresent = isActiveStopButton(stopSelector ? queryOneSafe(stopSelector) : null)
+      || isActiveStopButton(queryOneSafe('button[aria-label="Stop generating"], button[data-testid="stop-button"]'));
     const confirmVisible = isConfirmDialogVisible();
     return {
       loadingShimmer: !!loadingShimmer,
@@ -728,11 +751,86 @@
       stopPresent: !!stopPresent,
       confirmVisible,
       active: !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible,
+      blockingReasons: [
+        stopPresent ? 'stopButton' : '',
+        loadingShimmer ? 'loadingShimmer' : '',
+        thinkingIndicator ? 'thinkingIndicator' : '',
+        activeToolStatus ? 'activeToolStatus' : '',
+        confirmVisible ? 'confirmDialog' : '',
+      ].filter(Boolean),
     };
   }
 
   function isChatGPTThinking() {
     return getChatGPTThinkingSignals().active;
+  }
+
+  function getChatGPTComposerRole(button) {
+    if (typeof chatStateTools.getComposerActionRole === 'function') {
+      return chatStateTools.getComposerActionRole(button || undefined);
+    }
+    button = button || document.querySelector('button#composer-submit-button');
+    if (!button) return { role: 'missing', enabled: false, reason: 'missing' };
+    const enabled = isButtonEnabled(button);
+    const label = normalizeButtonText(button.getAttribute('aria-label') || button.getAttribute('title') || button.textContent || '');
+    const testId = normalizeButtonText(button.getAttribute('data-testid') || '');
+    const type = normalizeButtonText(button.getAttribute('type') || '');
+    const labelHasStop = /\bstop\b|stop answering|stop generating|stop streaming/.test(label);
+    const labelHasSend = /\bsend\b|submit|send prompt|send message/.test(`${label} ${type}`);
+    const testIdHasStop = /\bstop\b|stop-button/.test(testId);
+    const testIdHasSend = /\bsend\b|send-button/.test(testId);
+    const hasStop = labelHasStop || (testIdHasStop && !labelHasSend);
+    const hasSend = labelHasSend || testIdHasSend;
+    if (hasSend && enabled) return { role: 'send-ready', enabled, reason: labelHasSend ? 'send-label' : 'send-testid' };
+    if (hasStop && enabled) return { role: 'stop-active', enabled, reason: labelHasStop ? 'stop-label' : 'stop-testid' };
+    if (hasSend) return { role: 'send-disabled', enabled, reason: labelHasSend ? 'send-disabled-label' : 'send-disabled-testid' };
+    if (hasStop) return { role: 'stop-disabled', enabled, reason: labelHasStop ? 'stop-disabled-label' : 'stop-disabled-testid' };
+    return { role: enabled ? 'unknown-enabled' : 'idle-disabled', enabled, reason: 'unknown' };
+  }
+
+  function isChatGPTComposerActionButton(button) {
+    return !!button && button.matches?.('button#composer-submit-button');
+  }
+
+  function isActiveStopButton(button) {
+    if (!button || !isButtonEnabled(button)) return false;
+    if (isChatGPTComposerActionButton(button)) return getChatGPTComposerRole(button).role === 'stop-active';
+    const label = normalizeButtonText(button.getAttribute('aria-label') || button.getAttribute('title') || button.textContent || '');
+    const testId = normalizeButtonText(button.getAttribute('data-testid') || '');
+    const combined = `${label} ${testId}`;
+    const hasSend = /\bsend\b|send prompt|send message|send-button/.test(combined);
+    const hasStop = /\bstop\b|stop answering|stop generating|stop streaming|stop-button/.test(combined);
+    return hasStop && !hasSend;
+  }
+
+  function findChatGPTResponseCompletionMarkers(responseScope) {
+    if (typeof chatStateTools.findResponseCompletionMarkers === 'function') {
+      return chatStateTools.findResponseCompletionMarkers(responseScope);
+    }
+    const root = responseScope || document;
+    const selectors = [
+      'button[data-testid="copy-turn-action-button"]',
+      'button[aria-label="Copy response"]',
+      'button[aria-label="Good response"]',
+      'button[aria-label="Bad response"]',
+    ];
+    const markers = [];
+    for (const selector of selectors) {
+      let nodes = [];
+      try {
+        nodes = Array.from(root.querySelectorAll(selector));
+      } catch (_) {
+        nodes = [];
+      }
+      for (const node of nodes) {
+        if (!node || !isElementVisible(node)) continue;
+        markers.push({
+          selector,
+          label: String(node.getAttribute('aria-label') || node.getAttribute('data-testid') || node.textContent || selector).slice(0, 80),
+        });
+      }
+    }
+    return markers;
   }
 
   function waitForChatGPTSendWindow({ sendButton, inputEl, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
@@ -953,7 +1051,7 @@
       hasSendButton: !!resolvedSendBtn,
       sendButtonEnabled: isButtonEnabled(resolvedSendBtn),
       stopButtonSelector: stopButtonSelector || null,
-      stopButtonPresent: !!stopBtn && isButtonEnabled(stopBtn),
+      stopButtonPresent: isActiveStopButton(stopBtn),
       isChatGPTThinking: resolvedSite === 'chatgpt' ? isChatGPTThinking() : null,
       hasConfirmDialog: isConfirmDialogVisible(),
       activeElementTag: document.activeElement?.tagName || null,
@@ -1060,15 +1158,17 @@
         const elapsed = Date.now() - startTime;
         const stableFor = Date.now() - lastChange;
         const stopBtn = stopButtonSelector ? queryOneSafe(stopButtonSelector) : null;
-        const stopBtnPresent = stopBtn && isButtonEnabled(stopBtn);
+        const stopBtnPresent = isActiveStopButton(stopBtn);
         let activeGenerationPresent = stopBtnPresent;
         let chatGptThinkingSignals = null;
+        let composerActionRole = null;
 
         let currentSendButton = sendButton;
         let canSend = isButtonEnabled(currentSendButton);
         if (site === 'chatgpt') {
           currentSendButton = findSendButtonForSite('chatgpt', inputEl || findPromptInput()) || sendButton;
           chatGptThinkingSignals = getChatGPTThinkingSignals();
+          composerActionRole = getChatGPTComposerRole(currentSendButton);
           activeGenerationPresent = stopBtnPresent || chatGptThinkingSignals.active;
           canSend = isButtonEnabled(currentSendButton) || isChatGPTReadyToSend(inputEl || findPromptInput());
         } else if (site === 'gemini') {
@@ -1114,6 +1214,11 @@
 
         const domStableEnough = stableFor >= effectiveStableMs;
         const responseStableEnough = site === 'chatgpt' && responseSnapshot.ok && responseStableFor >= effectiveStableMs;
+        const responseCompletionMarkers = site === 'chatgpt' && responseSnapshot.ok
+          ? findChatGPTResponseCompletionMarkers(responseSnapshot.responseScope)
+          : [];
+        const responseCompletionMarkerNames = responseCompletionMarkers.map((marker) => marker.label || marker.selector);
+        const responseActionSatisfied = watchGateSatisfied || responseCompletionMarkers.length > 0;
         const hardChatGptActivityPresent = !!(
           chatGptThinkingSignals
           && (chatGptThinkingSignals.loadingShimmer
@@ -1121,12 +1226,15 @@
             || chatGptThinkingSignals.activeToolStatus
             || chatGptThinkingSignals.confirmVisible)
         );
+        const activityBlockerReasons = chatGptThinkingSignals?.blockingReasons || [];
+        const composerStopActive = composerActionRole?.role === 'stop-active';
+        const currentStopActive = !!(stopBtnPresent || composerStopActive || chatGptThinkingSignals?.stopPresent);
         const stopOnlyChatGptActivity = site === 'chatgpt'
           && activeGenerationPresent
           && !hardChatGptActivityPresent;
         const chatGptResponseComplete = responseStableEnough
-          && watchGateSatisfied
-          && (!activeGenerationPresent || (stopOnlyChatGptActivity && canSend));
+          && responseActionSatisfied
+          && !currentStopActive;
         const domComplete = domStableEnough && !activeGenerationPresent && canSend && watchGateSatisfied;
         const completeEnough = site === 'chatgpt' ? (chatGptResponseComplete || domComplete) : domComplete;
 
@@ -1151,6 +1259,9 @@
             hardChatGptActivityPresent,
             stopOnlyChatGptActivity,
             hasCurrentSendButton: !!currentSendButton,
+            composerActionRole: composerActionRole?.role || null,
+            responseCompletionMarkers: responseCompletionMarkerNames,
+            activityBlockerReasons,
             canSend,
             chatGptResponseComplete,
             watchGateSatisfied,
@@ -1166,6 +1277,9 @@
             responseCaptured: responseSnapshot.ok,
             stopBtnPresent, 
             activeGenerationPresent,
+            composerActionRole: composerActionRole?.role || null,
+            responseCompletionMarkers: responseCompletionMarkerNames,
+            activityBlockerReasons,
             canSend,
             chatGptResponseComplete,
             watchGateSatisfied
@@ -1218,7 +1332,7 @@
         maybeClickConfirmButtons('waitForStreamsToStop');
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? queryOneSafe(stopButtonSelector) : null;
-        const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
+        const stopPresent = isActiveStopButton(stopBtn);
 
         let stillStreaming = stopPresent;
 
@@ -1278,7 +1392,7 @@
         maybeClickConfirmButtons('waitForStreamStart');
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
-        const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
+        const stopPresent = isActiveStopButton(stopBtn);
 
         let streaming = false;
 
