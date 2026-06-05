@@ -25,13 +25,14 @@ Current sidepanel branch:
 | Phase | Plan | Status |
 |---|---|---|
 | Content/send-path modularization | [plans/phase-content-script-modularization.md](plans/phase-content-script-modularization.md) | proposed |
-| Send timing + cross-tab coordination + status controls | [plans/phase-send-timing-status-controls.md](plans/phase-send-timing-status-controls.md) | proposed |
+| Send timing + cross-tab coordination + status controls | [plans/phase-send-timing-status-controls.md](plans/phase-send-timing-status-controls.md) | in progress |
 
 Default choices for the timing/status phase unless overridden in `Q and A.md`:
 
 - Post-populate/pre-send delay: configurable random window, default 0.5-1.5 seconds.
 - Duplicate prompt typo variation: behind `enableDuplicateTypoVariants`, default off.
 - Cross-tab send lease: enabled for concurrent tab sends, with UI-configurable random wait range. Initial default: 3-12 seconds.
+- Tab-scoped side panel state: switching active browser tabs must refresh queue/status to that tab and ignore other tabs' scoped progress.
 - Step status colors: gray idle, blue waiting/timer, green active send, amber retry/pause, red error.
 - ChatGPT composer insertion: prefer visible ProseMirror/contenteditable editor and do not rely on hidden fallback textarea for success.
 - Lifecycle diagnostics: require sanitized, detailed signals for stop/send composer state, copy/good/bad buttons, loading shimmer, thinking/tool status, confirm dialog, watched selector state, pre-send quiet window, stream start/stop, and completion decision.

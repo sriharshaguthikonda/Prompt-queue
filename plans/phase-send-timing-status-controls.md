@@ -1,6 +1,6 @@
 # Phase: Send Timing + Cross-Tab Coordination + Status Controls
 
-Status: proposed
+Status: in progress
 
 ## Goal
 
@@ -11,9 +11,10 @@ Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extens
 ## Current Gaps
 
 - Duplicate-prompt typo variation exists and is always applied by `popup-prompt-plan.js`.
-- Post-populate waits and pre-send quiet windows are hard-coded in `content.js`.
+- Post-populate/pre-send controls now exist in the injected send-timing UI; keep end-to-end regression coverage so the loaded extension cannot drift back to hard-coded timing.
 - Parallel tab launch has random gaps, but there is no global cross-tab send lease around actual send dispatch.
 - Status badges exist, but timer/status UI does not show each wait step with clear color and countdown.
+- Side panel queue/status rendering can follow the previously selected tab because popup tab context was only refreshed by polling and queue text was loaded from the global `state` blob instead of the per-tab session store.
 - Lifecycle diagnostics are still too coarse unless they explain monitored signals for the stop/send composer, copy/good/bad buttons, loading shimmer, thinking/tool status, confirm dialog, watched selector state, pre-send quiet window, stream start/stop, and completion decision.
 
 ## Default Settings
@@ -74,12 +75,21 @@ Future settings should also let the user choose which monitored signals particip
 
 - Debug bundle export.
 
+### T6. Tab-Scoped Panel State
+
+- Refresh popup tab context immediately on browser tab activation/focus changes.
+- Filter progress, completion, error, selector-health, and step-status updates by the currently selected tab.
+- Load the prompt textarea from the active tab's `aiTaskSequencerTabSessions` entry while that tab has a session.
+- Do not let unscoped direct content messages repaint the panel for a different tab; use background re-broadcasts with tab ids.
+- Keep a focused regression test for tab filtering and queue-state lookup.
+
 ## Acceptance
 
 - User can configure the post-populate/pre-send delay without editing code.
 - Duplicate prompts are not modified unless the checkbox is enabled.
 - Concurrent sending tabs do not click send at the same moment.
 - During every timer/wait, the side panel shows the current step and countdown.
+- Switching tabs updates the side panel to that tab's queue/status instead of preserving the previous tab's session.
 - Bottom debug panel owns selector health, dry-run, and per-step logging controls.
 - Tests cover settings validation, duplicate toggle, cross-tab lease timeout/release, and status rendering.
 - Monitored-signal diagnostics explain what blocked or allowed progression without exposing content.
