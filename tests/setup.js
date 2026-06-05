@@ -177,6 +177,7 @@ afterEach(() => {
 
 const esmContext = vm.createContext({
   Blob: window.Blob,
+  chrome: global.chrome,
   console,
   document,
   Event: window.Event,
@@ -191,7 +192,12 @@ const esmContext = vm.createContext({
 
 async function loadEsmModule(filename, cache = new Map()) {
   const resolved = path.resolve(filename);
-  if (cache.has(resolved)) return cache.get(resolved).namespace;
+  if (cache.has(resolved)) {
+    const cached = cache.get(resolved);
+    return cached.status === 'linked' || cached.status === 'evaluated'
+      ? cached.namespace
+      : cached;
+  }
 
   const source = fs.readFileSync(resolved, 'utf8');
   const module = new vm.SourceTextModule(source, {

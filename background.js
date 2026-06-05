@@ -947,6 +947,41 @@ function createIdleStatusForTab(tabId, options = state.options) {
   };
 }
 
+function buildQueueStateForTab(tabId) {
+  const numericTabId = Number(tabId);
+  if (Number.isInteger(numericTabId) && tabSessions.has(numericTabId)) {
+    const session = tabSessions.get(numericTabId);
+    return {
+      tabId: numericTabId,
+      source: 'tabSession',
+      prompts: Array.isArray(session.prompts) ? session.prompts.slice() : [],
+      currentIndex: Number(session.currentIndex || 0),
+      running: session.running === true,
+      paused: session.paused === true,
+    };
+  }
+
+  if ((!Number.isInteger(numericTabId) || state.tabId === numericTabId) && Array.isArray(state.prompts)) {
+    return {
+      tabId: Number.isInteger(numericTabId) ? numericTabId : (state.tabId || null),
+      source: 'globalState',
+      prompts: state.prompts.slice(),
+      currentIndex: Number(state.currentIndex || 0),
+      running: state.running === true,
+      paused: state.paused === true,
+    };
+  }
+
+  return {
+    tabId: Number.isInteger(numericTabId) ? numericTabId : null,
+    source: 'idle',
+    prompts: [],
+    currentIndex: 0,
+    running: false,
+    paused: false,
+  };
+}
+
 function buildTabSessionStatus(session) {
   if (!session) return createIdleStatusForTab(null);
   const total = Array.isArray(session.prompts) ? session.prompts.length : 0;
@@ -1599,6 +1634,7 @@ if (self.__PROMPT_QUEUE_TEST__) {
       acquiredAt: sendLease.acquiredAt,
     } : null,
     releaseSendLease,
+    buildQueueStateForTab,
     saveSettings,
     validateSettings,
     validateTargetSelectors,
@@ -3164,8 +3200,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "SIDE_PANEL_OPENED": {
-          if (sender?.tab?.id) {
-            openSidePanels.add(sender.tab.id);
+          const panelTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          if (Number.isInteger(panelTabId)) {
+            openSidePanels.add(panelTabId);
           }
           return;
         }
@@ -3375,6 +3414,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return;
           }
           sendResponse({ ok: true, status: getStatus() });
+          return;
+        }
+        case "GET_AUTOMATION_QUEUE_STATE": {
+          const targetTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          sendResponse({ ok: true, queue: buildQueueStateForTab(targetTabId) });
           return;
         }
         case "PROMPT_SUBMITTED": {

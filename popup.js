@@ -6,6 +6,7 @@ import { NEW_TAB_MARKER, resolveSeparator, buildPromptLaunchPlan } from './popup
 import { initMemoryPackUI, loadMemorySettingsIntoUI } from './popup-memory.js';
 import { initPromptQueueReorder, refreshPromptQueueReorder } from './popup-queue.js';
 import { renderSelectorHealth, renderStepStatus } from './popup-send-settings.js';
+import { createTabContextController } from './popup-tab-context.js';
 
 applyConsolePatch();
 
@@ -14,28 +15,24 @@ const MESSAGE_TYPES = PQ_CONSTANTS.MESSAGE_TYPES || {};
 const STORAGE_KEYS = PQ_CONSTANTS.STORAGE_KEYS || {};
 const separatorInput = document.getElementById('separatorInput');
 let latestAutomationStatus = null;
-let currentPanelTabId = null;
 let lastParallelFailureSignature = null;
 let hasInitializedParallelFailureState = false;
 
+const tabContext = createTabContextController({
+  chromeApi: chrome,
+  refreshStatus: () => refreshPanelForCurrentTab(),
+});
+
 async function getActiveTabId() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs?.[0]?.id;
+  return tabContext.getActiveTabId();
 }
 
 async function getContextTabId() {
-  const tabId = await getActiveTabId();
-  if (Number.isInteger(tabId)) {
-    currentPanelTabId = tabId;
-  }
-  return tabId;
+  return tabContext.getContextTabId();
 }
 
 function shouldHandleAutomationMessage(message) {
-  const messageTabId = Number(message?.tabId);
-  if (!Number.isInteger(messageTabId)) return true;
-  if (!Number.isInteger(currentPanelTabId)) return true;
-  return messageTabId === currentPanelTabId;
+  return tabContext.shouldHandleAutomationMessage(message);
 }
 
 function getParallelFailureSignature(status = {}) {
@@ -219,6 +216,11 @@ function formatDuration(ms) {
   const seconds = totalSeconds % 60;
   if (minutes <= 0) return `${seconds}s`;
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+async function refreshPanelForCurrentTab() {
+  await loadStateIntoUI();
+  await refreshStatus();
 }
 
 async function refreshStatus() {
@@ -717,11 +719,12 @@ async function importSampleData(importData) {
 // Start auto-refresh when popup opens
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    const initialTabId = await getContextTabId();
+    tabContext.bindActiveTabRefresh();
     try {
-      chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
+      chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED', tabId: initialTabId });
     } catch (_) {}
 
-    await getContextTabId();
     initInfoPopovers();
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
@@ -800,10 +803,14 @@ const updatePromptCount = () => {
 
 async function loadStateIntoUI() {
   try {
-    const { state: storedState } = await chrome.storage.local.get(['state']);
-    if (!storedState || !Array.isArray(storedState.prompts)) return;
     if (!promptsTextarea) return;
-    promptsTextarea.value = storedState.prompts.join('\n');
+    let tabId = tabContext.getCurrentPanelTabId();
+    if (!Number.isInteger(tabId)) {
+      tabId = await getContextTabId();
+    }
+    const res = await chrome.runtime.sendMessage({ type: 'GET_AUTOMATION_QUEUE_STATE', tabId });
+    const prompts = Array.isArray(res?.queue?.prompts) ? res.queue.prompts : [];
+    promptsTextarea.value = prompts.join('\n');
     updatePromptCount();
     autoResizeTextarea(promptsTextarea, { active: false });
   } catch (e) {
@@ -1156,8 +1163,7 @@ chrome.runtime.onMessage.addListener((message) => {
     // Reload prompts to show new transcription entries
     loadStateIntoUI();
   } else if (message?.type === 'CLOSE_SIDE_PANEL') {
-    const messageTabId = Number(message?.tabId);
-    if (!Number.isInteger(messageTabId) || !Number.isInteger(currentPanelTabId) || messageTabId === currentPanelTabId) {
+    if (tabContext.shouldCloseForMessage(message)) {
       window.close();
     }
   }
