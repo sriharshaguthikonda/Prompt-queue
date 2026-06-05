@@ -134,12 +134,64 @@ export function applyTypoVariantsToExactDuplicates(prompts = []) {
   return { prompts: out, changed };
 }
 
+let systemThemeMediaQuery = null;
+let systemThemeListener = null;
+
+function resolveEffectiveTheme(theme) {
+  if (theme === 'system') {
+    try {
+      return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    } catch (_) {
+      return 'dark';
+    }
+  }
+  return theme === 'light' ? 'light' : 'dark';
+}
+
+function detachSystemThemeListener() {
+  if (!systemThemeMediaQuery || !systemThemeListener) return;
+  try {
+    if (typeof systemThemeMediaQuery.removeEventListener === 'function') {
+      systemThemeMediaQuery.removeEventListener('change', systemThemeListener);
+    } else if (typeof systemThemeMediaQuery.removeListener === 'function') {
+      systemThemeMediaQuery.removeListener(systemThemeListener);
+    }
+  } catch (_) {}
+  systemThemeMediaQuery = null;
+  systemThemeListener = null;
+}
+
+function attachSystemThemeListener() {
+  if (systemThemeListener) return;
+  try {
+    const mediaQuery = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!mediaQuery) return;
+    systemThemeMediaQuery = mediaQuery;
+    systemThemeListener = () => applyTheme('system');
+    if (typeof mediaQuery.addEventListener === 'function') {
+      mediaQuery.addEventListener('change', systemThemeListener);
+    } else if (typeof mediaQuery.addListener === 'function') {
+      mediaQuery.addListener(systemThemeListener);
+    }
+  } catch (_) {
+    systemThemeMediaQuery = null;
+    systemThemeListener = null;
+  }
+}
+
 export function applyTheme(theme) {
   const body = document.body;
+  const requestedTheme = theme === 'system' ? 'system' : (theme === 'light' ? 'light' : 'dark');
+  const effectiveTheme = resolveEffectiveTheme(requestedTheme);
   body.classList.remove('theme-dark', 'theme-light');
-  body.classList.add(theme === 'light' ? 'theme-light' : 'theme-dark');
+  body.classList.add(effectiveTheme === 'light' ? 'theme-light' : 'theme-dark');
+  body.dataset.themePreference = requestedTheme;
   const sel = document.getElementById('themeSelect');
-  if (sel) sel.value = theme === 'light' ? 'light' : 'dark';
+  if (sel) sel.value = requestedTheme;
+  detachSystemThemeListener();
+  if (requestedTheme === 'system') {
+    attachSystemThemeListener();
+  }
 }
 
 export function setStatus(text, type = 'idle') {

@@ -96,6 +96,8 @@ const state = {
     prependSystemPrompt: true,
     appendSystemPrompt: false,
     theme: 'dark',
+    preSendQuietWindowMs: 1200,
+    chatgptPreSendQuietWindowMs: 1200,
     autoConfirmDialogs: false,
     enableWatchedElementGate: false,
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
@@ -177,6 +179,8 @@ const DEFAULT_SETTINGS = {
   prependSystemPrompt: true,
   appendSystemPrompt: false,
   theme: 'dark',
+  preSendQuietWindowMs: 1200,
+  chatgptPreSendQuietWindowMs: 1200,
   autoConfirmDialogs: false,
   enableWatchedElementGate: false,
   watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
@@ -208,7 +212,7 @@ const DEFAULT_SETTINGS = {
   openNewChatPerPromptUrl: '',
   memory: DEFAULT_MEMORY_SETTINGS,
 };
-const CONTENT_SCRIPT_VERSION = '2026-06-04.completion-stop-role-v2';
+const CONTENT_SCRIPT_VERSION = '2026-06-05.lifecycle-diagnostics-v1';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
@@ -246,6 +250,12 @@ function coerceNumber(v, min, max, fallback) {
     return n;
   }
   return fallback;
+}
+
+function clampNumber(v, min, max, fallback) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
 }
 
 function sanitizeMemoryBridgeBaseUrl(url) {
@@ -419,7 +429,19 @@ function validateSettings(input = {}, options = {}) {
     appendPromptText: typeof input.appendPromptText === 'string' ? input.appendPromptText : DEFAULT_SETTINGS.appendPromptText,
     prependSystemPrompt: input.prependSystemPrompt !== false,
     appendSystemPrompt: input.appendSystemPrompt === true,
-    theme: input.theme === 'light' ? 'light' : 'dark',
+    theme: input.theme === 'system' ? 'system' : (input.theme === 'light' ? 'light' : 'dark'),
+    preSendQuietWindowMs: clampNumber(
+      input.preSendQuietWindowMs ?? input.chatgptPreSendQuietWindowMs,
+      0,
+      60000,
+      DEFAULT_SETTINGS.preSendQuietWindowMs,
+    ),
+    chatgptPreSendQuietWindowMs: clampNumber(
+      input.preSendQuietWindowMs ?? input.chatgptPreSendQuietWindowMs,
+      0,
+      60000,
+      DEFAULT_SETTINGS.preSendQuietWindowMs,
+    ),
     autoConfirmDialogs: input.autoConfirmDialogs === true,
     enableWatchedElementGate: input.enableWatchedElementGate === true,
     watchedElementSelector: targetSelectors.watchedElement,
@@ -3077,7 +3099,19 @@ function makeHistorySignature(item) {
       appendPromptText: item.settings?.appendPromptText || '',
       prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
       appendSystemPrompt: item.settings?.appendSystemPrompt === true,
-      theme: item.settings?.theme === 'light' ? 'light' : 'dark',
+      theme: item.settings?.theme === 'system' ? 'system' : (item.settings?.theme === 'light' ? 'light' : 'dark'),
+      preSendQuietWindowMs: clampNumber(
+        item.settings?.preSendQuietWindowMs ?? item.settings?.chatgptPreSendQuietWindowMs,
+        0,
+        60000,
+        DEFAULT_SETTINGS.preSendQuietWindowMs,
+      ),
+      chatgptPreSendQuietWindowMs: clampNumber(
+        item.settings?.preSendQuietWindowMs ?? item.settings?.chatgptPreSendQuietWindowMs,
+        0,
+        60000,
+        DEFAULT_SETTINGS.preSendQuietWindowMs,
+      ),
       autoConfirmDialogs: item.settings?.autoConfirmDialogs === true,
       enableWatchedElementGate: item.settings?.enableWatchedElementGate === true,
       watchedElementSelector: typeof item.settings?.watchedElementSelector === 'string'

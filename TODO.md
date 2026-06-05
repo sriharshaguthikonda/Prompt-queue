@@ -15,6 +15,8 @@ Regenerate: `gh issue list --repo sriharshaguthikonda/Prompt-queue --state open`
 - Add color-coded step/timer UI for waiting, populating, pre-send delay, sending, waiting for response, retry, pause, and error.
 - Put duplicate-prompt typo variation behind a checkbox and disable it by default.
 - Move debugging controls/status into the bottom debug collapsible panel, including live selector health, dry-run populate-without-send, and per-step console logging.
+- Add sanitized lifecycle diagnostics for monitored signals: stop/send composer role, copy/good/bad buttons, loading shimmer, thinking/tool status, confirm dialog, watched selector state, pre-send quiet window, stream start/stop, and completion decision.
+- Leave room in settings for later user control over which signals are monitored and how lifecycle behavior gates completion.
 
 ## P2 — Nice to have
 - Q&A approval candidate still pending: debug bundle export.

@@ -3,6 +3,7 @@ import { msToSec, secToMs } from './popup-dom-utils.js';
 const FIELD_CONFIG = [
   { id: 'postPopulateDelayMinSec', label: 'Post-populate min (sec)', min: 0, step: 0.1, defaultMs: 500 },
   { id: 'postPopulateDelayMaxSec', label: 'Post-populate max (sec)', min: 0, step: 0.1, defaultMs: 1500 },
+  { id: 'preSendQuietWindowMs', label: 'Pre-send quiet window (ms)', min: 0, max: 60000, step: 10, defaultMs: 1200, isMs: true },
   { id: 'crossTabSendLockMinWaitSec', label: 'Cross-tab wait min (sec)', min: 0, step: 0.5, defaultMs: 3000 },
   { id: 'crossTabSendLockMaxWaitSec', label: 'Cross-tab wait max (sec)', min: 0, step: 0.5, defaultMs: 12000 },
 ];
@@ -31,8 +32,9 @@ function makeNumberField(config) {
   input.id = config.id;
   input.type = 'number';
   input.min = String(config.min);
+  if (Number.isFinite(Number(config.max))) input.max = String(config.max);
   input.step = String(config.step);
-  input.placeholder = String(msToSec(config.defaultMs));
+  input.placeholder = String(config.isMs ? config.defaultMs : msToSec(config.defaultMs));
   wrapper.append(label, input);
   return wrapper;
 }
@@ -111,6 +113,11 @@ function setNumberValue(id, valueMs, fallbackMs) {
   if (input) input.value = msToSec(Number.isFinite(Number(valueMs)) ? Number(valueMs) : fallbackMs);
 }
 
+function setRawNumberValue(id, value, fallback) {
+  const input = document.getElementById(id);
+  if (input) input.value = Number.isFinite(Number(value)) ? Number(value) : fallback;
+}
+
 export function loadSendTimingSettingsIntoUI(settings = {}) {
   ensureSendTimingSettingsUI();
   const duplicate = document.getElementById('enableDuplicateTypoVariants');
@@ -123,6 +130,7 @@ export function loadSendTimingSettingsIntoUI(settings = {}) {
   if (dryRun) dryRun.checked = settings.dryRunPopulateOnly === true;
   setNumberValue('postPopulateDelayMinSec', settings.postPopulateDelayMinMs, 500);
   setNumberValue('postPopulateDelayMaxSec', settings.postPopulateDelayMaxMs, 1500);
+  setRawNumberValue('preSendQuietWindowMs', settings.preSendQuietWindowMs ?? settings.chatgptPreSendQuietWindowMs, 1200);
   setNumberValue('crossTabSendLockMinWaitSec', settings.crossTabSendLockMinWaitMs, 3000);
   setNumberValue('crossTabSendLockMaxWaitSec', settings.crossTabSendLockMaxWaitMs, 12000);
 }
@@ -141,11 +149,13 @@ function orderedMs(minId, maxId, fallbackMin, fallbackMax) {
 export function readSendTimingSettingsFromUI() {
   ensureSendTimingSettingsUI();
   const postPopulate = orderedMs('postPopulateDelayMinSec', 'postPopulateDelayMaxSec', 500, 1500);
+  const preSendQuietWindowMs = Number(document.getElementById('preSendQuietWindowMs')?.value);
   const crossTab = orderedMs('crossTabSendLockMinWaitSec', 'crossTabSendLockMaxWaitSec', 3000, 12000);
   return {
     enableDuplicateTypoVariants: document.getElementById('enableDuplicateTypoVariants')?.checked === true,
     postPopulateDelayMinMs: postPopulate.minMs,
     postPopulateDelayMaxMs: postPopulate.maxMs,
+    preSendQuietWindowMs: Number.isFinite(preSendQuietWindowMs) ? Math.min(60000, Math.max(0, Math.round(preSendQuietWindowMs))) : 1200,
     crossTabSendLockEnabled: document.getElementById('crossTabSendLockEnabled')?.checked !== false,
     crossTabSendLockMinWaitMs: crossTab.minMs,
     crossTabSendLockMaxWaitMs: crossTab.maxMs,
@@ -160,6 +170,7 @@ export function initSendTimingSettingsUI({ onSettingsChanged } = {}) {
     'enableDuplicateTypoVariants',
     'postPopulateDelayMinSec',
     'postPopulateDelayMaxSec',
+    'preSendQuietWindowMs',
     'crossTabSendLockEnabled',
     'crossTabSendLockMinWaitSec',
     'crossTabSendLockMaxWaitSec',

@@ -1,5 +1,5 @@
 (function () {
-  const CHAT_STATE_VERSION = '2026-06-04.chat-state-v2';
+  const CHAT_STATE_VERSION = '2026-06-04.chat-state-v3';
   if (window.PromptQueueChatState?.version === CHAT_STATE_VERSION) return;
 
   const RESPONSE_ACTION_SELECTORS = [
@@ -28,6 +28,60 @@
 
   function normalizeText(text) {
     return String(text || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  }
+
+  function getNodeTextLength(node) {
+    return String(node?.innerText || node?.textContent || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .length;
+  }
+
+  function getClassSnippet(node) {
+    return String(node?.className || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 120) || null;
+  }
+
+  function getRectSnapshot(node) {
+    if (!node?.getBoundingClientRect) return null;
+    const rect = node.getBoundingClientRect();
+    return {
+      x: Number.isFinite(rect.x) ? Math.round(rect.x) : 0,
+      y: Number.isFinite(rect.y) ? Math.round(rect.y) : 0,
+      width: Number.isFinite(rect.width) ? Math.round(rect.width) : 0,
+      height: Number.isFinite(rect.height) ? Math.round(rect.height) : 0,
+    };
+  }
+
+  function describeNode(node, extras = {}) {
+    if (!node) return null;
+    return {
+      tag: node.tagName?.toLowerCase() || null,
+      id: node.id || null,
+      role: node.getAttribute?.('role') || null,
+      ariaLabel: node.getAttribute?.('aria-label') || null,
+      textLength: getNodeTextLength(node),
+      dataTestId: node.getAttribute?.('data-testid') || null,
+      disabled: node.getAttribute?.('disabled') !== null || node.disabled === true || node.getAttribute?.('aria-disabled') === 'true',
+      visible: isElementVisible(node),
+      rect: getRectSnapshot(node),
+      classSnippet: getClassSnippet(node),
+      ...extras,
+    };
+  }
+
+  function getResponseActionLabel(node, selector) {
+    const values = [
+      node?.getAttribute?.('aria-label'),
+      node?.getAttribute?.('data-testid'),
+      selector,
+    ].map((value) => String(value || '').toLowerCase());
+    if (values.some((value) => value.includes('copy-turn-action-button') || value.includes('copy response'))) return 'Copy response';
+    if (values.some((value) => value.includes('good response'))) return 'Good response';
+    if (values.some((value) => value.includes('bad response'))) return 'Bad response';
+    return 'Response action';
   }
 
   function getComposerActionButton() {
@@ -60,6 +114,15 @@
     if (hasSend) return { role: 'send-disabled', enabled, reason: labelHasSend ? 'send-disabled-label' : 'send-disabled-testid' };
     if (hasStop) return { role: 'stop-disabled', enabled, reason: labelHasStop ? 'stop-disabled-label' : 'stop-disabled-testid' };
     return { role: enabled ? 'unknown-enabled' : 'idle-disabled', enabled, reason: 'unknown' };
+  }
+
+  function getComposerActionDiagnostics(button = getComposerActionButton()) {
+    const role = getComposerActionRole(button);
+    return describeNode(button, {
+      enabled: role.enabled,
+      roleDecision: role.role,
+      roleReason: role.reason,
+    });
   }
 
   function isComposerActionButton(button) {
@@ -116,9 +179,6 @@
 
     for (const turn of tailTurns) {
       if (!turn) continue;
-      const loadingInTurn = findElementInTailTurns('.loading-shimmer', [turn]);
-      if (loadingInTurn) return true;
-
       let statusNodes = [];
       try {
         statusNodes = Array.from(turn.querySelectorAll('[class*="tool-message"] .text-start, [class*="tool-message"] button, [class*="tool-message"] .loading-shimmer'));
@@ -137,6 +197,156 @@
     return false;
   }
 
+  function describeCandidateNodes(selector, limit = 5) {
+    if (!selector || typeof selector !== 'string') {
+      return { selector: selector || null, count: 0, candidates: [], invalidSelector: false };
+    }
+    let nodes = [];
+    try {
+      nodes = Array.from(document.querySelectorAll(selector));
+    } catch (_) {
+      return { selector, count: 0, candidates: [], invalidSelector: true };
+    }
+    return {
+      selector,
+      count: nodes.length,
+      candidates: nodes.slice(0, limit).map((node, index) => describeNode(node, { index })),
+      invalidSelector: false,
+    };
+  }
+
+  function buildResponseEvidence({
+    responseScope = null,
+    responseText = '',
+    responseStableForMs = 0,
+    stableMs = 0,
+  } = {}) {
+    const scope = responseScope || getLatestAssistantTurn();
+    const responseCompletionMarkers = findResponseCompletionMarkers(scope);
+    const stableThreshold = Math.max(0, Number(stableMs) || 0);
+    const stableFor = Math.max(0, Number(responseStableForMs) || 0);
+    const normalizedResponseText = normalizeText(responseText);
+    const hasStableCapturedResponse = !!normalizedResponseText && stableFor >= stableThreshold;
+    return {
+      scope,
+      responseCompletionMarkers,
+      responseCompletionMarkerNames: responseCompletionMarkers.map((marker) => marker.label || marker.selector),
+      hasStableCapturedResponse,
+      responseCompletionEvidence: responseCompletionMarkers.length > 0 && hasStableCapturedResponse,
+    };
+  }
+
+  function classifyChatGPTDomActivity({
+    stopButtonSelector = '',
+    targetSettings = {},
+    responseScope = null,
+    responseText = '',
+    responseStableForMs = 0,
+    stableMs = 0,
+  } = {}) {
+    const tailTurns = getTailConversationTurns(2);
+    const responseEvidence = buildResponseEvidence({
+      responseScope,
+      responseText,
+      responseStableForMs,
+      stableMs,
+    });
+    const loadingShimmerEl = findElementInTailTurns('.loading-shimmer', tailTurns);
+    const thinkingIndicatorEl = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
+    const activeToolStatus = hasActiveToolStatusInTailTurns(tailTurns);
+    const explicitStop = queryOneSafe(stopButtonSelector);
+    const fallbackStop = queryOneSafe('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
+    const composerRole = getComposerActionRole();
+    const composerAction = getComposerActionDiagnostics();
+    const stopPresent = isActiveStopButton(explicitStop)
+      || isActiveStopButton(fallbackStop)
+      || composerRole.role === 'stop-active';
+    const confirmVisible = isConfirmDialogVisible();
+    const responseScopeContains = (node) => !!(
+      node
+      && responseEvidence.responseCompletionEvidence
+      && responseEvidence.scope
+      && responseEvidence.scope.contains(node)
+    );
+    const shimmerContradictedByCompletion = responseScopeContains(loadingShimmerEl);
+    const thinkingContradictedByCompletion = responseScopeContains(thinkingIndicatorEl);
+    const hardBlockingReasons = [];
+    const staleActivityReasons = [];
+    if (stopPresent) hardBlockingReasons.push('stopButton');
+    if (loadingShimmerEl && !shimmerContradictedByCompletion) {
+      hardBlockingReasons.push('loadingShimmer');
+    } else if (loadingShimmerEl) {
+      staleActivityReasons.push('staleLoadingShimmer');
+    }
+    if (thinkingIndicatorEl && !thinkingContradictedByCompletion) {
+      hardBlockingReasons.push('thinkingIndicator');
+    } else if (thinkingIndicatorEl) {
+      staleActivityReasons.push('staleThinkingIndicator');
+    }
+    if (activeToolStatus) hardBlockingReasons.push('activeToolStatus');
+    if (confirmVisible) hardBlockingReasons.push('confirmDialog');
+    const stopButtonCandidates = describeCandidateNodes(stopButtonSelector || 'button[data-testid="stop-button"]');
+    const fallbackStopCandidates = describeCandidateNodes('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
+    const responseCompletionMarkerDiagnostics = responseEvidence.responseCompletionMarkers.map((marker, index) => ({
+      selector: marker.selector,
+      label: marker.label || null,
+      node: describeNode(marker.node, { index }),
+    }));
+    const activityDiagnostics = {
+      selectorUsed: stopButtonSelector || null,
+      explicitStop: describeNode(explicitStop, { activeStop: isActiveStopButton(explicitStop) }),
+      fallbackStop: describeNode(fallbackStop, { activeStop: isActiveStopButton(fallbackStop) }),
+      stopButtonCandidates,
+      fallbackStopCandidates,
+      composerAction,
+      loadingShimmer: describeNode(loadingShimmerEl, {
+        stale: !!loadingShimmerEl && shimmerContradictedByCompletion,
+      }),
+      thinkingIndicator: describeNode(thinkingIndicatorEl, {
+        stale: !!thinkingIndicatorEl && thinkingContradictedByCompletion,
+      }),
+      counts: {
+        stopButtonCandidates: stopButtonCandidates.count,
+        fallbackStopCandidates: fallbackStopCandidates.count,
+        responseCompletionMarkers: responseCompletionMarkerDiagnostics.length,
+      },
+      activeToolStatus,
+      confirmVisible,
+      hardBlockingReasons: hardBlockingReasons.slice(),
+      staleActivityReasons: staleActivityReasons.slice(),
+      responseCompletionMarkers: responseCompletionMarkerDiagnostics,
+      hasStableCapturedResponse: responseEvidence.hasStableCapturedResponse,
+      responseCompletionEvidence: responseEvidence.responseCompletionEvidence,
+      finalDecisionReason: hardBlockingReasons.length > 0
+        ? `active:${hardBlockingReasons.join(',')}`
+        : responseEvidence.responseCompletionEvidence
+          ? 'inactive:stableResponseMarkers'
+          : 'inactive:noActivitySignals',
+    };
+    return {
+      loadingShimmer: !!loadingShimmerEl,
+      loadingShimmerHardBlock: !!loadingShimmerEl && !shimmerContradictedByCompletion,
+      staleLoadingShimmer: !!loadingShimmerEl && shimmerContradictedByCompletion,
+      thinkingIndicator: !!thinkingIndicatorEl,
+      thinkingIndicatorHardBlock: !!thinkingIndicatorEl && !thinkingContradictedByCompletion,
+      activeToolStatus: !!activeToolStatus,
+      stopPresent,
+      confirmVisible,
+      composerRole,
+      active: hardBlockingReasons.length > 0,
+      hardActivityPresent: hardBlockingReasons.length > 0,
+      blockingReasons: hardBlockingReasons.slice(),
+      hardBlockingReasons,
+      staleActivityReasons,
+      responseCompletionMarkers: responseEvidence.responseCompletionMarkers,
+      responseCompletionMarkerNames: responseEvidence.responseCompletionMarkerNames,
+      hasStableCapturedResponse: responseEvidence.hasStableCapturedResponse,
+      responseCompletionEvidence: responseEvidence.responseCompletionEvidence,
+      activityDiagnostics,
+      targetSettings,
+    };
+  }
+
   function isConfirmButton(el) {
     if (!el) return false;
     const tag = el.tagName ? el.tagName.toLowerCase() : '';
@@ -149,35 +359,8 @@
     return Array.from(document.querySelectorAll('button')).some(isConfirmButton);
   }
 
-  function getChatGPTThinkingSignals({ stopButtonSelector = '', targetSettings = {} } = {}) {
-    const tailTurns = getTailConversationTurns(2);
-    const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
-    const thinkingIndicator = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
-    const activeToolStatus = hasActiveToolStatusInTailTurns(tailTurns);
-    const explicitStop = queryOneSafe(stopButtonSelector);
-    const fallbackStop = queryOneSafe('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
-    const composerRole = getComposerActionRole();
-    const stopPresent = isActiveStopButton(explicitStop)
-      || isActiveStopButton(fallbackStop)
-      || composerRole.role === 'stop-active';
-    const confirmVisible = isConfirmDialogVisible();
-    const reasons = [];
-    if (stopPresent) reasons.push('stopButton');
-    if (loadingShimmer) reasons.push('loadingShimmer');
-    if (thinkingIndicator) reasons.push('thinkingIndicator');
-    if (activeToolStatus) reasons.push('activeToolStatus');
-    if (confirmVisible) reasons.push('confirmDialog');
-    return {
-      loadingShimmer: !!loadingShimmer,
-      thinkingIndicator: !!thinkingIndicator,
-      activeToolStatus: !!activeToolStatus,
-      stopPresent,
-      confirmVisible,
-      composerRole,
-      active: reasons.length > 0,
-      blockingReasons: reasons,
-      targetSettings,
-    };
+  function getChatGPTThinkingSignals(options = {}) {
+    return classifyChatGPTDomActivity(options);
   }
 
   function getLatestAssistantTurn() {
@@ -203,8 +386,7 @@
       }
       for (const node of nodes) {
         if (!node || !isElementVisible(node)) continue;
-        const label = node.getAttribute('aria-label') || node.getAttribute('data-testid') || node.textContent || selector;
-        markers.push({ selector, label: String(label).slice(0, 80) });
+        markers.push({ selector, label: getResponseActionLabel(node, selector), node });
       }
     }
     return markers;
@@ -212,11 +394,16 @@
 
   window.PromptQueueChatState = Object.freeze({
     version: CHAT_STATE_VERSION,
+    classifyChatGPTDomActivity,
     findResponseCompletionMarkers,
     getChatGPTThinkingSignals,
     getComposerActionButton,
+    getComposerActionDiagnostics,
     getComposerActionRole,
     getLatestAssistantTurn,
+    isActiveStopButton,
+    isButtonEnabled,
+    isElementVisible,
     responseActionSelectors: RESPONSE_ACTION_SELECTORS.slice(),
   });
 })();

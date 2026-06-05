@@ -14,6 +14,7 @@ Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extens
 - Post-populate waits and pre-send quiet windows are hard-coded in `content.js`.
 - Parallel tab launch has random gaps, but there is no global cross-tab send lease around actual send dispatch.
 - Status badges exist, but timer/status UI does not show each wait step with clear color and countdown.
+- Lifecycle diagnostics are still too coarse unless they explain monitored signals for the stop/send composer, copy/good/bad buttons, loading shimmer, thinking/tool status, confirm dialog, watched selector state, pre-send quiet window, stream start/stop, and completion decision.
 
 ## Default Settings
 
@@ -25,6 +26,7 @@ Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extens
 - `crossTabSendLockMaxWaitMs`: `12000`
 
 Use the existing settings blob unless a durable live send-lock key is required.
+Future settings should also let the user choose which monitored signals participate in lifecycle gating and how aggressively the extension treats completion, after the current hardening work lands.
 
 ## Tasks
 
@@ -60,6 +62,7 @@ Use the existing settings blob unless a durable live send-lock key is required.
 - Add per-step console logging toggle in the debug panel.
 - Add dry-run populate-without-send mode in the debug panel.
 - Add live selector health in the debug panel.
+- Add sanitized lifecycle diagnostics for monitored signals and lifecycle decisions, with no raw prompt or response text.
 - Render colors:
   - gray: idle/complete
   - blue: waiting/timer
@@ -79,3 +82,4 @@ Use the existing settings blob unless a durable live send-lock key is required.
 - During every timer/wait, the side panel shows the current step and countdown.
 - Bottom debug panel owns selector health, dry-run, and per-step logging controls.
 - Tests cover settings validation, duplicate toggle, cross-tab lease timeout/release, and status rendering.
+- Monitored-signal diagnostics explain what blocked or allowed progression without exposing content.

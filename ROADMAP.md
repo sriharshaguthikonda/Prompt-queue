@@ -34,6 +34,8 @@ Default choices for the timing/status phase unless overridden in `Q and A.md`:
 - Cross-tab send lease: enabled for concurrent tab sends, with UI-configurable random wait range. Initial default: 3-12 seconds.
 - Step status colors: gray idle, blue waiting/timer, green active send, amber retry/pause, red error.
 - ChatGPT composer insertion: prefer visible ProseMirror/contenteditable editor and do not rely on hidden fallback textarea for success.
+- Lifecycle diagnostics: require sanitized, detailed signals for stop/send composer state, copy/good/bad buttons, loading shimmer, thinking/tool status, confirm dialog, watched selector state, pre-send quiet window, stream start/stop, and completion decision.
+- Future controls: expose monitored-signal selection and lifecycle-behavior tuning in settings later, without hard-coding the current diagnostic contract.
 
 User-approved debug-panel follow-ups captured in `Q and A.md`: move debugging controls/status into the bottom debug collapsible panel, add per-step console logging, add live selector health there, and add dry-run populate-without-send there. Debug bundle export remains a later candidate.
 

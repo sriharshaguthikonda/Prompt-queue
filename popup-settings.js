@@ -87,6 +87,7 @@ export async function saveSettingsFromUI() {
     }
 
     settings = {
+      theme: document.getElementById('themeSelect')?.value || 'dark',
       maxWaitMs: secToMs(maxWaitSec),
       stableMinMs: secToMs(stableMinOrdered),
       stableMaxMs: secToMs(stableMaxOrdered),

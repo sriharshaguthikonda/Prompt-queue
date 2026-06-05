@@ -16,6 +16,7 @@ Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extens
 - `content-targets.js` already has visible ChatGPT composer candidates and selector sanitization.
 - `content.js` still owns too much behavior: input population, send readiness, response detection, completion waiting, and runner orchestration.
 - `.planning/debug/reload-required-population.md` resolved one reload race but left no-reload composer and wait-state blind spots.
+- The lifecycle contract now needs sanitized diagnostics for stop/send composer role, copy/good/bad buttons, loading shimmer, thinking/tool status, confirm dialog, watched selector state, pre-send quiet window, stream start/stop, and completion decision.
 
 ## Tasks
 
@@ -40,7 +41,7 @@ Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extens
 - Drive completion from stable latest assistant output plus response action markers: copy response, good response, or bad response.
 - Scope response action markers to the assistant turn after the rendered queued prompt so older copy buttons cannot satisfy a new completion wait.
 - Do not let stale hard activity signals block completion when a stable response and response action marker are present and the composer action is not actively stop-role.
-- Log sanitized completion diagnostics: composer role, response marker names, and activity blocker reason names.
+- Log sanitized completion diagnostics: composer role, response marker names, watched selector state, quiet-window timing, stream start/stop, and activity blocker reason names.
 - Ensure `RESPONSE_COMPLETE` advances the next prompt or ends the run.
 
 ### T4. Selector Health
@@ -51,6 +52,7 @@ Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extens
 - Report when custom selectors fall back because no visible match exists.
 - Surface selector health in the bottom debug collapsible panel.
 - Keep lifecycle selector roles synchronized with `docs/chatgpt-extension-lifecycle-flow.md`.
+- Keep monitored-signal diagnostics synchronized with `docs/chatgpt-extension-lifecycle-flow.md`.
 
 ### T5. Tests + Live Closeout
 
@@ -66,3 +68,4 @@ Lifecycle reference: [ChatGPT + Extension Lifecycle Flow](../docs/chatgpt-extens
 - Side panel shows the wait step instead of looking idle during hidden timers.
 - Debug panel shows selector health and no-reload dry-run outcome.
 - No raw prompt or response text is logged.
+- Sanitized diagnostics cover each monitored signal and explain the completion decision without exposing content.

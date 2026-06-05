@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-06-04.completion-stop-role-v2';
+  const CONTENT_SCRIPT_VERSION = '2026-06-05.lifecycle-diagnostics-v1';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -666,98 +666,33 @@
     inputEl?.dispatchEvent(up);
   }
 
-  function getTailConversationTurns(maxTurns = 2) {
-    const turns = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id]'));
-    if (turns.length === 0) return [];
-    return turns.slice(Math.max(0, turns.length - maxTurns));
-  }
-
-  function findElementInTailTurns(selector, tailTurns) {
-    let matches = [];
-    try {
-      matches = Array.from(document.querySelectorAll(selector));
-    } catch (_) {
-      return null;
-    }
-    if (matches.length === 0) return null;
-    if (!tailTurns || tailTurns.length === 0) return matches[matches.length - 1] || null;
-    for (let i = matches.length - 1; i >= 0; i -= 1) {
-      const candidate = matches[i];
-      if (tailTurns.some((turn) => turn.contains(candidate))) {
-        return candidate;
-      }
-    }
-    return null;
-  }
-
-  function hasActiveToolStatusInTailTurns(tailTurns) {
-    if (!tailTurns || tailTurns.length === 0) return false;
-    const activePatterns = [
-      /\btalking to\b/i,
-      /\bwants to talk to\b/i,
-      /\brunning\b/i,
-      /\bprocessing\b/i,
-    ];
-    const inactivePatterns = [
-      /\btalked to\b/i,
-      /\bstopped talking to\b/i,
-      /\byou allowed this action\b/i,
-      /\byou denied this action\b/i,
-    ];
-
-    for (const turn of tailTurns) {
-      if (!turn) continue;
-      const loadingInTurn = findElementInTailTurns('.loading-shimmer', [turn]);
-      if (loadingInTurn) return true;
-
-      let statusNodes = [];
-      try {
-        statusNodes = Array.from(turn.querySelectorAll('[class*="tool-message"] .text-start, [class*="tool-message"] button, [class*="tool-message"] .loading-shimmer'));
-      } catch (_) {
-        statusNodes = [];
-      }
-
-      for (const node of statusNodes) {
-        if (!node || !isElementVisible(node)) continue;
-        const text = normalizeButtonText(node.textContent || node.innerText || '');
-        if (!text) continue;
-        if (inactivePatterns.some((pattern) => pattern.test(text))) continue;
-        if (activePatterns.some((pattern) => pattern.test(text))) return true;
-      }
-    }
-    return false;
-  }
-
-  function getChatGPTThinkingSignals() {
+  function getChatGPTThinkingSignals(options = {}) {
     if (typeof chatStateTools.getChatGPTThinkingSignals === 'function') {
       return chatStateTools.getChatGPTThinkingSignals({
         stopButtonSelector: resolveStopButtonSelector('chatgpt', currentTargetSettings),
         targetSettings: currentTargetSettings,
+        ...options,
       });
     }
-    // Ignore stale indicators in older turns; only tail turns can block sending.
-    const tailTurns = getTailConversationTurns(2);
-    const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
-    const thinkingIndicator = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
-    const activeToolStatus = hasActiveToolStatusInTailTurns(tailTurns);
-    const stopSelector = resolveStopButtonSelector('chatgpt', currentTargetSettings);
-    const stopPresent = isActiveStopButton(stopSelector ? queryOneSafe(stopSelector) : null)
-      || isActiveStopButton(queryOneSafe('button[aria-label="Stop generating"], button[data-testid="stop-button"]'));
-    const confirmVisible = isConfirmDialogVisible();
+    const composerRole = getChatGPTComposerRole();
     return {
-      loadingShimmer: !!loadingShimmer,
-      thinkingIndicator: !!thinkingIndicator,
-      activeToolStatus: !!activeToolStatus,
-      stopPresent: !!stopPresent,
-      confirmVisible,
-      active: !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible,
-      blockingReasons: [
-        stopPresent ? 'stopButton' : '',
-        loadingShimmer ? 'loadingShimmer' : '',
-        thinkingIndicator ? 'thinkingIndicator' : '',
-        activeToolStatus ? 'activeToolStatus' : '',
-        confirmVisible ? 'confirmDialog' : '',
-      ].filter(Boolean),
+      loadingShimmer: false,
+      loadingShimmerHardBlock: false,
+      staleLoadingShimmer: false,
+      thinkingIndicator: false,
+      activeToolStatus: false,
+      stopPresent: composerRole.role === 'stop-active',
+      confirmVisible: false,
+      composerRole,
+      active: composerRole.role === 'stop-active',
+      hardActivityPresent: composerRole.role === 'stop-active',
+      blockingReasons: composerRole.role === 'stop-active' ? ['stopButton'] : [],
+      hardBlockingReasons: composerRole.role === 'stop-active' ? ['stopButton'] : [],
+      staleActivityReasons: [],
+      responseCompletionMarkers: [],
+      responseCompletionMarkerNames: [],
+      hasStableCapturedResponse: false,
+      responseCompletionEvidence: false,
     };
   }
 
@@ -769,68 +704,45 @@
     if (typeof chatStateTools.getComposerActionRole === 'function') {
       return chatStateTools.getComposerActionRole(button || undefined);
     }
-    button = button || document.querySelector('button#composer-submit-button');
-    if (!button) return { role: 'missing', enabled: false, reason: 'missing' };
-    const enabled = isButtonEnabled(button);
-    const label = normalizeButtonText(button.getAttribute('aria-label') || button.getAttribute('title') || button.textContent || '');
-    const testId = normalizeButtonText(button.getAttribute('data-testid') || '');
-    const type = normalizeButtonText(button.getAttribute('type') || '');
-    const labelHasStop = /\bstop\b|stop answering|stop generating|stop streaming/.test(label);
-    const labelHasSend = /\bsend\b|submit|send prompt|send message/.test(`${label} ${type}`);
-    const testIdHasStop = /\bstop\b|stop-button/.test(testId);
-    const testIdHasSend = /\bsend\b|send-button/.test(testId);
-    const hasStop = labelHasStop || (testIdHasStop && !labelHasSend);
-    const hasSend = labelHasSend || testIdHasSend;
-    if (hasSend && enabled) return { role: 'send-ready', enabled, reason: labelHasSend ? 'send-label' : 'send-testid' };
-    if (hasStop && enabled) return { role: 'stop-active', enabled, reason: labelHasStop ? 'stop-label' : 'stop-testid' };
-    if (hasSend) return { role: 'send-disabled', enabled, reason: labelHasSend ? 'send-disabled-label' : 'send-disabled-testid' };
-    if (hasStop) return { role: 'stop-disabled', enabled, reason: labelHasStop ? 'stop-disabled-label' : 'stop-disabled-testid' };
-    return { role: enabled ? 'unknown-enabled' : 'idle-disabled', enabled, reason: 'unknown' };
-  }
-
-  function isChatGPTComposerActionButton(button) {
-    return !!button && button.matches?.('button#composer-submit-button');
+    return { role: 'missing', enabled: false, reason: 'missing' };
   }
 
   function isActiveStopButton(button) {
-    if (!button || !isButtonEnabled(button)) return false;
-    if (isChatGPTComposerActionButton(button)) return getChatGPTComposerRole(button).role === 'stop-active';
-    const label = normalizeButtonText(button.getAttribute('aria-label') || button.getAttribute('title') || button.textContent || '');
-    const testId = normalizeButtonText(button.getAttribute('data-testid') || '');
-    const combined = `${label} ${testId}`;
-    const hasSend = /\bsend\b|send prompt|send message|send-button/.test(combined);
-    const hasStop = /\bstop\b|stop answering|stop generating|stop streaming|stop-button/.test(combined);
-    return hasStop && !hasSend;
+    if (typeof chatStateTools.isActiveStopButton === 'function') {
+      return chatStateTools.isActiveStopButton(button || undefined);
+    }
+    return false;
   }
 
   function findChatGPTResponseCompletionMarkers(responseScope) {
     if (typeof chatStateTools.findResponseCompletionMarkers === 'function') {
       return chatStateTools.findResponseCompletionMarkers(responseScope);
     }
-    const root = responseScope || document;
-    const selectors = [
-      'button[data-testid="copy-turn-action-button"]',
-      'button[aria-label="Copy response"]',
-      'button[aria-label="Good response"]',
-      'button[aria-label="Bad response"]',
-    ];
-    const markers = [];
-    for (const selector of selectors) {
-      let nodes = [];
-      try {
-        nodes = Array.from(root.querySelectorAll(selector));
-      } catch (_) {
-        nodes = [];
-      }
-      for (const node of nodes) {
-        if (!node || !isElementVisible(node)) continue;
-        markers.push({
-          selector,
-          label: String(node.getAttribute('aria-label') || node.getAttribute('data-testid') || node.textContent || selector).slice(0, 80),
-        });
-      }
-    }
-    return markers;
+    return [];
+  }
+
+  function getChatGPTActivityDiagnostics(options = {}) {
+    const signals = getChatGPTThinkingSignals(options);
+    const diagnostics = signals?.activityDiagnostics || {};
+    return {
+      selectorUsed: diagnostics.selectorUsed || options?.stopButtonSelector || null,
+      stopButtonCandidates: diagnostics.stopButtonCandidates || { selector: options?.stopButtonSelector || null, count: 0, candidates: [], invalidSelector: false },
+      fallbackStopCandidates: diagnostics.fallbackStopCandidates || { selector: 'button[aria-label="Stop generating"], button[data-testid="stop-button"]', count: 0, candidates: [], invalidSelector: false },
+      explicitStop: diagnostics.explicitStop || null,
+      fallbackStop: diagnostics.fallbackStop || null,
+      composerAction: diagnostics.composerAction || null,
+      loadingShimmer: diagnostics.loadingShimmer || null,
+      thinkingIndicator: diagnostics.thinkingIndicator || null,
+      counts: diagnostics.counts || { stopButtonCandidates: 0, fallbackStopCandidates: 0, responseCompletionMarkers: 0 },
+      hardBlockingReasons: diagnostics.hardBlockingReasons || signals?.hardBlockingReasons || [],
+      staleActivityReasons: diagnostics.staleActivityReasons || signals?.staleActivityReasons || [],
+      responseCompletionMarkers: diagnostics.responseCompletionMarkers || [],
+      hasStableCapturedResponse: diagnostics.hasStableCapturedResponse || signals?.hasStableCapturedResponse || false,
+      responseCompletionEvidence: diagnostics.responseCompletionEvidence || signals?.responseCompletionEvidence || false,
+      activeToolStatus: diagnostics.activeToolStatus || signals?.activeToolStatus || false,
+      confirmVisible: diagnostics.confirmVisible || signals?.confirmVisible || false,
+      finalDecisionReason: diagnostics.finalDecisionReason || 'unknown',
+    };
   }
 
   function waitForChatGPTSendWindow({ sendButton, inputEl, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
@@ -854,21 +766,42 @@
             hasSendButton: !!currentSendButton,
             directReady,
             canSend,
+            preSendQuietWindowMs: quietWindowMs,
+            quietWindowMs,
             inputLength: getInputTextLengthQuiet(inputEl),
           });
         }
 
         if (!busy && canSend) {
+          if (quietWindowMs <= 0) {
+            console.log('[PreSendGuard] Quiet send window reached', {
+              elapsed,
+              preSendQuietWindowMs: quietWindowMs,
+              quietWindowMs,
+              reason: 'disabledQuietWindow',
+            });
+            resolve();
+            return;
+          }
           if (readySince === null) {
             readySince = Date.now();
           } else if (Date.now() - readySince >= quietWindowMs) {
-            console.log('[PreSendGuard] Quiet send window reached', { elapsed, quietWindowMs });
+            console.log('[PreSendGuard] Quiet send window reached', {
+              elapsed,
+              preSendQuietWindowMs: quietWindowMs,
+              quietWindowMs,
+            });
             resolve();
             return;
           }
         } else {
           if (readySince !== null) {
-            console.log('[PreSendGuard] Busy signal returned; resetting quiet window', { elapsed, busy, canSend });
+            console.log('[PreSendGuard] Busy signal returned; resetting quiet window', {
+              elapsed,
+              busy,
+              canSend,
+              preSendQuietWindowMs: quietWindowMs,
+            });
           }
           readySince = null;
         }
@@ -882,6 +815,12 @@
 
       check();
     });
+  }
+
+  function getChatGPTPreSendQuietWindowMs(settings = currentTargetSettings) {
+    const raw = Number(settings?.preSendQuietWindowMs ?? settings?.chatgptPreSendQuietWindowMs);
+    if (!Number.isFinite(raw)) return 1200;
+    return Math.min(60000, Math.max(0, Math.round(raw)));
   }
 
   function waitForEnabledSendButton({
@@ -1161,15 +1100,14 @@
         const stopBtnPresent = isActiveStopButton(stopBtn);
         let activeGenerationPresent = stopBtnPresent;
         let chatGptThinkingSignals = null;
+        let chatGptActivityDiagnostics = null;
         let composerActionRole = null;
 
         let currentSendButton = sendButton;
         let canSend = isButtonEnabled(currentSendButton);
         if (site === 'chatgpt') {
           currentSendButton = findSendButtonForSite('chatgpt', inputEl || findPromptInput()) || sendButton;
-          chatGptThinkingSignals = getChatGPTThinkingSignals();
           composerActionRole = getChatGPTComposerRole(currentSendButton);
-          activeGenerationPresent = stopBtnPresent || chatGptThinkingSignals.active;
           canSend = isButtonEnabled(currentSendButton) || isChatGPTReadyToSend(inputEl || findPromptInput());
         } else if (site === 'gemini') {
           canSend = isGeminiDone();
@@ -1212,21 +1150,33 @@
           }
         }
 
+        if (site === 'chatgpt') {
+          chatGptThinkingSignals = getChatGPTThinkingSignals({
+            responseScope: responseSnapshot.responseScope,
+            responseText: responseSnapshot.responseText,
+            responseStableForMs: responseStableFor,
+            stableMs: effectiveStableMs,
+          });
+          chatGptActivityDiagnostics = getChatGPTActivityDiagnostics({
+            responseScope: responseSnapshot.responseScope,
+            responseText: responseSnapshot.responseText,
+            responseStableForMs: responseStableFor,
+            stableMs: effectiveStableMs,
+            stopButtonSelector,
+          });
+          composerActionRole = chatGptThinkingSignals.composerRole || composerActionRole;
+          activeGenerationPresent = stopBtnPresent || chatGptThinkingSignals.active;
+        }
+
         const domStableEnough = stableFor >= effectiveStableMs;
         const responseStableEnough = site === 'chatgpt' && responseSnapshot.ok && responseStableFor >= effectiveStableMs;
         const responseCompletionMarkers = site === 'chatgpt' && responseSnapshot.ok
-          ? findChatGPTResponseCompletionMarkers(responseSnapshot.responseScope)
+          ? (chatGptThinkingSignals?.responseCompletionMarkers || findChatGPTResponseCompletionMarkers(responseSnapshot.responseScope))
           : [];
         const responseCompletionMarkerNames = responseCompletionMarkers.map((marker) => marker.label || marker.selector);
         const responseActionSatisfied = watchGateSatisfied || responseCompletionMarkers.length > 0;
-        const hardChatGptActivityPresent = !!(
-          chatGptThinkingSignals
-          && (chatGptThinkingSignals.loadingShimmer
-            || chatGptThinkingSignals.thinkingIndicator
-            || chatGptThinkingSignals.activeToolStatus
-            || chatGptThinkingSignals.confirmVisible)
-        );
-        const activityBlockerReasons = chatGptThinkingSignals?.blockingReasons || [];
+        const hardChatGptActivityPresent = !!chatGptThinkingSignals?.hardActivityPresent;
+        const activityBlockerReasons = chatGptThinkingSignals?.hardBlockingReasons || chatGptThinkingSignals?.blockingReasons || [];
         const composerStopActive = composerActionRole?.role === 'stop-active';
         const currentStopActive = !!(stopBtnPresent || composerStopActive || chatGptThinkingSignals?.stopPresent);
         const stopOnlyChatGptActivity = site === 'chatgpt'
@@ -1234,9 +1184,30 @@
           && !hardChatGptActivityPresent;
         const chatGptResponseComplete = responseStableEnough
           && responseActionSatisfied
-          && !currentStopActive;
+          && !currentStopActive
+          && !hardChatGptActivityPresent;
         const domComplete = domStableEnough && !activeGenerationPresent && canSend && watchGateSatisfied;
         const completeEnough = site === 'chatgpt' ? (chatGptResponseComplete || domComplete) : domComplete;
+        const finalDecisionReason = site === 'chatgpt'
+          ? (
+            chatGptResponseComplete ? 'chatgptResponseComplete'
+              : domComplete ? 'domComplete'
+                : currentStopActive ? 'blocked:stopActive'
+                  : hardChatGptActivityPresent ? `blocked:${activityBlockerReasons.join(',') || 'hardActivity'}`
+                    : !responseActionSatisfied ? 'waiting:responseMarkersOrWatchGate'
+                      : !responseStableEnough ? 'waiting:responseStability'
+                        : !domStableEnough ? 'waiting:domStability'
+                          : !canSend ? 'waiting:sendReady'
+                            : 'waiting:unknown'
+          )
+          : (
+            domComplete ? 'domComplete'
+              : activeGenerationPresent ? 'blocked:activeGeneration'
+                : !domStableEnough ? 'waiting:domStability'
+                  : !canSend ? 'waiting:sendReady'
+                    : !watchGateSatisfied ? 'waiting:watchGate'
+                      : 'waiting:unknown'
+          );
 
         if (elapsed - lastStatusAt >= 5000) {
           lastStatusAt = elapsed;
@@ -1262,9 +1233,12 @@
             composerActionRole: composerActionRole?.role || null,
             responseCompletionMarkers: responseCompletionMarkerNames,
             activityBlockerReasons,
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
             canSend,
             chatGptResponseComplete,
             watchGateSatisfied,
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
           });
         }
 
@@ -1280,9 +1254,12 @@
             composerActionRole: composerActionRole?.role || null,
             responseCompletionMarkers: responseCompletionMarkerNames,
             activityBlockerReasons,
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
             canSend,
             chatGptResponseComplete,
-            watchGateSatisfied
+            watchGateSatisfied,
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
           });
           cleanup();
           resolve();
@@ -1303,7 +1280,11 @@
             stopBtnPresent, 
             canSend,
             responseCaptured: responseSnapshot.ok,
-            responseLength: responseSnapshot.responseLength || 0
+            responseLength: responseSnapshot.responseLength || 0,
+            activityBlockerReasons,
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
           });
           cleanup();
           resolve();
@@ -1328,6 +1309,37 @@
       const requiredNoStopChecks = 3; // Require 3 consecutive checks without stop button
       const site = detectSite();
 
+      function buildWaitForStreamsLogPayload({
+        elapsed,
+        stopPresent,
+        stillStreaming,
+        chatGptThinkingSignals,
+        chatGptActivityDiagnostics,
+        finalDecisionReason,
+      }) {
+        return {
+          site,
+          stopButtonSelector: stopButtonSelector || null,
+          elapsed,
+          enableTimeout: enableTimeoutCheck,
+          noStopButtonCount,
+          requiredNoStopChecks,
+          stopPresent,
+          stillStreaming,
+          explicitStop: chatGptActivityDiagnostics?.explicitStop || null,
+          fallbackStop: chatGptActivityDiagnostics?.fallbackStop || null,
+          composerAction: chatGptActivityDiagnostics?.composerAction || null,
+          candidateCounts: {
+            stopButtonCandidates: chatGptActivityDiagnostics?.counts?.stopButtonCandidates ?? 0,
+            fallbackStopCandidates: chatGptActivityDiagnostics?.counts?.fallbackStopCandidates ?? 0,
+          },
+          hardBlockingReasons: chatGptThinkingSignals?.hardBlockingReasons || (stopPresent ? ['stopButton'] : []),
+          staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+          finalDecisionReason,
+          activityDiagnostics: chatGptActivityDiagnostics || null,
+        };
+      }
+
       const checkStop = () => {
         maybeClickConfirmButtons('waitForStreamsToStop');
         const elapsed = Date.now() - startTime;
@@ -1335,38 +1347,74 @@
         const stopPresent = isActiveStopButton(stopBtn);
 
         let stillStreaming = stopPresent;
+        let chatGptThinkingSignals = null;
+        let chatGptActivityDiagnostics = null;
+        let finalDecisionReason = stopPresent ? 'blocked:stopButton' : 'waiting:quietChecks';
 
         // For ChatGPT, also treat thinking indicators as active streaming
         if (site === 'chatgpt') {
-          if (isChatGPTThinking()) {
+          chatGptThinkingSignals = getChatGPTThinkingSignals({ stopButtonSelector, targetSettings: currentTargetSettings });
+          chatGptActivityDiagnostics = getChatGPTActivityDiagnostics({ stopButtonSelector, targetSettings: currentTargetSettings });
+          if (chatGptThinkingSignals.active) {
             stillStreaming = true;
+            finalDecisionReason = `blocked:${chatGptActivityDiagnostics.finalDecisionReason || 'chatgptActivity'}`;
+          } else if (!stopPresent) {
+            finalDecisionReason = noStopButtonCount + 1 >= requiredNoStopChecks
+              ? 'resolved:quietChecksSatisfied'
+              : 'waiting:quietChecks';
           }
         }
 
+        const diagnosticPayload = buildWaitForStreamsLogPayload({
+          elapsed,
+          stopPresent,
+          stillStreaming,
+          chatGptThinkingSignals,
+          chatGptActivityDiagnostics,
+          finalDecisionReason,
+        });
+
         if (!stillStreaming) {
           noStopButtonCount++;
-          console.log('[WaitForStreamsToStop] No stop button detected', { 
-            noStopButtonCount, 
-            requiredNoStopChecks,
-            elapsed,
-            enableTimeout: enableTimeoutCheck
+          console.log('[WaitForStreamsToStop] No stop button detected', {
+            ...diagnosticPayload,
+            noStopButtonCount,
           });
           
           // Require multiple consecutive checks without stop button to confirm not streaming
           if (noStopButtonCount >= requiredNoStopChecks) {
-            console.log('[WaitForStreamsToStop] Confirmed: No active stream, safe to proceed');
+            console.log('[WaitForStreamsToStop] Confirmed: No active stream, safe to proceed', {
+              elapsed,
+              noStopButtonCount,
+              requiredNoStopChecks,
+              selectorUsed: stopButtonSelector || null,
+              finalDecisionReason: 'resolved:quietChecksSatisfied',
+              activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
+            });
             resolve();
             return;
           }
         } else {
           // Reset counter if stop button appears
           noStopButtonCount = 0;
-          console.log('[WaitForStreamsToStop] Stop button detected, resetting counter', { enableTimeout: enableTimeoutCheck });
+          console.log('[WaitForStreamsToStop] Stop button detected, resetting counter', {
+            ...diagnosticPayload,
+            noStopButtonCount,
+          });
         }
 
         if (elapsed > effectiveMaxWaitMs) {
           // Timeout: reject instead of proceeding with potentially active stream
-          console.error('[WaitForStreamsToStop] Timeout waiting for stream to stop after ' + effectiveMaxWaitMs + 'ms. Stop button still present.');
+          console.error('[WaitForStreamsToStop] Timeout waiting for stream to stop after ' + effectiveMaxWaitMs + 'ms. Stop button still present.', {
+            elapsed,
+            selectorUsed: stopButtonSelector || null,
+            stopPresent,
+            activityBlockerReasons: chatGptThinkingSignals?.hardBlockingReasons || (stopPresent ? ['stopButton'] : []),
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+            responseCompletionMarkers: chatGptThinkingSignals?.responseCompletionMarkerNames || [],
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
+          });
           reject(new Error('Stream did not stop within timeout period. Stopping automation to prevent queue rush.'));
           return;
         }
@@ -1731,14 +1779,20 @@
 
       if (site === 'chatgpt') {
         const preSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
+        const configuredQuietWindowMs = getChatGPTPreSendQuietWindowMs(options);
         emitStepUpdate({ step: 'pre_send_quiet_window', promptId, detail: 'Waiting for ChatGPT send window', durationMs: preSendMaxWaitMs, endAt: Date.now() + preSendMaxWaitMs, log: options?.perStepConsoleLogging === true });
-        console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', { promptId, preSendMaxWaitMs });
+        console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', {
+          promptId,
+          preSendMaxWaitMs,
+          preSendQuietWindowMs: configuredQuietWindowMs,
+          quietWindowMs: configuredQuietWindowMs,
+        });
         try {
           await waitForChatGPTSendWindow({
             sendButton: sendBtn,
             inputEl,
             maxWaitMs: preSendMaxWaitMs,
-            quietWindowMs: 120,
+            quietWindowMs: configuredQuietWindowMs,
             pollMs: 250,
           });
         } catch (preSendErr) {
@@ -1817,17 +1871,20 @@
           await new Promise((r) => setTimeout(r, 250));
           if (site === 'chatgpt') {
             const retryPreSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
+            const configuredQuietWindowMs = getChatGPTPreSendQuietWindowMs(options);
             console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window before retry', {
               promptId,
               attempt,
               retryPreSendMaxWaitMs,
+              preSendQuietWindowMs: configuredQuietWindowMs,
+              quietWindowMs: configuredQuietWindowMs,
             });
             try {
               await waitForChatGPTSendWindow({
                 sendButton: sendBtn,
                 inputEl,
                 maxWaitMs: retryPreSendMaxWaitMs,
-                quietWindowMs: 1200,
+                quietWindowMs: configuredQuietWindowMs,
                 pollMs: 250,
               });
             } catch (retryPreSendErr) {
@@ -2019,6 +2076,7 @@
       setTextInInput,
       waitForComposerReady,
       waitForCompletion,
+      waitForChatGPTSendWindow,
       waitForStreamsToStop,
     };
   }

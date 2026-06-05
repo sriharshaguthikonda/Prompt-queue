@@ -12,6 +12,7 @@ Stop growing `content.js` as a catch-all file. Split send-path behavior into foc
 - Do not combine refactor with broad feature work unless a small extraction is required for a bug fix.
 - Preserve existing test hooks or replace them with equivalent module-level test access.
 - Preserve privacy rules: no raw prompt, response, token, clipboard, or memory text in logs.
+- Preserve the sanitized lifecycle diagnostic contract for monitored signals, including stop/send composer role, copy/good/bad buttons, loading shimmer, thinking/tool status, confirm dialog, watched selector state, pre-send quiet window, stream start/stop, and completion decision.
 
 ## Proposed Modules
 
@@ -21,6 +22,7 @@ Stop growing `content.js` as a catch-all file. Split send-path behavior into foc
 - `content-chat-state.js`: ChatGPT composer action-role detection, response action marker detection, readiness, pre-send quiet window, stream/stop detection, completion wait.
 - `content-runner.js`: message listener and prompt orchestration only.
 - `content-debug.js`: sanitized logging/status event helpers.
+- `content-diagnostics.js`: monitored-signal summaries and lifecycle decision diagnostics, kept free of raw content.
 
 ## Tasks
 
@@ -36,6 +38,7 @@ Stop growing `content.js` as a catch-all file. Split send-path behavior into foc
 - Keep stable-response completion independent from send-button enabled state.
 - Keep ChatGPT response action marker candidates centralized: copy response, good response, and bad response.
 - Keep composer action-role detection out of the runner; `button#composer-submit-button` can be send-ready, stop-active, or idle/disabled.
+- Centralize sanitized diagnostics for monitored signals so the runner can report what was observed without duplicating DOM logic.
 
 ### T3. Extract Runner Orchestration
 
@@ -59,3 +62,4 @@ Stop growing `content.js` as a catch-all file. Split send-path behavior into foc
 - Selector, input, response detection, and runner code each have a clear owner file.
 - Existing send behavior is unchanged except for bugs deliberately fixed in the hardening phase.
 - Tests cover module load order and exposed test hooks.
+- Lifecycle diagnostics remain detailed, sanitized, and owned by a dedicated module or shared helper surface.

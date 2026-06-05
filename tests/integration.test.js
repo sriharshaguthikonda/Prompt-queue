@@ -100,13 +100,18 @@ describe('Content Script Integration', () => {
   });
 
   describe('waitForStreamsToStop', () => {
+    let logSpy;
+
     beforeEach(() => {
       jest.useFakeTimers();
+      logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
     });
 
     afterEach(() => {
       jest.runOnlyPendingTimers();
       jest.useRealTimers();
+      logSpy.mockRestore();
+      document.body.innerHTML = '';
     });
 
     it('should resolve when stop button is not present', async () => {
@@ -179,11 +184,149 @@ describe('Content Script Integration', () => {
       const result = await promise;
       expect(result).toBeUndefined();
     });
+
+    it('logs sanitized ChatGPT stop-detected diagnostics while waiting for streams to stop', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <button class="stop-btn btn-primary" data-testid="stop-button" aria-label="Stop generating">Stop</button>
+        <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop answering" class="composer-stop">Stop</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="assistant">
+            <div class="loading-shimmer shimmer-live">Loading</div>
+          </article>
+        </main>
+      `;
+
+      const stopBtn = document.querySelector('.stop-btn');
+      const composerBtn = document.getElementById('composer-submit-button');
+      const shimmer = document.querySelector('.loading-shimmer');
+      stopBtn.getBoundingClientRect = jest.fn(() => ({ x: 5, y: 10, width: 90, height: 32 }));
+      composerBtn.getBoundingClientRect = jest.fn(() => ({ x: 10, y: 20, width: 88, height: 32 }));
+      shimmer.getBoundingClientRect = jest.fn(() => ({ x: 12, y: 40, width: 120, height: 20 }));
+
+      const promise = waitForStreamsToStop({
+        stopButtonSelector: '.stop-btn',
+        maxWaitMs: 5000,
+        enableTimeout: false,
+      });
+
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+
+      const stopDetectedLog = logSpy.mock.calls.find(([message]) =>
+        message === '[WaitForStreamsToStop] Stop button detected, resetting counter'
+      );
+      expect(stopDetectedLog).toBeTruthy();
+      expect(stopDetectedLog[1]).toMatchObject({
+        site: 'chatgpt',
+        stopButtonSelector: '.stop-btn',
+        elapsed: expect.any(Number),
+        enableTimeout: false,
+        noStopButtonCount: 0,
+        requiredNoStopChecks: 3,
+        stopPresent: true,
+        stillStreaming: true,
+        hardBlockingReasons: expect.arrayContaining(['stopButton', 'loadingShimmer']),
+        staleActivityReasons: [],
+        finalDecisionReason: 'blocked:active:stopButton,loadingShimmer',
+        candidateCounts: expect.objectContaining({
+          stopButtonCandidates: 1,
+          fallbackStopCandidates: expect.any(Number),
+        }),
+        explicitStop: expect.objectContaining({
+          ariaLabel: 'Stop generating',
+          dataTestId: 'stop-button',
+          textLength: 4,
+          visible: true,
+        }),
+        fallbackStop: expect.any(Object),
+        composerAction: expect.objectContaining({
+          ariaLabel: 'Stop answering',
+          roleDecision: 'stop-active',
+          roleReason: 'stop-label',
+          visible: true,
+        }),
+        activityDiagnostics: expect.objectContaining({
+          selectorUsed: '.stop-btn',
+          hardBlockingReasons: expect.arrayContaining(['stopButton', 'loadingShimmer']),
+          counts: expect.objectContaining({
+            stopButtonCandidates: 1,
+            responseCompletionMarkers: expect.any(Number),
+          }),
+          stopButtonCandidates: expect.objectContaining({
+            count: 1,
+            candidates: expect.arrayContaining([
+              expect.objectContaining({
+                ariaLabel: 'Stop generating',
+                dataTestId: 'stop-button',
+                textLength: 4,
+                visible: true,
+              }),
+            ]),
+          }),
+          loadingShimmer: expect.objectContaining({
+            textLength: 7,
+            visible: true,
+          }),
+        }),
+      });
+
+      document.querySelector('.stop-btn').remove();
+      document.getElementById('composer-submit-button').remove();
+      document.querySelector('.loading-shimmer').remove();
+      jest.advanceTimersByTime(3000);
+      await expect(promise).resolves.toBeUndefined();
+    });
+  });
+
+  describe('waitForChatGPTSendWindow', () => {
+    let logSpy;
+
+    beforeEach(() => {
+      jest.useFakeTimers();
+      logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+      document.body.innerHTML = `
+        <textarea id="prompt-textarea">Queued prompt</textarea>
+        <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt">Send</button>
+      `;
+      document.getElementById('prompt-textarea').getBoundingClientRect = jest.fn(() => ({ width: 320, height: 48 }));
+      document.getElementById('composer-submit-button').getBoundingClientRect = jest.fn(() => ({ width: 96, height: 32 }));
+    });
+
+    afterEach(() => {
+      jest.runOnlyPendingTimers();
+      jest.useRealTimers();
+      logSpy.mockRestore();
+      document.body.innerHTML = '';
+    });
+
+    it('resolves immediately when the configured quiet window is zero', async () => {
+      const promise = waitForChatGPTSendWindow({
+        sendButton: document.getElementById('composer-submit-button'),
+        inputEl: document.getElementById('prompt-textarea'),
+        maxWaitMs: 10000,
+        quietWindowMs: 0,
+        pollMs: 250,
+      });
+
+      await expect(promise).resolves.toBeUndefined();
+      expect(logSpy).toHaveBeenCalledWith('[PreSendGuard] Quiet send window reached', expect.objectContaining({
+        preSendQuietWindowMs: 0,
+        quietWindowMs: 0,
+        reason: 'disabledQuietWindow',
+      }));
+    });
   });
 
   describe('waitForCompletion', () => {
+    let logSpy;
+
     beforeEach(() => {
       jest.useFakeTimers();
+      logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
       document.body.innerHTML = `
         <button class="send-btn">Send</button>
         <button class="stop-btn">Stop</button>
@@ -194,6 +337,7 @@ describe('Content Script Integration', () => {
     afterEach(() => {
       jest.runOnlyPendingTimers();
       jest.useRealTimers();
+      logSpy.mockRestore();
       document.body.innerHTML = '';
     });
 
@@ -493,6 +637,82 @@ describe('Content Script Integration', () => {
 
       jest.advanceTimersByTime(700);
       await expect(promise).resolves.toBeUndefined();
+    });
+
+    it('logs sanitized completion decision diagnostics for stale shimmer resolution', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt" disabled class="composer-button">Send</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+            <div class="loading-shimmer status-node">Loading</div>
+            Assistant answer
+            <button data-testid="copy-turn-action-button" aria-label="Copy response" class="response-action">Copy response</button>
+          </article>
+        </main>
+      `;
+      document.getElementById('composer-submit-button').getBoundingClientRect = jest.fn(() => ({ x: 10, y: 20, width: 88, height: 32 }));
+      document.querySelector('.loading-shimmer').getBoundingClientRect = jest.fn(() => ({ x: 12, y: 40, width: 120, height: 20 }));
+      document.querySelector('button[data-testid="copy-turn-action-button"]').getBoundingClientRect = jest.fn(() => ({ x: 30, y: 45, width: 100, height: 24 }));
+
+      const promise = waitForCompletion({
+        sendButton: document.querySelector('#composer-submit-button'),
+        stopButtonSelector: 'button[data-testid="stop-button"]',
+        messagesContainer: document.querySelector('main'),
+        stableMs: 500,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableMaxWaitTimeout: false,
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+      });
+
+      jest.advanceTimersByTime(700);
+      await expect(promise).resolves.toBeUndefined();
+
+      const completionLog = logSpy.mock.calls.find(([message]) =>
+        message === '[WaitForCompletion] Completion condition met'
+      );
+      expect(completionLog).toBeTruthy();
+      expect(completionLog[1]).toMatchObject({
+        staleActivityReasons: ['staleLoadingShimmer'],
+        finalDecisionReason: 'chatgptResponseComplete',
+      });
+      expect(completionLog[1].responseCompletionMarkers).toEqual(expect.arrayContaining(['Copy response']));
+      expect(completionLog[1].activityDiagnostics).toMatchObject({
+        selectorUsed: 'button[data-testid="stop-button"]',
+        staleActivityReasons: ['staleLoadingShimmer'],
+        finalDecisionReason: 'inactive:stableResponseMarkers',
+        counts: expect.objectContaining({
+          responseCompletionMarkers: expect.any(Number),
+        }),
+        composerAction: expect.objectContaining({
+          ariaLabel: 'Send prompt',
+          roleDecision: 'send-disabled',
+          roleReason: 'send-disabled-label',
+        }),
+        loadingShimmer: expect.objectContaining({
+          textLength: 7,
+          stale: true,
+          visible: true,
+        }),
+      });
+      expect(completionLog[1].activityDiagnostics.responseCompletionMarkers).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          selector: 'button[data-testid="copy-turn-action-button"]',
+          label: 'Copy response',
+          node: expect.objectContaining({
+            ariaLabel: 'Copy response',
+            textLength: 13,
+            visible: true,
+          }),
+        }),
+      ]));
     });
   });
 
@@ -1001,12 +1221,17 @@ describe('Background settings sanitization', () => {
 
   it('should default duplicate typo variants off and normalize send delay windows', () => {
     const settings = global.PromptQueueBackgroundTest.validateSettings({
+      theme: 'system',
+      preSendQuietWindowMs: 100000,
       postPopulateDelayMinMs: 2000,
       postPopulateDelayMaxMs: 500,
       crossTabSendLockMinWaitMs: 12000,
       crossTabSendLockMaxWaitMs: 3000,
     });
 
+    expect(settings.theme).toBe('system');
+    expect(settings.preSendQuietWindowMs).toBe(60000);
+    expect(settings.chatgptPreSendQuietWindowMs).toBe(60000);
     expect(settings.enableDuplicateTypoVariants).toBe(false);
     expect(settings.postPopulateDelayMinMs).toBe(500);
     expect(settings.postPopulateDelayMaxMs).toBe(2000);
@@ -1015,13 +1240,30 @@ describe('Background settings sanitization', () => {
     expect(settings.crossTabSendLockMaxWaitMs).toBe(12000);
   });
 
+  it('should fall back to the default ChatGPT pre-send quiet window when invalid', () => {
+    const settings = global.PromptQueueBackgroundTest.validateSettings({
+      preSendQuietWindowMs: 'nope',
+    });
+
+    expect(settings.preSendQuietWindowMs).toBe(1200);
+    expect(settings.chatgptPreSendQuietWindowMs).toBe(1200);
+  });
+
+  it('should sanitize invalid theme values to dark', () => {
+    const settings = global.PromptQueueBackgroundTest.validateSettings({
+      theme: 'sepia',
+    });
+
+    expect(settings.theme).toBe('dark');
+  });
+
   it('should reinject when an already-open tab has a stale content script version', async () => {
     const sendResponses = [
       { ok: true, version: 'old-version' },
       { ok: true, version: '2026-06-04.completion-stop-role-v2' },
     ];
     chrome.tabs.sendMessage.mockImplementation((_tabId, _message, callback) => {
-      callback(sendResponses.shift() || { ok: true, version: '2026-06-04.completion-stop-role-v2' });
+      callback(sendResponses.shift() || { ok: true, version: '2026-06-05.lifecycle-diagnostics-v1' });
       return Promise.resolve();
     });
     chrome.scripting.executeScript.mockResolvedValue([]);
@@ -1035,7 +1277,7 @@ describe('Background settings sanitization', () => {
       });
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         7,
-        { type: 'PING_CURRENT', expectedVersion: '2026-06-04.completion-stop-role-v2' },
+        { type: 'PING_CURRENT', expectedVersion: '2026-06-05.lifecycle-diagnostics-v1' },
         expect.any(Function),
       );
     } finally {
