@@ -480,6 +480,7 @@ function publicSettings(settings = state.options) {
 
 function sanitizeSettingsForHistory(settings = {}) {
   const safe = publicSettings(validateSettings({ ...DEFAULT_SETTINGS, ...(settings || {}) }));
+  delete safe.theme;
   if (safe.memory) {
     safe.memory.storedToken = safe.memory.hasStoredToken ? '<stored>' : '';
   }
@@ -3147,7 +3148,6 @@ function makeHistorySignature(item) {
       appendPromptText: item.settings?.appendPromptText || '',
       prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
       appendSystemPrompt: item.settings?.appendSystemPrompt === true,
-      theme: item.settings?.theme === 'system' ? 'system' : (item.settings?.theme === 'light' ? 'light' : 'dark'),
       preSendQuietWindowMs: clampNumber(
         item.settings?.preSendQuietWindowMs ?? item.settings?.chatgptPreSendQuietWindowMs,
         0,

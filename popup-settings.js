@@ -14,6 +14,19 @@ import {
   readSendTimingSettingsFromUI,
 } from './popup-send-settings.js';
 
+function applyMaxWaitSemanticsText() {
+  const checkbox = document.getElementById('enableMaxWaitTimeout');
+  if (!checkbox) return;
+  const label = document.querySelector('label[for="enableMaxWaitTimeout"]');
+  if (label) {
+    label.textContent = 'Wait indefinitely for response';
+  }
+  const helpText = checkbox.parentElement?.querySelector('.info-popover');
+  if (helpText) {
+    helpText.textContent = 'When checked, the extension monitors until the response completes. When unchecked, Max wait is the per-prompt response timeout.';
+  }
+}
+
 // Initialization and helpers for settings UI
 export async function loadSettingsIntoUI() {
   try {
@@ -22,6 +35,7 @@ export async function loadSettingsIntoUI() {
       const s = res.settings;
       ensureTargetSettingsUI();
       ensureSendTimingSettingsUI();
+      applyMaxWaitSemanticsText();
       applyTheme(s.theme || 'dark');
       document.getElementById('maxWaitSec').value = msToSec(s.maxWaitMs);
       document.getElementById('stableMinSec').value = msToSec(s.stableMinMs ?? s.stableMs);
@@ -134,6 +148,7 @@ export function initSettingsUI() {
   applyConsolePatch(undefined, false);
   ensureTargetSettingsUI();
   ensureSendTimingSettingsUI();
+  applyMaxWaitSemanticsText();
 
   const themeSelect = document.getElementById('themeSelect');
   if (themeSelect) {

@@ -10,6 +10,12 @@ function makeSignature(item) {
   return JSON.stringify((item.prompts || []).map((p) => p.trim()));
 }
 
+function settingsWithoutTheme(settings) {
+  if (!settings || typeof settings !== 'object') return null;
+  const { theme: _theme, ...rest } = settings;
+  return rest;
+}
+
 export function createHistoryRow(item, index, { onLoadPrompts } = {}) {
   const wrapper = document.createElement('div');
   wrapper.className = 'history-item';
@@ -41,8 +47,9 @@ export function createHistoryRow(item, index, { onLoadPrompts } = {}) {
   loadBtn.textContent = 'Load';
   loadBtn.addEventListener('click', async () => {
     document.getElementById('prompts').value = (item.prompts || []).join('\n');
-    if (item.settings) {
-      await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SAVE_SETTINGS || 'SAVE_SETTINGS', settings: item.settings });
+    const queueSettings = settingsWithoutTheme(item.settings);
+    if (queueSettings) {
+      await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SAVE_SETTINGS || 'SAVE_SETTINGS', settings: queueSettings });
       await loadSettingsIntoUI();
     }
     if (typeof onLoadPrompts === 'function') {
