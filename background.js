@@ -212,7 +212,7 @@ const DEFAULT_SETTINGS = {
   openNewChatPerPromptUrl: '',
   memory: DEFAULT_MEMORY_SETTINGS,
 };
-const CONTENT_SCRIPT_VERSION = '2026-06-05.lifecycle-diagnostics-v1';
+const CONTENT_SCRIPT_VERSION = '2026-06-06.infinite-response-wait-v1';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
@@ -546,6 +546,16 @@ function buildTimingStatus({ running, processing, promptStartTime, currentIndex,
     }
   }
   return { averageResponseMs, elapsedPromptMs, etaMs };
+}
+
+function isInfiniteResponseWaitEnabled(options = {}) {
+  return options?.enableMaxWaitTimeout !== false;
+}
+
+function shouldAllowInFlightRecovery({ options = {}, processingElapsed = 0 } = {}) {
+  if (isInfiniteResponseWaitEnabled(options)) return false;
+  const maxPerPrompt = options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs;
+  return Number(processingElapsed) >= maxPerPrompt;
 }
 
 function randomBetweenMs(minMs, maxMs) {
@@ -1551,10 +1561,11 @@ async function healthCheck() {
   if (state.processing && state.promptStartTime) {
     const processingElapsed = now - state.promptStartTime;
     const maxPerPrompt = state.options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs;
-    if (processingElapsed < maxPerPrompt) {
+    if (!shouldAllowInFlightRecovery({ options: state.options, processingElapsed })) {
       console.log('[Health] Processing in-flight prompt; refreshing activity and skipping recovery', {
         processingElapsed,
         maxPerPrompt,
+        infiniteResponseWait: isInfiniteResponseWaitEnabled(state.options),
       });
       state.lastActivityTime = now;
       saveState(); // fire-and-forget; best effort to keep state fresh
@@ -1636,6 +1647,7 @@ if (self.__PROMPT_QUEUE_TEST__) {
     releaseSendLease,
     buildQueueStateForTab,
     saveSettings,
+    shouldAllowInFlightRecovery,
     validateSettings,
     validateTargetSelectors,
     waitForTriggeredTabLoad,

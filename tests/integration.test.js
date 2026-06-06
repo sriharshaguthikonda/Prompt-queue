@@ -352,7 +352,7 @@ describe('Content Script Integration', () => {
         stableMs: 500,
         maxWaitMs: 10000,
         pollIntervalMs: 100,
-        enableMaxWaitTimeout: true
+        enableMaxWaitTimeout: false
       });
 
       // Remove stop button
@@ -376,13 +376,43 @@ describe('Content Script Integration', () => {
         stableMs: 500,
         maxWaitMs: 1000,
         pollIntervalMs: 100,
-        enableMaxWaitTimeout: true
+        enableMaxWaitTimeout: false
       });
 
       jest.advanceTimersByTime(2000);
 
       const result = await promise;
-      expect(result).toBeUndefined();
+      expect(result).toMatchObject({ timedOut: true, error: 'waitForCompletion timeout' });
+    });
+
+    it('should keep waiting past max wait when infinite response wait is enabled', async () => {
+      const sendBtn = document.querySelector('.send-btn');
+      const messagesContainer = document.querySelector('.messages');
+
+      const promise = waitForCompletion({
+        sendButton: sendBtn,
+        stopButtonSelector: '.stop-btn',
+        messagesContainer,
+        stableMs: 500,
+        maxWaitMs: 1000,
+        pollIntervalMs: 100,
+        enableMaxWaitTimeout: true
+      });
+
+      jest.advanceTimersByTime(2000);
+      await Promise.resolve();
+
+      let resolved = false;
+      promise.then(() => {
+        resolved = true;
+      });
+      await Promise.resolve();
+
+      expect(resolved).toBe(false);
+      document.querySelector('.stop-btn').remove();
+      jest.advanceTimersByTime(1000);
+
+      await expect(promise).resolves.toBeUndefined();
     });
 
     it('should detect DOM changes', async () => {
@@ -1263,7 +1293,7 @@ describe('Background settings sanitization', () => {
       { ok: true, version: '2026-06-04.completion-stop-role-v2' },
     ];
     chrome.tabs.sendMessage.mockImplementation((_tabId, _message, callback) => {
-      callback(sendResponses.shift() || { ok: true, version: '2026-06-05.lifecycle-diagnostics-v1' });
+      callback(sendResponses.shift() || { ok: true, version: '2026-06-06.infinite-response-wait-v1' });
       return Promise.resolve();
     });
     chrome.scripting.executeScript.mockResolvedValue([]);
@@ -1277,7 +1307,7 @@ describe('Background settings sanitization', () => {
       });
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         7,
-        { type: 'PING_CURRENT', expectedVersion: '2026-06-05.lifecycle-diagnostics-v1' },
+        { type: 'PING_CURRENT', expectedVersion: '2026-06-06.infinite-response-wait-v1' },
         expect.any(Function),
       );
     } finally {
@@ -1363,6 +1393,18 @@ describe('Background settings sanitization', () => {
 
     expect(helpers.releaseSendLease('prompt-a', 'prompt-submitted')).toBe(true);
     expect(helpers.getSendLeaseSnapshot()).toBeNull();
+  });
+
+  it('should not allow in-flight recovery only because max wait elapsed in infinite mode', () => {
+    const helpers = global.PromptQueueBackgroundTest;
+    expect(helpers.shouldAllowInFlightRecovery({
+      options: { enableMaxWaitTimeout: true, maxWaitMs: 500 },
+      processingElapsed: 5000,
+    })).toBe(false);
+    expect(helpers.shouldAllowInFlightRecovery({
+      options: { enableMaxWaitTimeout: false, maxWaitMs: 500 },
+      processingElapsed: 5000,
+    })).toBe(true);
   });
 });
 });

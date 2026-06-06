@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-06-05.lifecycle-diagnostics-v1';
+  const CONTENT_SCRIPT_VERSION = '2026-06-06.infinite-response-wait-v1';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -1056,7 +1056,7 @@
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
     const effectivePollMs = typeof pollIntervalMs === 'number' ? pollIntervalMs : DEFAULTS.pollIntervalMs;
-    const enableTimeout = enableMaxWaitTimeout !== false;
+    const enableTimeout = enableMaxWaitTimeout === false;
     const completionId = Math.random();
 
     console.log('[WaitForCompletion] Starting', { completionId, effectiveStableMs, effectiveMaxWaitMs, effectivePollMs, enableTimeout, stopWord, hasPromptText: !!promptText });
@@ -1287,7 +1287,7 @@
             activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
           });
           cleanup();
-          resolve();
+          resolve({ timedOut: true, error: 'waitForCompletion timeout' });
         }
       }, effectivePollMs);
 
@@ -1492,9 +1492,9 @@
       };
       console.warn('[PromptQueue] QUEUED: Waiting for current prompt to complete', queueMeta, JSON.stringify(queueMeta));
       
-      const enableQueueTimeout = options?.enableMaxWaitTimeout !== false;
-      // When queue timeout is enabled, wait up to 30 seconds for current prompt to finish.
-      // When disabled, wait indefinitely until currentPromptId is cleared by the previous prompt.
+      const enableQueueTimeout = options?.enableMaxWaitTimeout === false;
+      // Finite max-wait mode waits up to 30 seconds for current prompt to finish.
+      // Infinite mode waits until currentPromptId is cleared by the previous prompt.
       let waitTime = 0;
       const maxWaitTime = 30000;
       const checkInterval = 100;
@@ -1572,7 +1572,7 @@
     
     // Set a safety timeout to force cleanup if this prompt takes too long
     const isParallelDispatch = options?.parallelDispatchMode === true;
-    const enablePromptTimeout = options?.enableMaxWaitTimeout !== false && !isParallelDispatch;
+    const enablePromptTimeout = options?.enableMaxWaitTimeout === false && !isParallelDispatch;
     const maxPromptDuration = (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 10000; // Add 10s buffer
     console.log('[PromptQueue] Prompt timeout configuration', {
       promptId,
@@ -1947,10 +1947,17 @@
         throw e;
       }
 
-      const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
+      const enableCompletionTimeout = options?.enableMaxWaitTimeout === false;
       const effectiveStopWord = options?.enableStopWord ? options?.stopWord : null;
       armStopWordGuard('PromptQueue');
-      emitStepUpdate({ step: 'completion_wait', promptId, detail: 'Waiting for completion', durationMs: options?.maxWaitMs || DEFAULTS.maxWaitMs, endAt: Date.now() + (options?.maxWaitMs || DEFAULTS.maxWaitMs), log: options?.perStepConsoleLogging === true });
+      emitStepUpdate({
+        step: 'completion_wait',
+        promptId,
+        detail: 'Waiting for completion',
+        durationMs: enableCompletionTimeout ? (options?.maxWaitMs || DEFAULTS.maxWaitMs) : 0,
+        endAt: enableCompletionTimeout ? Date.now() + (options?.maxWaitMs || DEFAULTS.maxWaitMs) : 0,
+        log: options?.perStepConsoleLogging === true
+      });
       console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, enableStopWord: options?.enableStopWord, stopWord: effectiveStopWord, watchGate });
       try {
         let result;
@@ -1998,6 +2005,9 @@
             chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, stoppedByStopWord: true });
           } catch (_) {}
           return;
+        }
+        if (result?.timedOut) {
+          throw new Error(result.error || 'waitForCompletion timeout');
         }
         console.log('[PromptQueue] Completion wait finished (no stop word)', { promptId });
       } catch (e) {
