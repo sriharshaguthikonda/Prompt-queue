@@ -17,7 +17,7 @@ describe('popup history UI', () => {
     `;
   }
 
-  it('loads saved prompts without restoring saved theme', async () => {
+  it('loads saved prompts without restoring any saved runtime settings', async () => {
     renderHistoryDom();
     chrome.runtime.sendMessage.mockImplementation(async (message) => {
       if (message.type === 'SAVE_SETTINGS') return { ok: true, settings: message.settings };
@@ -28,9 +28,10 @@ describe('popup history UI', () => {
       prompts: ['Prompt A', 'Prompt B'],
       settings: {
         theme: 'light',
-        maxWaitMs: 300000,
-        enableMaxWaitTimeout: true,
+        maxWaitMs: 180000,
+        enableMaxWaitTimeout: false,
         systemPrompt: 'system',
+        debugLoggingEnabled: true,
       },
       savedAt: Date.now(),
     }, 0);
@@ -40,15 +41,23 @@ describe('popup history UI', () => {
     await Promise.resolve();
 
     expect(document.getElementById('prompts').value).toBe('Prompt A\nPrompt B');
-    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+    expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({
       type: 'SAVE_SETTINGS',
-      settings: expect.objectContaining({
-        maxWaitMs: 300000,
-        enableMaxWaitTimeout: true,
-        systemPrompt: 'system',
-      }),
+    }));
+  });
+
+  it('saves prompt history without runtime settings', async () => {
+    chrome.runtime.sendMessage.mockResolvedValue({ ok: true });
+
+    await mod.saveHistoryItem(['Prompt A'], {
+      theme: 'system',
+      maxWaitMs: 3600000,
+      enableMaxWaitTimeout: false,
     });
-    const saveCall = chrome.runtime.sendMessage.mock.calls.find(([message]) => message?.type === 'SAVE_SETTINGS');
-    expect(saveCall[0].settings).not.toHaveProperty('theme');
+
+    expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+      type: 'SAVE_PROMPT_HISTORY',
+      item: { prompts: ['Prompt A'] },
+    });
   });
 });

@@ -822,6 +822,82 @@ describe('Content Script Integration', () => {
       }
     });
 
+    it('should not leave completion polling active after finite PromptQueue timeout', async () => {
+      jest.useFakeTimers();
+      const logSpy = jest.spyOn(console, 'log');
+      try {
+        Object.defineProperty(window, 'location', {
+          value: { href: 'https://chatgpt.com/c/finite-timeout-test' },
+          writable: true,
+        });
+        document.body.innerHTML = `
+          <textarea id="prompt-textarea" style="display:block"></textarea>
+          <button data-testid="send-button" type="button">Send</button>
+          <main></main>
+        `;
+
+        const input = document.getElementById('prompt-textarea');
+        const sendButton = document.querySelector('button[data-testid="send-button"]');
+
+        input.getBoundingClientRect = jest.fn(() => ({ width: 320, height: 48 }));
+        sendButton.getBoundingClientRect = jest.fn(() => ({ width: 96, height: 32 }));
+
+        sendButton.addEventListener('click', () => {
+          const main = document.querySelector('main');
+          main.insertAdjacentHTML('beforeend', `
+            <article data-testid="conversation-turn-1" data-message-author-role="user">Finite timeout prompt</article>
+            <article data-testid="conversation-turn-2" data-message-author-role="assistant">Still working</article>
+          `);
+          const stopButton = document.createElement('button');
+          stopButton.setAttribute('data-testid', 'stop-button');
+          stopButton.setAttribute('aria-label', 'Stop answering');
+          stopButton.textContent = 'Stop';
+          document.body.appendChild(stopButton);
+        });
+
+        await expect(
+          chrome.runtime.sendMessage({
+            type: 'SEND_PROMPT',
+            text: 'Finite timeout prompt',
+            promptId: 'finite-timeout',
+            options: {
+              stableMs: 50,
+              maxWaitMs: 500,
+              pollIntervalMs: 50,
+              enableMaxWaitTimeout: false,
+              postPopulateDelayMinMs: 0,
+              postPopulateDelayMaxMs: 0,
+              preSendQuietWindowMs: 0,
+            },
+          }),
+        ).resolves.toMatchObject({ ok: true, accepted: true, promptId: 'finite-timeout' });
+
+        await jest.advanceTimersByTimeAsync(8000);
+
+        const runtimeMessages = chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
+        const finiteErrors = runtimeMessages.filter((message) =>
+          message?.type === 'RESPONSE_COMPLETE'
+          && message?.promptId === 'finite-timeout'
+          && String(message?.error || '').includes('waitForCompletion timeout')
+        );
+        expect(finiteErrors).toHaveLength(1);
+        expect(runtimeMessages).not.toContainEqual(expect.objectContaining({
+          type: 'RESPONSE_COMPLETE',
+          promptId: 'finite-timeout',
+          error: 'Prompt processing timeout',
+        }));
+
+        const statusLogsAtTimeout = logSpy.mock.calls.filter(([message]) => message === '[WaitForCompletion] Waiting status').length;
+        await jest.advanceTimersByTimeAsync(12000);
+        const statusLogsAfterMoreTime = logSpy.mock.calls.filter(([message]) => message === '[WaitForCompletion] Waiting status').length;
+
+        expect(statusLogsAfterMoreTime).toBe(statusLogsAtTimeout);
+      } finally {
+        logSpy.mockRestore();
+        jest.useRealTimers();
+      }
+    });
+
     it('should reject unknown message types', (done) => {
       chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.type === 'UNKNOWN') {
@@ -1293,7 +1369,7 @@ describe('Background settings sanitization', () => {
       { ok: true, version: '2026-06-04.completion-stop-role-v2' },
     ];
     chrome.tabs.sendMessage.mockImplementation((_tabId, _message, callback) => {
-      callback(sendResponses.shift() || { ok: true, version: '2026-06-06.infinite-response-wait-v1' });
+      callback(sendResponses.shift() || { ok: true, version: global.PromptQueueBackgroundTest.CONTENT_SCRIPT_VERSION });
       return Promise.resolve();
     });
     chrome.scripting.executeScript.mockResolvedValue([]);
@@ -1307,7 +1383,7 @@ describe('Background settings sanitization', () => {
       });
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         7,
-        { type: 'PING_CURRENT', expectedVersion: '2026-06-06.infinite-response-wait-v1' },
+        { type: 'PING_CURRENT', expectedVersion: global.PromptQueueBackgroundTest.CONTENT_SCRIPT_VERSION },
         expect.any(Function),
       );
     } finally {
@@ -1405,6 +1481,38 @@ describe('Background settings sanitization', () => {
       options: { enableMaxWaitTimeout: false, maxWaitMs: 500 },
       processingElapsed: 5000,
     })).toBe(true);
+  });
+
+  it('should use prompt-only history signatures', () => {
+    const helpers = global.PromptQueueBackgroundTest;
+    const first = helpers.makeHistorySignatureForTest({
+      prompts: ['Prompt A'],
+      settings: { enableMaxWaitTimeout: false, maxWaitMs: 180000, theme: 'light' },
+    });
+    const second = helpers.makeHistorySignatureForTest({
+      prompts: ['Prompt A'],
+      settings: { enableMaxWaitTimeout: true, maxWaitMs: 3600000, theme: 'system' },
+    });
+
+    expect(first).toBe(second);
+  });
+
+  it('should match legacy stored history duplicates by prompt text only', () => {
+    const helpers = global.PromptQueueBackgroundTest;
+    const promptOnlySignature = helpers.makeHistorySignatureForTest({
+      prompts: ['Prompt A'],
+      settings: { enableMaxWaitTimeout: true, maxWaitMs: 3600000, theme: 'system' },
+    });
+    const legacyStoredHistory = [{
+      prompts: ['Prompt A'],
+      settings: { enableMaxWaitTimeout: false, maxWaitMs: 180000, theme: 'light' },
+      __sig: JSON.stringify({
+        prompts: ['Prompt A'],
+        settings: { enableMaxWaitTimeout: false, maxWaitMs: 180000, theme: 'light' },
+      }),
+    }];
+
+    expect(helpers.hasHistorySignatureForTest(legacyStoredHistory, promptOnlySignature)).toBe(true);
   });
 });
 });

@@ -1,5 +1,4 @@
 import { showHistoryLoading, showToast } from './popup-dom-utils.js';
-import { loadSettingsIntoUI } from './popup-settings.js';
 
 const PQ_CONSTANTS = globalThis.PromptQueueConstants || {};
 const MESSAGE_TYPES = PQ_CONSTANTS.MESSAGE_TYPES || {};
@@ -8,12 +7,6 @@ const HISTORY_STORAGE_KEY = STORAGE_KEYS.HISTORY || 'aiTaskSequencerHistory';
 
 function makeSignature(item) {
   return JSON.stringify((item.prompts || []).map((p) => p.trim()));
-}
-
-function settingsWithoutTheme(settings) {
-  if (!settings || typeof settings !== 'object') return null;
-  const { theme: _theme, ...rest } = settings;
-  return rest;
 }
 
 export function createHistoryRow(item, index, { onLoadPrompts } = {}) {
@@ -45,13 +38,8 @@ export function createHistoryRow(item, index, { onLoadPrompts } = {}) {
 
   const loadBtn = document.createElement('button');
   loadBtn.textContent = 'Load';
-  loadBtn.addEventListener('click', async () => {
+  loadBtn.addEventListener('click', () => {
     document.getElementById('prompts').value = (item.prompts || []).join('\n');
-    const queueSettings = settingsWithoutTheme(item.settings);
-    if (queueSettings) {
-      await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.SAVE_SETTINGS || 'SAVE_SETTINGS', settings: queueSettings });
-      await loadSettingsIntoUI();
-    }
     if (typeof onLoadPrompts === 'function') {
       onLoadPrompts();
     }
@@ -131,7 +119,7 @@ export async function importHistoryItems(importData) {
 
   const newItems = validItems.filter((item) => !existingSignatures.has(makeSignature(item)));
   const itemsWithTimestamp = newItems.map((item) => ({
-    ...item,
+    prompts: item.prompts,
     savedAt: item.savedAt || Date.now(),
   }));
 
@@ -200,9 +188,9 @@ export function exportHistoryMarkdown(exportData) {
   return `${lines.join('\n').trim()}\n`;
 }
 
-export async function saveHistoryItem(prompts, settings) {
+export async function saveHistoryItem(prompts) {
   await chrome.runtime.sendMessage({
     type: MESSAGE_TYPES.SAVE_PROMPT_HISTORY || 'SAVE_PROMPT_HISTORY',
-    item: { prompts, settings },
+    item: { prompts },
   });
 }

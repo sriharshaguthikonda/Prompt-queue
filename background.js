@@ -212,7 +212,7 @@ const DEFAULT_SETTINGS = {
   openNewChatPerPromptUrl: '',
   memory: DEFAULT_MEMORY_SETTINGS,
 };
-const CONTENT_SCRIPT_VERSION = '2026-06-06.infinite-response-wait-v1';
+const CONTENT_SCRIPT_VERSION = '2026-06-12.response-timeout-owner-v2';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
@@ -1637,6 +1637,7 @@ async function saveSettings(newSettings) {
 
 if (self.__PROMPT_QUEUE_TEST__) {
   self.PromptQueueBackgroundTest = {
+    CONTENT_SCRIPT_VERSION,
     DEFAULT_SETTINGS,
     acquireSendLease,
     getSendLeaseSnapshot: () => sendLease ? {
@@ -1647,6 +1648,8 @@ if (self.__PROMPT_QUEUE_TEST__) {
     } : null,
     releaseSendLease,
     buildQueueStateForTab,
+    hasHistorySignatureForTest: hasHistorySignature,
+    makeHistorySignatureForTest: makeHistorySignature,
     saveSettings,
     shouldAllowInFlightRecovery,
     validateSettings,
@@ -3138,49 +3141,11 @@ async function sendNextPrompt() {
 }
 
 function makeHistorySignature(item) {
-  const normalized = {
-    prompts: (item.prompts || []).map((p) => p.trim()),
-    settings: {
-      stableMs: item.settings?.stableMs || undefined,
-      maxWaitMs: item.settings?.maxWaitMs || undefined,
-      pollIntervalMs: item.settings?.pollIntervalMs || undefined,
-      systemPrompt: item.settings?.systemPrompt || '',
-      appendPromptText: item.settings?.appendPromptText || '',
-      prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
-      appendSystemPrompt: item.settings?.appendSystemPrompt === true,
-      preSendQuietWindowMs: clampNumber(
-        item.settings?.preSendQuietWindowMs ?? item.settings?.chatgptPreSendQuietWindowMs,
-        0,
-        60000,
-        DEFAULT_SETTINGS.preSendQuietWindowMs,
-      ),
-      chatgptPreSendQuietWindowMs: clampNumber(
-        item.settings?.preSendQuietWindowMs ?? item.settings?.chatgptPreSendQuietWindowMs,
-        0,
-        60000,
-        DEFAULT_SETTINGS.preSendQuietWindowMs,
-      ),
-      autoConfirmDialogs: item.settings?.autoConfirmDialogs === true,
-      enableWatchedElementGate: item.settings?.enableWatchedElementGate === true,
-      watchedElementSelector: typeof item.settings?.watchedElementSelector === 'string'
-        ? item.settings.watchedElementSelector.trim()
-        : DEFAULT_SETTINGS.watchedElementSelector,
-      refreshTabBeforeEachPrompt: item.settings?.refreshTabBeforeEachPrompt === true,
-      parallelOneTabPerPrompt: item.settings?.parallelOneTabPerPrompt === true,
-      enableRetryOnFailure: item.settings?.enableRetryOnFailure !== false,
-      maxRetriesPerPrompt: coerceNumber(item.settings?.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
-      retryDelayMs: coerceNumber(item.settings?.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
-      debugLoggingEnabled: item.settings?.debugLoggingEnabled === true,
-      enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
-      enableStopWord: item.settings?.enableStopWord === true,
-      stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
-      stopWordCaseSensitive: item.settings?.stopWordCaseSensitive === true,
-      openNewChatPerPrompt: item.settings?.openNewChatPerPrompt === true,
-      openNewChatPerPromptUrl: sanitizeUrlOrEmpty(item.settings?.openNewChatPerPromptUrl),
-      memory: sanitizeSettingsForHistory(item.settings || {}).memory,
-    },
-  };
-  return JSON.stringify(normalized);
+  return JSON.stringify((item.prompts || []).map((p) => String(p || '').trim()));
+}
+
+function hasHistorySignature(history, signature) {
+  return (history || []).some((item) => item?.__sig === signature || makeHistorySignature(item) === signature);
 }
 
 // ============ MESSAGE HANDLERS ============
@@ -3890,11 +3855,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const storedHistory = await chrome.storage.local.get(HISTORY_STORAGE_KEY);
             const aiTaskSequencerHistory = Array.isArray(storedHistory?.[HISTORY_STORAGE_KEY]) ? storedHistory[HISTORY_STORAGE_KEY] : [];
             const safeHistoryItem = {
-              ...historyItem,
-              settings: sanitizeSettingsForHistory(historyItem.settings || {}),
+              prompts: Array.isArray(historyItem.prompts)
+                ? historyItem.prompts.map((prompt) => String(prompt || ''))
+                : [],
             };
             const sig = makeHistorySignature(safeHistoryItem);
-            const exists = aiTaskSequencerHistory.some((h) => h.__sig === sig);
+            const exists = hasHistorySignature(aiTaskSequencerHistory, sig);
             if (!exists) {
               aiTaskSequencerHistory.unshift({ ...safeHistoryItem, savedAt: Date.now(), __sig: sig });
               const trimmed = aiTaskSequencerHistory.slice(0, 50);

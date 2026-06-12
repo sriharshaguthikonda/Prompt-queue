@@ -103,5 +103,9 @@ describe('popup settings UI', () => {
     document.getElementById('enableMaxWaitTimeout').checked = true;
     const infiniteSettings = await mod.saveSettingsFromUI();
     expect(infiniteSettings.enableMaxWaitTimeout).toBe(true);
+
+    document.getElementById('maxWaitSec').value = '3600';
+    const longWaitSettings = await mod.saveSettingsFromUI();
+    expect(longWaitSettings.maxWaitMs).toBe(3600000);
   });
 });
