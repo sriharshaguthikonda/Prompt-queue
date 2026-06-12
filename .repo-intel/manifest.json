@@ -1,0 +1,162 @@
+{
+  "schemaVersion": "0.1.0",
+  "repo": {
+    "id": "Prompt-queue",
+    "root": ".",
+    "remoteUrl": "https://github.com/sriharshaguthikonda/Prompt-queue.git",
+    "defaultBranch": "codex/memory-pack-sidepanel-native",
+    "localPaths": [
+      ".agent-reports",
+      ".gitignore",
+      ".planning",
+      ".windsurf",
+      "AGENTS.md",
+      "Plab 2 Feedback v22 - Speculum Examination Teaching.html",
+      "Prompt-queue.code-workspace",
+      "Prompts",
+      "Q and A.md",
+      "README.md",
+      "ROADMAP.md",
+      "TESTING.md",
+      "TODO.md",
+      "TODO.txt",
+      "TRANSCRIPTION_MONITOR_SETUP.md",
+      "USER_GUIDE.md",
+      "background-parallel-utils.js",
+      "background.js",
+      "console.log",
+      "content-targets.js",
+      "content.js",
+      "images",
+      "install_native_host.bat",
+      "install_native_host.ps1",
+      "jest.config.js",
+      "manifest.json",
+      "native_host.example.json",
+      "native_host.json",
+      "native_host.py",
+      "offscreen.html",
+      "offscreen.js",
+      "package-lock.json",
+      "package.json",
+      "parallel prompt Section think deeper and harder!.lua",
+      "plans",
+      "popup-console-patch.js",
+      "popup-dom-utils.js",
+      "popup-history.js",
+      "popup-memory.js",
+      "popup-prompt-plan.js",
+      "popup-queue.js",
+      "popup-settings.js",
+      "popup-target-settings.js",
+      "popup.html",
+      "popup.html.bak",
+      "popup.js",
+      "prompt-queue-constants.js",
+      "run_host.bat",
+      "sample-export.json",
+      "serial prompt Section think deeper and harder! copy.lua",
+      "styles.css",
+      "tampermonkey-automation-core.user.js",
+      "tests",
+      "tools"
+    ]
+  },
+  "sourceState": {
+    "commit": "2db449ce209a90a44d52e3b5cac4e1e2f7363f44",
+    "branch": "codex/memory-pack-sidepanel-native",
+    "dirty": true,
+    "generatedForCommit": "2db449ce209a90a44d52e3b5cac4e1e2f7363f44",
+    "dirtyReason": "uncommitted changes"
+  },
+  "policy": {
+    "profile": "basic",
+    "sensitivity": "private",
+    "committedArtifacts": [
+      "manifest"
+    ],
+    "allowMemoryPointer": false,
+    "allowGraphPilots": false,
+    "runOnPush": false
+  },
+  "generatedAt": "2026-06-01T16:49:27.001453Z",
+  "toolRuns": [
+    {
+      "id": "repomix.basic",
+      "tool": "repomix",
+      "mode": "basic",
+      "status": "skipped",
+      "outputRef": "artifacts/repomix/repo-map.json",
+      "warnings": [
+        "Repomix is unavailable on PATH.",
+        "Suggested command: `npx repomix --output artifacts/repomix/repo-map.json`.",
+        "Repomix output is a native artifact and is not committed by default.",
+        "Bare `npx` does not prove Repomix is installed; install `repomix` or verify it explicitly."
+      ]
+    },
+    {
+      "id": "aider.basic",
+      "tool": "aider",
+      "mode": "basic",
+      "status": "skipped",
+      "outputRef": "artifacts/aider/repo-map-guidance.md",
+      "warnings": [
+        "Aider records repo-map guidance without forcing an interactive run.",
+        "Aider is unavailable on PATH.",
+        "Baseline guidance output lives in an artifact path and is not committed by default."
+      ]
+    },
+    {
+      "id": "serena.basic",
+      "tool": "serena",
+      "mode": "basic",
+      "status": "skipped",
+      "outputRef": "artifacts/serena/symbols.json",
+      "warnings": [
+        "Serena records symbol-navigation guidance without auto-configuring global state.",
+        "Serena is unavailable on PATH and no command override is configured.",
+        "Symbol-navigation output lives in an artifact path and is not committed by default."
+      ]
+    }
+  ],
+  "artifacts": {
+    "manifestPath": ".repo-intel/manifest.json",
+    "summaryPath": ".repo-intel/summary.md",
+    "nativeOutputs": [
+      {
+        "name": "repomix",
+        "path": "artifacts/repomix/repo-map.json",
+        "kind": "native"
+      },
+      {
+        "name": "aider",
+        "path": "artifacts/aider/repo-map-guidance.md",
+        "kind": "native"
+      },
+      {
+        "name": "serena",
+        "path": "artifacts/serena/symbols.json",
+        "kind": "native"
+      },
+      {
+        "name": "repo-map-full",
+        "path": "artifacts/repo-map/repo-map-full.json",
+        "kind": "native"
+      }
+    ],
+    "workflowArtifacts": []
+  },
+  "contextLevels": {
+    "level0": "identity",
+    "level1": "summary",
+    "level2": "importantFiles",
+    "level3": "symbols",
+    "level4": "fullExport"
+  },
+  "staleness": "dirty",
+  "security": {
+    "ignorePolicy": ".repo-map-ignore",
+    "secretScanStatus": "skipped",
+    "sizeGateStatus": "skipped"
+  }
+}

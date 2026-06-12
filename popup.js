@@ -1,35 +1,38 @@
 import { applyConsolePatch } from './popup-console-patch.js';
 import { setStatus, setProgress, showToast, showError, hideError, clearError, setButtonsDisabled, secToMs } from './popup-dom-utils.js';
 import { loadSettingsIntoUI, saveSettingsFromUI, initSettingsUI } from './popup-settings.js';
-import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, saveHistoryItem } from './popup-history.js';
+import { loadHistoryIntoUI, importHistoryItems, clearHistory, exportHistory, exportHistoryMarkdown, saveHistoryItem } from './popup-history.js';
 import { NEW_TAB_MARKER, resolveSeparator, buildPromptLaunchPlan } from './popup-prompt-plan.js';
+import { initMemoryPackUI, loadMemorySettingsIntoUI } from './popup-memory.js';
+import { initPromptQueueReorder, refreshPromptQueueReorder } from './popup-queue.js';
+import { renderSelectorHealth, renderStepStatus } from './popup-send-settings.js';
+import { createTabContextController } from './popup-tab-context.js';
 
 applyConsolePatch();
 
+const PQ_CONSTANTS = globalThis.PromptQueueConstants || {};
+const MESSAGE_TYPES = PQ_CONSTANTS.MESSAGE_TYPES || {};
+const STORAGE_KEYS = PQ_CONSTANTS.STORAGE_KEYS || {};
 const separatorInput = document.getElementById('separatorInput');
 let latestAutomationStatus = null;
-let currentPanelTabId = null;
 let lastParallelFailureSignature = null;
 let hasInitializedParallelFailureState = false;
 
+const tabContext = createTabContextController({
+  chromeApi: chrome,
+  refreshStatus: () => refreshPanelForCurrentTab(),
+});
+
 async function getActiveTabId() {
-  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tabs?.[0]?.id;
+  return tabContext.getActiveTabId();
 }
 
 async function getContextTabId() {
-  const tabId = await getActiveTabId();
-  if (Number.isInteger(tabId)) {
-    currentPanelTabId = tabId;
-  }
-  return tabId;
+  return tabContext.getContextTabId();
 }
 
 function shouldHandleAutomationMessage(message) {
-  const messageTabId = Number(message?.tabId);
-  if (!Number.isInteger(messageTabId)) return true;
-  if (!Number.isInteger(currentPanelTabId)) return true;
-  return messageTabId === currentPanelTabId;
+  return tabContext.shouldHandleAutomationMessage(message);
 }
 
 function getParallelFailureSignature(status = {}) {
@@ -97,6 +100,10 @@ function initInfoPopovers() {
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       closeOpenInfoPopovers();
+      if (latestAutomationStatus?.running === true) {
+        event.preventDefault();
+      }
+      stopAutomationFromUI({ reason: 'escape' });
     }
   });
 }
@@ -161,6 +168,8 @@ function getRunningStatusText(status = {}) {
     parallelCompleted = 0,
     parallelFailed = 0,
     parallelActive = 0,
+    currentPromptPreview = '',
+    etaMs = 0,
   } = status;
 
   if (mode === 'parallel') {
@@ -170,17 +179,26 @@ function getRunningStatusText(status = {}) {
     return `Parallel running - launched ${parallelLaunched}/${total}, active ${parallelActive}, done ${parallelCompleted}, failed ${parallelFailed}`;
   }
 
+  const details = [];
+  if (Number(etaMs || 0) > 0 && !paused) {
+    details.push(`ETA ${formatDuration(etaMs)}`);
+  }
+  if (currentPromptPreview) {
+    details.push(`Now: ${currentPromptPreview}`);
+  }
+  const suffix = details.length > 0 ? ` - ${details.join(' - ')}` : '';
+
   if (paused) {
-    return `Paused at prompt ${currentIndex + 1} of ${total}`;
+    return `Paused at prompt ${currentIndex + 1} of ${total}${suffix}`;
   }
   if (recoveryAttempts > 0) {
-    return `Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}`;
+    return `Recovering... (attempt ${recoveryAttempts}/3) - Prompt ${currentIndex + 1} of ${total}${suffix}`;
   }
   if (currentRetryCount > 0) {
     const maxRetries = Number(options?.maxRetriesPerPrompt || 0);
-    return `Retrying prompt ${currentIndex + 1} of ${total} (${currentRetryCount}/${maxRetries || '?'})`;
+    return `Retrying prompt ${currentIndex + 1} of ${total} (${currentRetryCount}/${maxRetries || '?'})${suffix}`;
   }
-  return `Running prompt ${currentIndex + 1} of ${total}...`;
+  return `Running prompt ${currentIndex + 1} of ${total}${suffix}`;
 }
 
 function getProgressPosition(status = {}) {
@@ -190,6 +208,19 @@ function getProgressPosition(status = {}) {
     return completed + failed;
   }
   return Number(status.currentIndex || 0);
+}
+
+function formatDuration(ms) {
+  const totalSeconds = Math.max(0, Math.round(Number(ms || 0) / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
+}
+
+async function refreshPanelForCurrentTab() {
+  await loadStateIntoUI();
+  await refreshStatus();
 }
 
 async function refreshStatus() {
@@ -207,10 +238,13 @@ async function refreshStatus() {
       updateControlButtons(res.status);
       if (running) {
         setStatus(getRunningStatusText(res.status), res.status.paused ? 'paused' : 'running');
+        renderStepStatus(res.status.stepStatus || null);
       } else if (total > 0 && currentIndex >= total) {
         setStatus('Complete', 'idle');
+        renderStepStatus(null);
       } else {
         setStatus('Idle', 'idle');
+        renderStepStatus(null);
       }
     }
   } catch (e) {
@@ -227,7 +261,13 @@ async function startAutomation() {
     const separator = resolveSeparator(separatorInput?.value);
     const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
     const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
-    const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText);
+    const uiSettings = await saveSettingsFromUI();
+    let currentSettings = { ...(uiSettings || {}) };
+    if (!uiSettings) {
+      const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      currentSettings = { ...(settingsRes?.settings || {}) };
+    }
+    const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText, currentSettings);
     const prompts = launchPlan.prompts;
     if (prompts.length === 0) {
       setStatus('Please enter at least one prompt.');
@@ -253,13 +293,6 @@ async function startAutomation() {
 
     setStatus('Starting...');
     hideError(); // Clear any previous error
-    // Get current settings and include them in START_AUTOMATION to avoid race conditions
-    const uiSettings = await saveSettingsFromUI();
-    let currentSettings = { ...(uiSettings || {}) };
-    if (!uiSettings) {
-      const settingsRes = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
-      currentSettings = { ...(settingsRes?.settings || {}) };
-    }
     const parallelTabCount = launchPlan.hasTabMarkers ? launchPlan.tabPromptGroups.length : 0;
     if (launchPlan.hasTabMarkers) {
       showToast(`Detected ${parallelTabCount} tab group(s) using ${NEW_TAB_MARKER}`, 'info', 3000);
@@ -276,6 +309,7 @@ async function startAutomation() {
         ? { mode: 'parallel', running: true, paused: false, total: parallelTabCount, parallelLaunched: 0, parallelCompleted: 0, parallelFailed: 0, parallelActive: 0 }
         : { mode: 'sequential', running: true, paused: false, currentIndex: 0, total: prompts.length };
       setStatus(getRunningStatusText(initialStatus), 'running');
+      renderStepStatus({ step: 'waiting_for_tab', label: 'Starting', color: 'active' });
       setProgress(getProgressPosition(initialStatus), initialStatus.total);
       updateControlButtons({ running: true, paused: false });
       await chrome.runtime.sendMessage({
@@ -330,11 +364,15 @@ if (resumeBtn) {
   });
 }
 
-document.getElementById('stopBtn').addEventListener('click', async () => {
+async function stopAutomationFromUI({ reason = 'button' } = {}) {
   try {
+    if (reason === 'escape' && latestAutomationStatus?.running !== true) {
+      return;
+    }
     const tabId = await getContextTabId();
-    await chrome.runtime.sendMessage({ type: 'STOP_AUTOMATION', tabId });
-    setStatus('Stopped');
+    await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.STOP_AUTOMATION || 'STOP_AUTOMATION', tabId });
+    setStatus(reason === 'escape' ? 'Stopped by Escape' : 'Stopped');
+    renderStepStatus(null);
     updateControlButtons({ running: false, paused: false });
     // Refresh to clear any recovery status
     await refreshStatus();
@@ -342,6 +380,10 @@ document.getElementById('stopBtn').addEventListener('click', async () => {
     console.error('[StopBtn] Error:', e);
     setStatus('Stop failed');
   }
+}
+
+document.getElementById('stopBtn').addEventListener('click', async () => {
+  await stopAutomationFromUI({ reason: 'button' });
 });
 
 // Save current prompts to history
@@ -354,7 +396,8 @@ if (saveHistoryBtn) {
       const separator = resolveSeparator(separatorInput?.value);
       const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
       const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
-      const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText);
+      const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
+      const launchPlan = buildPromptLaunchPlan(textarea.value, separator, appendText, prependText, settings?.settings || {});
       const prompts = launchPlan.prompts;
       if (prompts.length === 0) {
         showToast('No prompts to save', 'error');
@@ -363,7 +406,6 @@ if (saveHistoryBtn) {
       if (launchPlan.duplicateChanged > 0) {
         showToast(`Adjusted ${launchPlan.duplicateChanged} duplicate prompt(s) before save`, 'info', 3500);
       }
-      const settings = await chrome.runtime.sendMessage({ type: 'GET_SETTINGS' });
       await saveHistoryItem(launchPlan.promptsWithMarkers, settings?.settings);
       // Immediately refresh the history list
       await loadHistoryIntoUI(updatePromptCount);
@@ -406,10 +448,34 @@ if (exportBtn) {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
-      showToast(`✓ Exported ${exportData.history.length} items`, 'success');
+      showToast(`✓ Exported ${exportData.history.length} items and ${exportData.responses.length} responses`, 'success');
     } catch (e) {
       console.error('[ExportBtn] Error:', e);
       showToast('Export failed', 'error');
+    }
+  });
+}
+
+const exportMarkdownBtn = document.getElementById('exportMarkdownBtn');
+if (exportMarkdownBtn) {
+  exportMarkdownBtn.addEventListener('click', async () => {
+    try {
+      const exportData = await exportHistory();
+      if (!exportData) return;
+      const markdown = exportHistoryMarkdown(exportData);
+      const blob = new Blob([markdown], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `prompt-queue-export-${Date.now()}.md`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`✓ Exported Markdown with ${exportData.responses.length} responses`, 'success');
+    } catch (e) {
+      console.error('[ExportMarkdownBtn] Error:', e);
+      showToast('Markdown export failed', 'error');
     }
   });
 }
@@ -461,6 +527,7 @@ chrome.runtime.onMessage.addListener((message) => {
       clearError();
       updateControlButtons(message.status);
       setStatus(getRunningStatusText(message.status), paused ? 'paused' : 'running');
+      renderStepStatus(message.status.stepStatus || null);
       setProgress(getProgressPosition(message.status), total);
     } else if (message?.type === 'AUTOMATION_COMPLETE') {
       const reason = message.reason;
@@ -492,6 +559,7 @@ chrome.runtime.onMessage.addListener((message) => {
       const toastKind = reason === 'completedWithErrors' ? 'info' : 'success';
       showToast(toastMessage, toastKind);
       stopCountdownTimer();
+      renderStepStatus(null);
       updateControlButtons({ running: false, paused: false });
     } else if (message?.type === 'AUTOMATION_ERROR') {
       latestAutomationStatus = { ...(latestAutomationStatus || {}), running: false, paused: false };
@@ -504,9 +572,14 @@ chrome.runtime.onMessage.addListener((message) => {
         message.stack || 'No stack trace available'
       );
       stopCountdownTimer();
+      renderStepStatus({ step: 'error', label: 'Error', color: 'error', detail: message.error || '' });
       // Refresh status after error to show proper state
       setTimeout(refreshStatus, 1000);
       updateControlButtons({ running: false, paused: false });
+    } else if (message?.type === 'PROMPT_STEP_STATUS') {
+      renderStepStatus(message.status || null);
+    } else if (message?.type === 'SELECTOR_HEALTH' || message?.type === 'SELECTOR_HEALTH_UPDATE') {
+      renderSelectorHealth(message.health || null);
     }
   } catch (e) {
     console.error('[MessageListener] Error handling message:', e);
@@ -646,14 +719,24 @@ async function importSampleData(importData) {
 // Start auto-refresh when popup opens
 document.addEventListener('DOMContentLoaded', async () => {
   try {
+    const initialTabId = await getContextTabId();
+    tabContext.bindActiveTabRefresh();
     try {
-      chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED' });
+      chrome.runtime.sendMessage({ type: 'SIDE_PANEL_OPENED', tabId: initialTabId });
     } catch (_) {}
 
-    await getContextTabId();
     initInfoPopovers();
     await loadParallelWalkthroughVisibility();
     await loadSettingsIntoUI();
+    await loadMemorySettingsIntoUI();
+    initMemoryPackUI({ getContextTabId });
+    initPromptQueueReorder({
+      textarea: promptsTextarea,
+      separatorInput,
+      appendInput: document.getElementById('appendPromptText'),
+      prependInput: document.getElementById('systemPrompt'),
+      onChange: updatePromptCount,
+    });
     refreshWrapperPromptTextareaHeights();
     await loadHistoryIntoUI(updatePromptCount);
     await loadStateIntoUI();
@@ -681,6 +764,20 @@ document.getElementById('optionsHeader')?.addEventListener('click', () => {
   content.classList.toggle('collapsed');
 });
 
+document.getElementById('memoryHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#memoryHeader .collapsible-toggle');
+  const content = document.getElementById('memoryContent');
+  toggle?.classList.toggle('collapsed');
+  content?.classList.toggle('collapsed');
+});
+
+document.getElementById('memorySettingsHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#memorySettingsHeader .collapsible-toggle');
+  const content = document.getElementById('memorySettingsContent');
+  toggle?.classList.toggle('collapsed');
+  content?.classList.toggle('collapsed');
+});
+
 
 // Prompt counter
 const promptsTextarea = document.getElementById('prompts');
@@ -689,7 +786,9 @@ const updatePromptCount = () => {
   const separator = resolveSeparator(separatorInput?.value);
   const appendText = document.getElementById('appendPromptText')?.value?.trim() || '';
   const prependText = document.getElementById('systemPrompt')?.value?.trim() || '';
-  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator, appendText, prependText);
+  const launchPlan = buildPromptLaunchPlan(promptsTextarea.value, separator, appendText, prependText, {
+    enableDuplicateTypoVariants: document.getElementById('enableDuplicateTypoVariants')?.checked === true,
+  });
   const prompts = launchPlan.prompts;
   const tabGroups = launchPlan.tabPromptGroups.length;
   const counter = document.querySelector('.prompt-counter');
@@ -699,14 +798,19 @@ const updatePromptCount = () => {
       ? `${base} · ${tabGroups} tab set${tabGroups !== 1 ? 's' : ''}`
       : base;
   }
+  refreshPromptQueueReorder();
 };
 
 async function loadStateIntoUI() {
   try {
-    const { state: storedState } = await chrome.storage.local.get(['state']);
-    if (!storedState || !Array.isArray(storedState.prompts)) return;
     if (!promptsTextarea) return;
-    promptsTextarea.value = storedState.prompts.join('\n');
+    let tabId = tabContext.getCurrentPanelTabId();
+    if (!Number.isInteger(tabId)) {
+      tabId = await getContextTabId();
+    }
+    const res = await chrome.runtime.sendMessage({ type: 'GET_AUTOMATION_QUEUE_STATE', tabId });
+    const prompts = Array.isArray(res?.queue?.prompts) ? res.queue.prompts : [];
+    promptsTextarea.value = prompts.join('\n');
     updatePromptCount();
     autoResizeTextarea(promptsTextarea, { active: false });
   } catch (e) {
@@ -1059,8 +1163,7 @@ chrome.runtime.onMessage.addListener((message) => {
     // Reload prompts to show new transcription entries
     loadStateIntoUI();
   } else if (message?.type === 'CLOSE_SIDE_PANEL') {
-    const messageTabId = Number(message?.tabId);
-    if (!Number.isInteger(messageTabId) || !Number.isInteger(currentPanelTabId) || messageTabId === currentPanelTabId) {
+    if (tabContext.shouldCloseForMessage(message)) {
       window.close();
     }
   }

@@ -1,0 +1,27 @@
+[$caveman:caveman](C:\\Users\\deletable\\.codex\\plugins\\cache\\caveman-repo\\caveman\\0.1.0\\skills\\caveman\\SKILL.md) [$superpowers:using-superpowers](C:\\Users\\deletable\\.codex\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\skills\\using-superpowers\\SKILL.md) use gsd skills as well
+
+
+So this issue has been there for some time now, but I think the new console log has the console log. 
+
+
+So the issue is that it is, I load like 10 prompts or something in the queue and it sends one or two prompts and it throws errors. or says complete without errors.....
+
+you can see multiple attempts in the console log
+
+It keeps on doing the errors. I tried to change the max prompt duration beyond 190,000 but it did not stick. 
+
+
+
+And there have been already changes done by other agents and some of them were good. 
+
+
+There is also another issue where there is some inversion logic which is not correct in terms of maximum duration, indefinite duration. It does not actually make indefinite duration. Some of the flags become false or something like that and it does not stick.
+
+
+
+
+
+you know the usual workflow, talk to me in Q and A file, ask me questions, talk to me as freely as possible, don't stop working 
+frequently check time-based q&a file !
+
+you are gpt 5.5 extra high in codex, so don't waste tokens, use appropriate intelligence, sub-agents to do your work.

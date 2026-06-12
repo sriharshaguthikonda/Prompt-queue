@@ -27,13 +27,16 @@ The extension uses a Python native messaging host to access the file system.
    install_native_host.bat
    ```
 
-3. **Update Extension ID(s)**:
+   If auto-detection cannot find the unpacked extension, pass the ID shown in the browser:
+   ```batch
+   install_native_host.bat -EdgeExtensionId YOUR_EDGE_EXTENSION_ID
+   install_native_host.bat -ChromeExtensionId YOUR_CHROME_EXTENSION_ID
+   ```
+
+3. **Extension ID source**:
    - **For Chrome**: Go to `chrome://extensions` and copy the extension ID
    - **For Edge**: Go to `edge://extensions` and copy the extension ID
-   - Edit `native_host.json` and replace:
-     - `YOUR_EXTENSION_ID` with your Chrome extension ID
-     - `YOUR_EDGE_EXTENSION_ID` with your Edge extension ID
-   - **If you only use one browser**, you can remove the unused entry from `allowed_origins`
+   - The installer writes `native_host.json` with the supplied or auto-detected ID(s)
 
 ### 2. Enable the Extension
 
@@ -120,7 +123,8 @@ Or simple format:
 1. Make sure you ran the `install_native_host.bat` script
 2. Check that Python is installed and in your PATH
 3. Verify the extension ID in `native_host.json` is correct
-4. Restart Chrome after making changes
+4. Verify the registry default value points to this repo's `native_host.json`
+5. Restart or reload the browser extension after making changes
 
 ### No Files Being Detected
 
@@ -149,6 +153,8 @@ Or simple format:
 - `native_host.example.json` - Sanitized template checked into the repo
 - `native_host.json` - Local native host configuration (auto-generated, gitignored)
 - `install_native_host.bat` - Installation script
+- `install_native_host.ps1` - Installer implementation with extension ID auto-detection
+- `run_host.bat` - Native messaging launcher for `native_host.py`
 - Registry entries for native messaging (auto-created)
 
 ## Security Notes

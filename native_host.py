@@ -11,12 +11,27 @@ import os
 import time
 import glob
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+
+DEFAULT_MEMORY_BASE_URL = "http://127.0.0.1:5599"
+DEFAULT_TOKEN_PATH = r"C:\.memory\config\local_token"
+MEMORY_TIMEOUT_SECONDS = 10
+ALLOWED_MEMORY_TYPES = {
+    "memory_healthz",
+    "memory_pack_browser",
+    "memory_projects",
+    "memory_get",
+}
 
 class TranscriptionMonitor:
-    def __init__(self):
+    def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
         self.processed_files = set()
         self.watch_folder = ""
         self.running = True
+        self.memory_base_url = memory_base_url.rstrip("/")
+        self.http_open = http_open or urlopen
         
     def send_message(self, message):
         """Send message to Chrome extension"""
@@ -103,9 +118,129 @@ class TranscriptionMonitor:
         elif msg_type == 'stop_monitoring':
             self.watch_folder = ""
             return {"type": "monitoring_stopped"}
+
+        elif msg_type in ALLOWED_MEMORY_TYPES:
+            return self.handle_memory_message(message)
+
+        elif isinstance(msg_type, str) and msg_type.startswith("memory_"):
+            return {
+                "type": "error",
+                "ok": False,
+                "code": "UNSUPPORTED_MEMORY_OPERATION",
+                "message": "Unsupported memory operation",
+            }
             
         else:
             return {"type": "error", "message": f"Unknown message type: {msg_type}"}
+
+    def get_memory_token(self, message):
+        """Read the local memory token at request time."""
+        token_path = message.get("token_path") or DEFAULT_TOKEN_PATH
+        with open(token_path, "r", encoding="utf-8") as f:
+            return f.read().strip()
+
+    def handle_memory_message(self, message):
+        """Proxy allowlisted read-only memory bridge operations."""
+        try:
+            msg_type = message.get("type")
+            token = self.get_memory_token(message)
+
+            if msg_type == "memory_healthz":
+                return self.proxy_memory_request(msg_type, "GET", "/healthz", token)
+
+            if msg_type == "memory_pack_browser":
+                payload = {
+                    key: value for key, value in message.items()
+                    if key not in {"type", "token_path"}
+                }
+                return self.proxy_memory_request(
+                    msg_type,
+                    "POST",
+                    "/pack/browser",
+                    token,
+                    payload=payload,
+                )
+
+            if msg_type == "memory_projects":
+                return self.proxy_memory_request(msg_type, "GET", "/memory/projects", token)
+
+            if msg_type == "memory_get":
+                memory_id = str(message.get("memory_id") or message.get("id") or "").strip()
+                if not memory_id:
+                    return {
+                        "type": "error",
+                        "ok": False,
+                        "code": "MISSING_MEMORY_ID",
+                        "message": "memory_id is required",
+                    }
+                return self.proxy_memory_request(
+                    msg_type,
+                    "GET",
+                    f"/memory/{quote(memory_id, safe='')}",
+                    token,
+                )
+
+            return {
+                "type": "error",
+                "ok": False,
+                "code": "UNSUPPORTED_MEMORY_OPERATION",
+                "message": "Unsupported memory operation",
+            }
+        except OSError:
+            return {
+                "type": "error",
+                "ok": False,
+                "code": "TOKEN_UNAVAILABLE",
+                "message": "Memory token unavailable",
+            }
+
+    def proxy_memory_request(self, msg_type, method, path, token, payload=None):
+        body = None
+        headers = {"X-Memory-Token": token}
+        if payload is not None:
+            body = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+
+        request = Request(
+            f"{self.memory_base_url}{path}",
+            data=body,
+            headers=headers,
+            method=method,
+        )
+
+        try:
+            with self.http_open(request, timeout=MEMORY_TIMEOUT_SECONDS) as response:
+                response_body = response.read()
+                parsed_body = self.parse_memory_response(response_body, response.headers)
+                return {
+                    "type": f"{msg_type}_result",
+                    "ok": True,
+                    "status": getattr(response, "status", 200),
+                    "content_type": response.headers.get("Content-Type", ""),
+                    "body": parsed_body,
+                }
+        except HTTPError as e:
+            return {
+                "type": "error",
+                "ok": False,
+                "status": e.code,
+                "code": "MEMORY_BRIDGE_HTTP_ERROR",
+                "message": "Memory bridge request failed",
+            }
+        except URLError:
+            return {
+                "type": "error",
+                "ok": False,
+                "code": "MEMORY_BRIDGE_UNAVAILABLE",
+                "message": "Memory bridge unavailable",
+            }
+
+    def parse_memory_response(self, response_body, headers):
+        content_type = headers.get("Content-Type", "")
+        text = response_body.decode("utf-8")
+        if "application/json" in content_type:
+            return json.loads(text) if text else {}
+        return text
             
     def read_state_file(self, state_file):
         """Read the state file content"""

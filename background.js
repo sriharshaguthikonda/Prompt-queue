@@ -40,7 +40,11 @@
   });
 })();
 
-importScripts('background-parallel-utils.js');
+importScripts('prompt-queue-constants.js', 'background-parallel-utils.js');
+const PQ_CONSTANTS = self.PromptQueueConstants || {};
+const MESSAGE_TYPES = PQ_CONSTANTS.MESSAGE_TYPES || {};
+const STORAGE_KEYS = PQ_CONSTANTS.STORAGE_KEYS || {};
+const LIMITS = PQ_CONSTANTS.LIMITS || {};
 const {
   PARALLEL_CONFIG,
   buildParallelPromptId,
@@ -91,16 +95,32 @@ const state = {
     appendPromptText: '',
     prependSystemPrompt: true,
     appendSystemPrompt: false,
-    theme: 'dark',
+    theme: 'system',
+    preSendQuietWindowMs: 1200,
+    chatgptPreSendQuietWindowMs: 1200,
     autoConfirmDialogs: false,
     enableWatchedElementGate: false,
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
+    targetSelectors: {
+      promptInput: '',
+      sendButton: '',
+      stopButton: '',
+      watchedElement: 'button[data-testid="copy-turn-action-button"]',
+    },
     refreshTabBeforeEachPrompt: false,
     parallelOneTabPerPrompt: false,
     enableRetryOnFailure: true,
     maxRetriesPerPrompt: 2,
     retryDelayMs: 2000,
     debugLoggingEnabled: false,
+    enableDuplicateTypoVariants: false,
+    postPopulateDelayMinMs: 500,
+    postPopulateDelayMaxMs: 1500,
+    crossTabSendLockEnabled: true,
+    crossTabSendLockMinWaitMs: 3000,
+    crossTabSendLockMaxWaitMs: 12000,
+    perStepConsoleLogging: false,
+    dryRunPopulateOnly: false,
     openNewChatPerPrompt: false,
     openNewChatPerPromptUrl: '',
   },
@@ -112,11 +132,41 @@ const state = {
   currentPromptId: null,
   currentRetryCount: 0,
   stableCountdownMs: 0,
+  responseDurations: [],
   parallel: null,
+  stepStatus: null,
 };
 let sequentialRetryTimer = null;
 const parallelSubmissionWaiters = new Map();
 let hasHydratedPersistentState = false;
+let sendLease = null;
+
+const MEMORY_CLASSES = [
+  'beliefs_preferences',
+  'world_facts',
+  'entity_observations',
+  'agent_experiences',
+  'reflections',
+];
+
+const DEFAULT_MEMORY_SETTINGS = {
+  enabled: true,
+  bridgeBaseUrl: 'http://127.0.0.1:5599',
+  authMode: 'native_host',
+  nativeHostName: 'com.aipromptqueue.transcription',
+  storedToken: '',
+  querySource: 'prompt_box',
+  project: 'global',
+  mode: 'smart',
+  maxTokens: 800,
+  topK: 8,
+  minScore: 0.2,
+  pinnedPolicy: 'relevant_only',
+  includeClasses: MEMORY_CLASSES,
+  excludeClasses: [],
+  insertBehavior: 'prepend_or_replace_managed_block',
+  debug: false,
+};
 
 const DEFAULT_SETTINGS = {
   stableMs: 10000,
@@ -128,25 +178,49 @@ const DEFAULT_SETTINGS = {
   appendPromptText: '',
   prependSystemPrompt: true,
   appendSystemPrompt: false,
-  theme: 'dark',
+  theme: 'system',
+  preSendQuietWindowMs: 1200,
+  chatgptPreSendQuietWindowMs: 1200,
   autoConfirmDialogs: false,
   enableWatchedElementGate: false,
   watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
+  targetSelectors: {
+    promptInput: '',
+    sendButton: '',
+    stopButton: '',
+    watchedElement: 'button[data-testid="copy-turn-action-button"]',
+  },
   refreshTabBeforeEachPrompt: false,
   parallelOneTabPerPrompt: false,
   enableRetryOnFailure: true,
   maxRetriesPerPrompt: 2,
   retryDelayMs: 2000,
   debugLoggingEnabled: false,
+  enableDuplicateTypoVariants: false,
+  postPopulateDelayMinMs: 500,
+  postPopulateDelayMaxMs: 1500,
+  crossTabSendLockEnabled: true,
+  crossTabSendLockMinWaitMs: 3000,
+  crossTabSendLockMaxWaitMs: 12000,
+  perStepConsoleLogging: false,
+  dryRunPopulateOnly: false,
   enableMaxWaitTimeout: true,
   enableStopWord: false,
   stopWord: 'end of feedback',
   stopWordCaseSensitive: false,
   openNewChatPerPrompt: false,
   openNewChatPerPromptUrl: '',
+  memory: DEFAULT_MEMORY_SETTINGS,
 };
+const CONTENT_SCRIPT_VERSION = '2026-06-12.response-timeout-owner-v2';
+const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
-const SETTINGS_STORAGE_KEY = 'aiTaskSequencerSettings';
+const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
+const HISTORY_STORAGE_KEY = STORAGE_KEYS.HISTORY || 'aiTaskSequencerHistory';
+const RESPONSE_LOG_STORAGE_KEY = STORAGE_KEYS.RESPONSES || 'aiTaskSequencerResponses';
+const PROMPT_PREVIEW_CHARS = LIMITS.PROMPT_PREVIEW_CHARS || 120;
+const RESPONSE_TEXT_CHARS = LIMITS.RESPONSE_TEXT_CHARS || 20000;
+const RESPONSE_RECORD_LIMIT = LIMITS.RESPONSE_RECORD_LIMIT || 200;
 
 function applyDebugLoggingSetting(enabled) {
   const next = enabled === true;
@@ -178,13 +252,173 @@ function coerceNumber(v, min, max, fallback) {
   return fallback;
 }
 
-function validateSettings(input = {}) {
+function clampNumber(v, min, max, fallback) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function sanitizeMemoryBridgeBaseUrl(url) {
+  const trimmed = typeof url === 'string' ? url.trim().replace(/\/+$/, '') : '';
+  if (!trimmed) return DEFAULT_MEMORY_SETTINGS.bridgeBaseUrl;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol === 'http:' && (parsed.hostname === '127.0.0.1' || parsed.hostname === 'localhost')) {
+      return parsed.toString().replace(/\/+$/, '');
+    }
+  } catch (_) {}
+  return DEFAULT_MEMORY_SETTINGS.bridgeBaseUrl;
+}
+
+const BUTTON_CONTEXT_SELECTOR_ROLES = new Set(['sendButton', 'stopButton', 'watchedElement']);
+
+function normalizeCommonDataTestIdPattern(rawValue, role) {
+  const trimmed = typeof rawValue === 'string' ? rawValue.trim() : '';
+  if (!trimmed) return { value: '', normalized: false };
+
+  const hashMatch = trimmed.match(/^data-testid#([a-zA-Z0-9_.:-]+)$/);
+  if (hashMatch) {
+    const base = `[data-testid="${hashMatch[1]}"]`;
+    return { value: BUTTON_CONTEXT_SELECTOR_ROLES.has(role) ? `button${base}` : base, normalized: true };
+  }
+
+  const equalsMatch = trimmed.match(/^data-testid\s*=\s*["']?([a-zA-Z0-9_.:-]+)["']?$/);
+  if (equalsMatch) {
+    const base = `[data-testid="${equalsMatch[1]}"]`;
+    return { value: BUTTON_CONTEXT_SELECTOR_ROLES.has(role) ? `button${base}` : base, normalized: true };
+  }
+
+  return { value: trimmed, normalized: false };
+}
+
+function isValidCssSelector(selector) {
+  if (!selector) return true;
+  try {
+    if (typeof document !== 'undefined' && document?.createDocumentFragment) {
+      document.createDocumentFragment().querySelector(selector);
+      return true;
+    }
+    if (typeof CSS !== 'undefined' && typeof CSS.supports === 'function') {
+      return CSS.supports(`selector(:is(${selector}))`);
+    }
+  } catch (_) {
+    return false;
+  }
+  return isSupportedSelectorWithoutEngine(selector);
+}
+
+function isRecognizedSimpleDataTestIdSelector(selector) {
+  const trimmed = typeof selector === 'string' ? selector.trim() : '';
+  if (!trimmed) return true;
+  const tag = '(?:[a-zA-Z][a-zA-Z0-9_-]*)?';
+  const value = '(?:"[a-zA-Z0-9_.:-]+"|\'[a-zA-Z0-9_.:-]+\'|[a-zA-Z0-9_.:-]+)';
+  return new RegExp(`^${tag}\\[\\s*data-testid\\s*=\\s*${value}\\s*\\]$`).test(trimmed);
+}
+
+function isSupportedSelectorWithoutEngine(selector) {
+  const trimmed = typeof selector === 'string' ? selector.trim() : '';
+  if (!trimmed) return true;
+
+  const tokenPattern = '(?:[#.][a-zA-Z_][a-zA-Z0-9_-]*|[a-zA-Z][a-zA-Z0-9_-]*|\\[\\s*[a-zA-Z_][a-zA-Z0-9_-]*(?:\\s*=\\s*(?:"[^"\\n\\r\\f\\\\]*"|\'[^\'\\n\\r\\f\\\\]*\'|[^\\s\\]]+))?\\s*\\])';
+  const segmentPattern = `${tokenPattern}(?:${tokenPattern})*`;
+  const selectorPattern = `^${segmentPattern}(?:\\s+${segmentPattern})*$`;
+  return new RegExp(selectorPattern).test(trimmed);
+}
+
+function normalizeRoleSelector(rawValue, role, strict, errors) {
+  const normalized = normalizeCommonDataTestIdPattern(rawValue, role);
+  if (!normalized.value) return '';
+  if (isValidCssSelector(normalized.value)) return normalized.value;
+  if (strict && errors) errors[role] = 'Invalid CSS selector';
+  return '';
+}
+
+function validateTargetSelectors(input = {}, legacy = {}, options = {}) {
+  const strict = options?.strict === true;
+  const errors = {};
+  const raw = input && typeof input === 'object' ? input : {};
+  const old = legacy && typeof legacy === 'object' ? legacy : {};
+  const watchedFallback = typeof old.watchedElementSelector === 'string' && old.watchedElementSelector.trim()
+    ? old.watchedElementSelector.trim()
+    : DEFAULT_SETTINGS.targetSelectors.watchedElement;
+
+  const selectors = {
+    promptInput: normalizeRoleSelector(raw.promptInput, 'promptInput', strict, errors),
+    sendButton: normalizeRoleSelector(raw.sendButton, 'sendButton', strict, errors),
+    stopButton: normalizeRoleSelector(raw.stopButton, 'stopButton', strict, errors),
+    watchedElement: '',
+  };
+
+  const watchedRaw = typeof raw.watchedElement === 'string' && raw.watchedElement.trim()
+    ? raw.watchedElement.trim()
+    : watchedFallback;
+  selectors.watchedElement = normalizeRoleSelector(watchedRaw, 'watchedElement', strict, errors) || DEFAULT_SETTINGS.targetSelectors.watchedElement;
+
+  return { selectors, errors };
+}
+
+function validateMemorySettings(input = {}) {
+  const memoryInput = input && typeof input === 'object' ? input : {};
+  const includeClasses = Array.isArray(memoryInput.includeClasses)
+    ? memoryInput.includeClasses.filter((c) => MEMORY_CLASSES.includes(c))
+    : DEFAULT_MEMORY_SETTINGS.includeClasses.slice();
+  const excludeClasses = Array.isArray(memoryInput.excludeClasses)
+    ? memoryInput.excludeClasses.filter((c) => MEMORY_CLASSES.includes(c))
+    : [];
+  const authMode = memoryInput.authMode === 'stored_token' ? 'stored_token' : 'native_host';
+  const querySource = ['prompt_box', 'selection', 'clipboard', 'page', 'manual', 'combined'].includes(memoryInput.querySource)
+    ? memoryInput.querySource
+    : DEFAULT_MEMORY_SETTINGS.querySource;
+  const mode = ['smart', 'compact_hits', 'full_pack', 'debug'].includes(memoryInput.mode)
+    ? memoryInput.mode
+    : DEFAULT_MEMORY_SETTINGS.mode;
+  const pinnedPolicy = ['core_only', 'relevant_only', 'all', 'none'].includes(memoryInput.pinnedPolicy)
+    ? memoryInput.pinnedPolicy
+    : DEFAULT_MEMORY_SETTINGS.pinnedPolicy;
+  const insertBehavior = ['prepend_or_replace_managed_block', 'append', 'replace_selected_text', 'copy_only'].includes(memoryInput.insertBehavior)
+    ? memoryInput.insertBehavior
+    : DEFAULT_MEMORY_SETTINGS.insertBehavior;
+
+  return {
+    enabled: memoryInput.enabled !== false,
+    bridgeBaseUrl: sanitizeMemoryBridgeBaseUrl(memoryInput.bridgeBaseUrl),
+    authMode,
+    nativeHostName: typeof memoryInput.nativeHostName === 'string' && memoryInput.nativeHostName.trim()
+      ? memoryInput.nativeHostName.trim()
+      : DEFAULT_MEMORY_SETTINGS.nativeHostName,
+    storedToken: typeof memoryInput.storedToken === 'string' ? memoryInput.storedToken.trim() : '',
+    querySource,
+    project: typeof memoryInput.project === 'string' && memoryInput.project.trim() ? memoryInput.project.trim() : DEFAULT_MEMORY_SETTINGS.project,
+    mode,
+    maxTokens: coerceNumber(memoryInput.maxTokens, 300, 3000, DEFAULT_MEMORY_SETTINGS.maxTokens),
+    topK: coerceNumber(memoryInput.topK, 3, 20, DEFAULT_MEMORY_SETTINGS.topK),
+    minScore: coerceNumber(memoryInput.minScore, 0, 1, DEFAULT_MEMORY_SETTINGS.minScore),
+    pinnedPolicy,
+    includeClasses: includeClasses.length ? includeClasses : MEMORY_CLASSES.slice(),
+    excludeClasses,
+    insertBehavior,
+    debug: memoryInput.debug === true,
+  };
+}
+
+function validateSettings(input = {}, options = {}) {
   const sanitizedUrl = sanitizeUrlOrEmpty(input.openNewChatPerPromptUrl);
+  const targetResult = validateTargetSelectors(input.targetSelectors, input, options);
+  const targetSelectors = targetResult.selectors;
+  if (options?.strict === true && Object.keys(targetResult.errors || {}).length > 0) {
+    const err = new Error('Invalid target selector');
+    err.validationErrors = targetResult.errors;
+    throw err;
+  }
   const rawStableMin = coerceNumber(input.stableMinMs ?? input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMinMs);
   const rawStableMax = coerceNumber(input.stableMaxMs ?? input.stableMs, 100, 60000, DEFAULT_SETTINGS.stableMaxMs);
   const stableMinMs = Math.min(rawStableMin, rawStableMax);
   const stableMaxMs = Math.max(rawStableMin, rawStableMax);
   const effectiveStableMs = coerceNumber(input.stableMs, stableMinMs, stableMaxMs, stableMaxMs);
+  const postPopulateMinRaw = coerceNumber(input.postPopulateDelayMinMs, 0, 60000, DEFAULT_SETTINGS.postPopulateDelayMinMs);
+  const postPopulateMaxRaw = coerceNumber(input.postPopulateDelayMaxMs, 0, 60000, DEFAULT_SETTINGS.postPopulateDelayMaxMs);
+  const crossTabMinRaw = coerceNumber(input.crossTabSendLockMinWaitMs, 0, 60000, DEFAULT_SETTINGS.crossTabSendLockMinWaitMs);
+  const crossTabMaxRaw = coerceNumber(input.crossTabSendLockMaxWaitMs, 0, 60000, DEFAULT_SETTINGS.crossTabSendLockMaxWaitMs);
   return {
     stableMs: effectiveStableMs,
     stableMinMs,
@@ -195,25 +429,62 @@ function validateSettings(input = {}) {
     appendPromptText: typeof input.appendPromptText === 'string' ? input.appendPromptText : DEFAULT_SETTINGS.appendPromptText,
     prependSystemPrompt: input.prependSystemPrompt !== false,
     appendSystemPrompt: input.appendSystemPrompt === true,
-    theme: input.theme === 'light' ? 'light' : 'dark',
+    theme: input.theme === 'system' ? 'system' : (input.theme === 'light' ? 'light' : 'dark'),
+    preSendQuietWindowMs: clampNumber(
+      input.preSendQuietWindowMs ?? input.chatgptPreSendQuietWindowMs,
+      0,
+      60000,
+      DEFAULT_SETTINGS.preSendQuietWindowMs,
+    ),
+    chatgptPreSendQuietWindowMs: clampNumber(
+      input.preSendQuietWindowMs ?? input.chatgptPreSendQuietWindowMs,
+      0,
+      60000,
+      DEFAULT_SETTINGS.preSendQuietWindowMs,
+    ),
     autoConfirmDialogs: input.autoConfirmDialogs === true,
     enableWatchedElementGate: input.enableWatchedElementGate === true,
-    watchedElementSelector: typeof input.watchedElementSelector === 'string'
-      ? input.watchedElementSelector.trim()
-      : DEFAULT_SETTINGS.watchedElementSelector,
+    watchedElementSelector: targetSelectors.watchedElement,
+    targetSelectors,
     refreshTabBeforeEachPrompt: input.refreshTabBeforeEachPrompt === true,
     parallelOneTabPerPrompt: input.parallelOneTabPerPrompt === true,
     enableRetryOnFailure: input.enableRetryOnFailure !== false,
     maxRetriesPerPrompt: coerceNumber(input.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
     retryDelayMs: coerceNumber(input.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
     debugLoggingEnabled: input.debugLoggingEnabled === true,
+    enableDuplicateTypoVariants: input.enableDuplicateTypoVariants === true,
+    postPopulateDelayMinMs: Math.min(postPopulateMinRaw, postPopulateMaxRaw),
+    postPopulateDelayMaxMs: Math.max(postPopulateMinRaw, postPopulateMaxRaw),
+    crossTabSendLockEnabled: input.crossTabSendLockEnabled !== false,
+    crossTabSendLockMinWaitMs: Math.min(crossTabMinRaw, crossTabMaxRaw),
+    crossTabSendLockMaxWaitMs: Math.max(crossTabMinRaw, crossTabMaxRaw),
+    perStepConsoleLogging: input.perStepConsoleLogging === true,
+    dryRunPopulateOnly: input.dryRunPopulateOnly === true,
     enableMaxWaitTimeout: input.enableMaxWaitTimeout !== false,
     enableStopWord: input.enableStopWord === true,
     stopWord: typeof input.stopWord === 'string' ? input.stopWord.trim() : DEFAULT_SETTINGS.stopWord,
     stopWordCaseSensitive: input.stopWordCaseSensitive === true,
     openNewChatPerPrompt: input.openNewChatPerPrompt === true,
     openNewChatPerPromptUrl: sanitizedUrl,
+    memory: validateMemorySettings(input.memory || {}),
   };
+}
+
+function publicSettings(settings = state.options) {
+  const safe = { ...(settings || {}) };
+  safe.memory = { ...(safe.memory || DEFAULT_MEMORY_SETTINGS) };
+  safe.memory.hasStoredToken = Boolean(safe.memory.storedToken);
+  safe.memory.storedToken = '';
+  return safe;
+}
+
+function sanitizeSettingsForHistory(settings = {}) {
+  const safe = publicSettings(validateSettings({ ...DEFAULT_SETTINGS, ...(settings || {}) }));
+  delete safe.theme;
+  if (safe.memory) {
+    safe.memory.storedToken = safe.memory.hasStoredToken ? '<stored>' : '';
+  }
+  return safe;
 }
 
 function sanitizeUrlOrEmpty(url) {
@@ -231,8 +502,282 @@ function sanitizeUrlOrEmpty(url) {
   return '';
 }
 
+function truncateForStatus(text, maxChars = PROMPT_PREVIEW_CHARS) {
+  const normalized = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!normalized) return '';
+  if (normalized.length <= maxChars) return normalized;
+  return `${normalized.slice(0, Math.max(0, maxChars - 3))}...`;
+}
+
+function clampStoredResponseText(text) {
+  const normalized = String(text || '').trim();
+  if (!normalized) return '';
+  if (normalized.length <= RESPONSE_TEXT_CHARS) return normalized;
+  return `${normalized.slice(0, Math.max(0, RESPONSE_TEXT_CHARS - 28))}\n\n[response truncated]`;
+}
+
+function pushPromptDuration(target, startedAt, completedAt = Date.now()) {
+  const start = Number(startedAt || 0);
+  if (!target || !Number.isFinite(start) || start <= 0) return 0;
+  const duration = Math.max(0, completedAt - start);
+  if (duration <= 0) return 0;
+  const durations = Array.isArray(target.responseDurations) ? target.responseDurations : [];
+  durations.push(duration);
+  target.responseDurations = durations.slice(-20);
+  return duration;
+}
+
+function averageDurationMs(durations) {
+  const clean = (Array.isArray(durations) ? durations : [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value) && value > 0);
+  if (clean.length === 0) return 0;
+  return Math.round(clean.reduce((sum, value) => sum + value, 0) / clean.length);
+}
+
+function buildTimingStatus({ running, processing, promptStartTime, currentIndex, total, responseDurations }) {
+  const averageResponseMs = averageDurationMs(responseDurations);
+  const elapsedPromptMs = running && promptStartTime ? Math.max(0, Date.now() - Number(promptStartTime || 0)) : 0;
+  let etaMs = 0;
+  if (running && averageResponseMs > 0 && Number.isFinite(total) && Number.isFinite(currentIndex)) {
+    const remainingAfterCurrent = Math.max(0, Number(total) - Number(currentIndex) - 1);
+    etaMs = remainingAfterCurrent * averageResponseMs;
+    if (processing && elapsedPromptMs > 0) {
+      etaMs += Math.max(0, averageResponseMs - elapsedPromptMs);
+    }
+  }
+  return { averageResponseMs, elapsedPromptMs, etaMs };
+}
+
+function isInfiniteResponseWaitEnabled(options = {}) {
+  return options?.enableMaxWaitTimeout !== false;
+}
+
+function shouldAllowInFlightRecovery({ options = {}, processingElapsed = 0 } = {}) {
+  if (isInfiniteResponseWaitEnabled(options)) return false;
+  const maxPerPrompt = options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs;
+  return Number(processingElapsed) >= maxPerPrompt;
+}
+
+function randomBetweenMs(minMs, maxMs) {
+  const min = Math.max(0, Number(minMs) || 0);
+  const max = Math.max(min, Number(maxMs) || min);
+  if (max <= min) return Math.round(min);
+  return Math.round(min + Math.random() * (max - min));
+}
+
+function getSendLeaseWaitWindow(options = {}) {
+  const minMs = Number.isFinite(Number(options.crossTabSendLockMinWaitMs))
+    ? Number(options.crossTabSendLockMinWaitMs)
+    : DEFAULT_SETTINGS.crossTabSendLockMinWaitMs;
+  const maxMs = Number.isFinite(Number(options.crossTabSendLockMaxWaitMs))
+    ? Number(options.crossTabSendLockMaxWaitMs)
+    : DEFAULT_SETTINGS.crossTabSendLockMaxWaitMs;
+  return {
+    minMs: Math.min(Math.max(0, minMs), Math.max(0, maxMs)),
+    maxMs: Math.max(Math.max(0, minMs), Math.max(0, maxMs)),
+  };
+}
+
+function normalizeStepStatus(input = {}) {
+  if (!input || typeof input !== 'object') return null;
+  return {
+    step: String(input.step || 'working'),
+    label: String(input.label || input.step || 'Working').slice(0, 80),
+    color: String(input.color || 'active'),
+    detail: String(input.detail || '').slice(0, 120),
+    durationMs: Math.max(0, Math.round(Number(input.durationMs) || 0)),
+    endAt: Math.max(0, Math.round(Number(input.endAt) || 0)),
+    startedAt: Math.max(0, Math.round(Number(input.startedAt) || Date.now())),
+    source: String(input.source || 'background').slice(0, 40),
+  };
+}
+
+function setStepStatusForPrompt({ promptId, senderTabId, status }) {
+  const next = normalizeStepStatus(status);
+  if (!next) return null;
+  const tabSessionRef = resolveTabSessionForMessage({ promptId }, { tab: { id: senderTabId } });
+  if (tabSessionRef.session) {
+    tabSessionRef.session.stepStatus = next;
+    return { tabId: tabSessionRef.tabId, status: buildTabSessionStatus(tabSessionRef.session) };
+  }
+  if (state.running && (!promptId || String(promptId) === String(state.currentPromptId))) {
+    state.stepStatus = next;
+    return { tabId: state.tabId, status: getStatus() };
+  }
+  if (state.mode === 'parallel' && state.parallel && promptId) {
+    const promptRef = resolveParallelPromptRef(String(promptId), senderTabId);
+    const worker = promptRef ? state.parallel.workersById?.[promptRef.workerId] : null;
+    if (worker) {
+      worker.stepStatus = next;
+      state.stepStatus = next;
+      return { tabId: worker.tabId || senderTabId || state.tabId, status: getStatus() };
+    }
+  }
+  state.stepStatus = next;
+  return { tabId: senderTabId || state.tabId, status: getStatus() };
+}
+
+function emitProgressStatus(tabId, status) {
+  try {
+    chrome.runtime.sendMessage({
+      type: 'AUTOMATION_PROGRESS',
+      tabId: Number.isInteger(Number(tabId)) ? Number(tabId) : undefined,
+      status,
+    });
+  } catch (_) {}
+}
+
+function releaseSendLease(promptId, reason = 'unknown') {
+  const leasePromptId = sendLease?.promptId ? String(sendLease.promptId) : '';
+  if (!sendLease) {
+    console.log('[SendLease] Release skipped; no active lease', { promptId: String(promptId || ''), reason });
+    return false;
+  }
+  if (promptId && leasePromptId && String(promptId) !== leasePromptId) {
+    console.log('[SendLease] Release skipped; prompt mismatch', {
+      requestedPromptId: String(promptId),
+      leasePromptId,
+      reason,
+      ownerTabId: sendLease.tabId,
+    });
+    return false;
+  }
+  console.log('[SendLease] Released', {
+    promptId: leasePromptId || String(promptId || ''),
+    reason,
+    heldMs: sendLease?.acquiredAt ? Date.now() - sendLease.acquiredAt : 0,
+    ownerTabId: sendLease.tabId,
+  });
+  if (sendLease.timeoutId) clearTimeout(sendLease.timeoutId);
+  sendLease = null;
+  return true;
+}
+
+async function acquireSendLease({ tabId, promptId, options = {}, statusTarget = null } = {}) {
+  const enabled = options.crossTabSendLockEnabled !== false;
+  if (!enabled) {
+    console.log('[SendLease] Disabled; dispatch proceeds without cross-tab wait', { tabId, promptId });
+    return true;
+  }
+  const ownerId = `${tabId || 'tab'}:${promptId || Date.now()}`;
+  const wait = getSendLeaseWaitWindow(options);
+  const leaseTimeoutMs = Math.max(15000, wait.maxMs + 15000);
+  const startedAt = Date.now();
+  console.log('[SendLease] Acquire requested', {
+    tabId,
+    promptId,
+    waitMinMs: wait.minMs,
+    waitMaxMs: wait.maxMs,
+    leaseTimeoutMs,
+    activeLease: sendLease ? {
+      promptId: sendLease.promptId,
+      tabId: sendLease.tabId,
+      ageMs: Date.now() - sendLease.acquiredAt,
+      expiresInMs: Math.max(0, sendLease.expiresAt - Date.now()),
+    } : null,
+  });
+  while (true) {
+    if (!sendLease || sendLease.expiresAt <= Date.now() || sendLease.ownerId === ownerId) {
+      if (sendLease?.expiresAt <= Date.now()) {
+        releaseSendLease(sendLease.promptId, 'expired');
+      } else if (sendLease?.ownerId === ownerId) {
+        releaseSendLease(sendLease.promptId, 'renew');
+      }
+      const timeoutId = setTimeout(() => releaseSendLease(promptId, 'timeout'), leaseTimeoutMs);
+      sendLease = {
+        ownerId,
+        tabId,
+        promptId: String(promptId || ''),
+        acquiredAt: Date.now(),
+        expiresAt: Date.now() + leaseTimeoutMs,
+        timeoutId,
+      };
+      const status = {
+        step: 'sending',
+        label: 'Send lock acquired',
+        color: 'active',
+        detail: 'Tab owns send lock',
+        source: 'background',
+      };
+      const progress = setStepStatusForPrompt({ promptId, senderTabId: tabId, status }) || statusTarget;
+      if (progress?.status) emitProgressStatus(progress.tabId, progress.status);
+      console.log('[SendLease] Acquired', {
+        tabId,
+        promptId,
+        leaseTimeoutMs,
+        waitedMs: Date.now() - startedAt,
+        releaseTrigger: 'PROMPT_SUBMITTED',
+      });
+      return true;
+    }
+
+    const delayMs = randomBetweenMs(wait.minMs, wait.maxMs);
+    const status = {
+      step: 'waiting_for_tab',
+      label: 'Waiting for another tab',
+      color: 'waiting',
+      detail: 'Cross-tab send lock is busy',
+      durationMs: delayMs,
+      endAt: Date.now() + delayMs,
+      source: 'background',
+    };
+    const progress = setStepStatusForPrompt({ promptId, senderTabId: tabId, status }) || statusTarget;
+    if (progress?.status) emitProgressStatus(progress.tabId, progress.status);
+    console.log('[SendLease] Busy; waiting before retry', {
+      tabId,
+      promptId,
+      ownerTabId: sendLease.tabId,
+      ownerPromptId: sendLease.promptId,
+      delayMs,
+      waitedMs: Date.now() - startedAt,
+      note: 'Wait is only for send-slot spacing, not response completion',
+    });
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+}
+
+async function recordCapturedResponse(record = {}) {
+  const responseText = clampStoredResponseText(record.responseText);
+  if (!responseText) return false;
+  const safeRecord = {
+    promptId: record.promptId ? String(record.promptId) : '',
+    promptIndex: Number.isFinite(record.promptIndex) ? Number(record.promptIndex) : null,
+    tabId: Number.isFinite(record.tabId) ? Number(record.tabId) : null,
+    mode: record.mode || 'sequential',
+    site: record.site || '',
+    url: typeof record.url === 'string' ? record.url.slice(0, 500) : '',
+    promptText: clampStoredResponseText(record.promptText),
+    promptPreview: truncateForStatus(record.promptText),
+    responseText,
+    responsePreview: truncateForStatus(responseText),
+    durationMs: Number.isFinite(record.durationMs) ? Number(record.durationMs) : 0,
+    capturedAt: Date.now(),
+  };
+  const stored = await chrome.storage.local.get(RESPONSE_LOG_STORAGE_KEY);
+  const existing = Array.isArray(stored?.[RESPONSE_LOG_STORAGE_KEY])
+    ? stored[RESPONSE_LOG_STORAGE_KEY]
+    : [];
+  const next = [safeRecord, ...existing]
+    .filter((item, index, arr) => {
+      if (!item?.promptId) return true;
+      return arr.findIndex((candidate) => candidate?.promptId === item.promptId) === index;
+    })
+    .slice(0, RESPONSE_RECORD_LIMIT);
+  await chrome.storage.local.set({ [RESPONSE_LOG_STORAGE_KEY]: next });
+  return true;
+}
+
 function getStatus() {
   const parallel = state.parallel || {};
+  const timing = buildTimingStatus({
+    running: state.running,
+    processing: state.processing,
+    promptStartTime: state.promptStartTime,
+    currentIndex: state.currentIndex,
+    total: state.prompts.length,
+    responseDurations: state.responseDurations,
+  });
   return {
     running: state.running,
     paused: state.paused,
@@ -244,6 +789,9 @@ function getStatus() {
     recoveryAttempts: state.recoveryAttempts,
     currentRetryCount: state.currentRetryCount || 0,
     stableCountdownMs: state.stableCountdownMs,
+    stepStatus: state.stepStatus,
+    currentPromptPreview: state.running ? truncateForStatus(state.prompts[state.currentIndex]) : '',
+    ...timing,
     parallelLaunched: parallel.launched || 0,
     parallelCompleted: parallel.completed || 0,
     parallelFailed: parallel.failed || 0,
@@ -288,15 +836,19 @@ async function saveState() {
     currentPromptId: state.currentPromptId,
     currentRetryCount: state.currentRetryCount,
     promptStartTime: state.promptStartTime,
+    responseDurations: state.responseDurations,
     savedAt: Date.now(),
     stableCountdownMs: state.stableCountdownMs,
+    stepStatus: state.stepStatus,
     parallel: state.parallel,
   };
-  await chrome.storage.local.set({ aiTaskSequencerState: persistentState });
+  await chrome.storage.local.set({ [STORAGE_KEYS.STATE || 'aiTaskSequencerState']: persistentState });
 }
 
 async function loadState() {
-  const { aiTaskSequencerState } = await chrome.storage.local.get('aiTaskSequencerState');
+  const stateKey = STORAGE_KEYS.STATE || 'aiTaskSequencerState';
+  const storedState = await chrome.storage.local.get(stateKey);
+  const aiTaskSequencerState = storedState?.[stateKey];
   hasHydratedPersistentState = true;
   if (aiTaskSequencerState) {
     const oldState = { running: state.running, currentIndex: state.currentIndex, prompts: state.prompts.length };
@@ -316,6 +868,8 @@ async function loadState() {
     state.currentPromptId = aiTaskSequencerState.currentPromptId || state.currentPromptId || null;
     state.currentRetryCount = aiTaskSequencerState.currentRetryCount || state.currentRetryCount || 0;
     state.promptStartTime = aiTaskSequencerState.promptStartTime || state.promptStartTime || (state.processing ? state.lastActivityTime : 0);
+    state.responseDurations = Array.isArray(aiTaskSequencerState.responseDurations) ? aiTaskSequencerState.responseDurations.slice(-20) : [];
+    state.stepStatus = aiTaskSequencerState.stepStatus || null;
     if (state.mode === 'parallel') {
       const restoredParallel = aiTaskSequencerState.parallel || {};
       state.parallel = {
@@ -348,7 +902,8 @@ async function loadState() {
 }
 
 async function clearState() {
-  await chrome.storage.local.remove('aiTaskSequencerState');
+  releaseSendLease(null, 'clear-state');
+  await chrome.storage.local.remove(STORAGE_KEYS.STATE || 'aiTaskSequencerState');
   if (sequentialRetryTimer) {
     clearTimeout(sequentialRetryTimer);
     sequentialRetryTimer = null;
@@ -371,11 +926,13 @@ async function clearState() {
   state.currentPromptId = null;
   state.currentRetryCount = 0;
   state.promptStartTime = 0;
+  state.responseDurations = [];
   state.stableCountdownMs = 0;
+  state.stepStatus = null;
   state.parallel = null;
 }
 
-const TAB_SESSIONS_STORAGE_KEY = 'aiTaskSequencerTabSessions';
+const TAB_SESSIONS_STORAGE_KEY = STORAGE_KEYS.TAB_SESSIONS || 'aiTaskSequencerTabSessions';
 const tabSessions = new Map();
 const tabSessionRetryTimers = new Map();
 let hasHydratedTabSessions = false;
@@ -392,6 +949,7 @@ function createIdleStatusForTab(tabId, options = state.options) {
     recoveryAttempts: 0,
     currentRetryCount: 0,
     stableCountdownMs: 0,
+    stepStatus: null,
     parallelLaunched: 0,
     parallelCompleted: 0,
     parallelFailed: 0,
@@ -400,19 +958,67 @@ function createIdleStatusForTab(tabId, options = state.options) {
   };
 }
 
+function buildQueueStateForTab(tabId) {
+  const numericTabId = Number(tabId);
+  if (Number.isInteger(numericTabId) && tabSessions.has(numericTabId)) {
+    const session = tabSessions.get(numericTabId);
+    return {
+      tabId: numericTabId,
+      source: 'tabSession',
+      prompts: Array.isArray(session.prompts) ? session.prompts.slice() : [],
+      currentIndex: Number(session.currentIndex || 0),
+      running: session.running === true,
+      paused: session.paused === true,
+    };
+  }
+
+  if ((!Number.isInteger(numericTabId) || state.tabId === numericTabId) && Array.isArray(state.prompts)) {
+    return {
+      tabId: Number.isInteger(numericTabId) ? numericTabId : (state.tabId || null),
+      source: 'globalState',
+      prompts: state.prompts.slice(),
+      currentIndex: Number(state.currentIndex || 0),
+      running: state.running === true,
+      paused: state.paused === true,
+    };
+  }
+
+  return {
+    tabId: Number.isInteger(numericTabId) ? numericTabId : null,
+    source: 'idle',
+    prompts: [],
+    currentIndex: 0,
+    running: false,
+    paused: false,
+  };
+}
+
 function buildTabSessionStatus(session) {
   if (!session) return createIdleStatusForTab(null);
+  const total = Array.isArray(session.prompts) ? session.prompts.length : 0;
+  const currentIndex = Number.isFinite(session.currentIndex) ? Number(session.currentIndex) : 0;
+  const timing = buildTimingStatus({
+    running: session.running === true,
+    processing: session.processing === true,
+    promptStartTime: session.promptStartTime,
+    currentIndex,
+    total,
+    responseDurations: session.responseDurations,
+  });
   return {
     running: session.running === true,
     paused: session.paused === true,
-    total: Array.isArray(session.prompts) ? session.prompts.length : 0,
-    currentIndex: Number.isFinite(session.currentIndex) ? Number(session.currentIndex) : 0,
+    total,
+    currentIndex,
     mode: 'sequential',
     tabId: session.tabId,
     options: session.options || state.options,
     recoveryAttempts: Number(session.recoveryAttempts || 0),
     currentRetryCount: Number(session.currentRetryCount || 0),
     stableCountdownMs: Number(session.stableCountdownMs || 0),
+    stepStatus: session.stepStatus || null,
+    currentPromptPreview: session.running ? truncateForStatus(session.prompts?.[currentIndex]) : '',
+    ...timing,
     parallelLaunched: 0,
     parallelCompleted: 0,
     parallelFailed: 0,
@@ -434,7 +1040,9 @@ function cloneTabSessionForStorage(session) {
     currentPromptId: session.currentPromptId || null,
     currentRetryCount: Number(session.currentRetryCount || 0),
     promptStartTime: Number(session.promptStartTime || 0),
+    responseDurations: Array.isArray(session.responseDurations) ? session.responseDurations.slice(-20) : [],
     stableCountdownMs: Number(session.stableCountdownMs || 0),
+    stepStatus: session.stepStatus || null,
     recoveryAttempts: Number(session.recoveryAttempts || 0),
     savedAt: Date.now(),
   };
@@ -470,7 +1078,9 @@ async function loadTabSessions() {
         currentPromptId: rawSession.currentPromptId || null,
         currentRetryCount: Number(rawSession.currentRetryCount || 0),
         promptStartTime: Number(rawSession.promptStartTime || 0),
+        responseDurations: Array.isArray(rawSession.responseDurations) ? rawSession.responseDurations.slice(-20) : [],
         stableCountdownMs: Number(rawSession.stableCountdownMs || 0),
+        stepStatus: rawSession.stepStatus || null,
         recoveryAttempts: Number(rawSession.recoveryAttempts || 0),
       });
     }
@@ -569,6 +1179,7 @@ async function emitTabSessionComplete(tabId, status, reason) {
 async function stopTabSession(tabId, { reason = 'stoppedByUser', emitComplete = false } = {}) {
   const session = tabSessions.get(tabId);
   if (!session) return false;
+  releaseSendLease(session.currentPromptId, 'stop-tab-session');
   clearTabSessionRetryTimer(tabId);
   const completionStatus = {
     ...buildTabSessionStatus(session),
@@ -673,15 +1284,19 @@ async function sendNextPromptForTabSession(tabId) {
       if (!targetUrl) {
         throw new Error('Active tab not supported for new chat navigation.');
       }
-      await chrome.tabs.update(tabId, { url: targetUrl });
-      await waitForTabLoad(tabId);
+      await waitForTriggeredTabLoad(tabId, () => chrome.tabs.update(tabId, { url: targetUrl }));
       await ensureContentScriptReady(tabId);
     } else if (session.options?.refreshTabBeforeEachPrompt) {
       await refreshTabInBackgroundBeforeSend(tabId);
     }
 
+    await acquireSendLease({
+      tabId,
+      promptId: session.currentPromptId,
+      options: session.options,
+    });
     await sendToContent(tabId, {
-      type: 'SEND_PROMPT',
+      type: CONTENT_SEND_PROMPT_MESSAGE,
       text: promptText,
       index: session.currentIndex,
       total: session.prompts.length,
@@ -689,6 +1304,7 @@ async function sendNextPromptForTabSession(tabId) {
       promptId: session.currentPromptId,
     });
   } catch (err) {
+    releaseSendLease(session.currentPromptId, 'tab-session-dispatch-error');
     const rawSendError = String(err?.message || err);
     const sendError = buildBackgroundDispatchFailureMessage(tabId, rawSendError);
     console.error('[TabSession] Error sending prompt:', {
@@ -726,8 +1342,10 @@ async function startTabSession({ prompts, tabId, options }) {
     currentPromptId: null,
     currentRetryCount: 0,
     promptStartTime: 0,
+    responseDurations: [],
     stableCountdownMs: 0,
     recoveryAttempts: 0,
+    stepStatus: null,
   };
   tabSessions.set(tabId, session);
   await saveTabSessions();
@@ -772,14 +1390,21 @@ async function testContentScriptConnection(tabId) {
 
       chrome.tabs.sendMessage(
         tabId,
-        { type: "PING" },
+        { type: "PING_CURRENT", expectedVersion: CONTENT_SCRIPT_VERSION },
         (response) => {
           clearTimeout(timeoutId);
           if (chrome.runtime.lastError) {
             console.error('[TestConnection] Error:', chrome.runtime.lastError);
             resolve(false);
           } else {
-            resolve(response?.ok === true);
+            const versionMatches = response?.ok === true && response?.version === CONTENT_SCRIPT_VERSION;
+            if (!versionMatches) {
+              console.warn('[TestConnection] Content script stale or missing version', {
+                expectedVersion: CONTENT_SCRIPT_VERSION,
+                actualVersion: response?.version || null,
+              });
+            }
+            resolve(versionMatches);
           }
         }
       );
@@ -790,16 +1415,37 @@ async function testContentScriptConnection(tabId) {
   });
 }
 
+async function waitForContentScriptReady(tabId, { timeoutMs = 6000, pollMs = 150 } = {}) {
+  const startedAt = Date.now();
+  let attempts = 0;
+  while (Date.now() - startedAt < timeoutMs) {
+    attempts += 1;
+    if (await testContentScriptConnection(tabId)) {
+      console.log('[EnsureContentScript] Current content script ready', {
+        tabId,
+        attempts,
+        elapsedMs: Date.now() - startedAt,
+        version: CONTENT_SCRIPT_VERSION,
+      });
+      return true;
+    }
+    await new Promise(resolve => setTimeout(resolve, pollMs));
+  }
+  console.error('[EnsureContentScript] Timed out waiting for current content script', {
+    tabId,
+    attempts,
+    timeoutMs,
+    version: CONTENT_SCRIPT_VERSION,
+  });
+  return false;
+}
+
 async function ensureContentScriptReady(tabId) {
   const isConnected = await testContentScriptConnection(tabId);
-  if (!isConnected) {
-    await injectContentScript(tabId);
-    // Wait a bit for injection
-    await new Promise(resolve => setTimeout(resolve, 500));
-    const stillConnected = await testContentScriptConnection(tabId);
-    return stillConnected;
-  }
-  return true;
+  if (isConnected) return true;
+
+  await injectContentScript(tabId);
+  return waitForContentScriptReady(tabId);
 }
 
 // ============ RECOVERY LOGIC ============
@@ -916,10 +1562,11 @@ async function healthCheck() {
   if (state.processing && state.promptStartTime) {
     const processingElapsed = now - state.promptStartTime;
     const maxPerPrompt = state.options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs;
-    if (processingElapsed < maxPerPrompt) {
+    if (!shouldAllowInFlightRecovery({ options: state.options, processingElapsed })) {
       console.log('[Health] Processing in-flight prompt; refreshing activity and skipping recovery', {
         processingElapsed,
         maxPerPrompt,
+        infiniteResponseWait: isInfiniteResponseWaitEnabled(state.options),
       });
       state.lastActivityTime = now;
       saveState(); // fire-and-forget; best effort to keep state fresh
@@ -969,7 +1616,13 @@ async function loadSettings() {
 }
 
 async function saveSettings(newSettings) {
-  const merged = validateSettings({ ...state.options, ...newSettings });
+  const currentMemory = state.options?.memory || DEFAULT_MEMORY_SETTINGS;
+  const incomingMemory = newSettings?.memory || {};
+  const nextMemory = { ...currentMemory, ...incomingMemory };
+  if (!Object.prototype.hasOwnProperty.call(incomingMemory, 'storedToken')) {
+    nextMemory.storedToken = currentMemory.storedToken || '';
+  }
+  const merged = validateSettings({ ...state.options, ...newSettings, memory: nextMemory }, { strict: true });
   state.options = merged;
   applyDebugLoggingSetting(state.options?.debugLoggingEnabled === true);
   try {
@@ -982,18 +1635,149 @@ async function saveSettings(newSettings) {
   await ensureAutoConfirmContentScript();
 }
 
+if (self.__PROMPT_QUEUE_TEST__) {
+  self.PromptQueueBackgroundTest = {
+    CONTENT_SCRIPT_VERSION,
+    DEFAULT_SETTINGS,
+    acquireSendLease,
+    getSendLeaseSnapshot: () => sendLease ? {
+      promptId: sendLease.promptId,
+      tabId: sendLease.tabId,
+      expiresAt: sendLease.expiresAt,
+      acquiredAt: sendLease.acquiredAt,
+    } : null,
+    releaseSendLease,
+    buildQueueStateForTab,
+    hasHistorySignatureForTest: hasHistorySignature,
+    makeHistorySignatureForTest: makeHistorySignature,
+    saveSettings,
+    shouldAllowInFlightRecovery,
+    validateSettings,
+    validateTargetSelectors,
+    waitForTriggeredTabLoad,
+    testContentScriptConnection,
+    ensureContentScriptReady,
+  };
+}
+
 async function broadcastSettingsUpdate() {
   try {
     const tabs = await chrome.tabs.query({});
     tabs.forEach((tab) => {
       if (tab?.id && isSupportedUrl(tab.url)) {
-        chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_UPDATED', settings: state.options }, () => {
+        chrome.tabs.sendMessage(tab.id, { type: 'SETTINGS_UPDATED', settings: publicSettings() }, () => {
           // Read lastError to avoid unchecked runtime errors
           void chrome.runtime.lastError;
         });
       }
     });
   } catch (_) {}
+}
+
+async function callNativeMemory(type, payload = {}) {
+  const memory = state.options?.memory || DEFAULT_MEMORY_SETTINGS;
+  const response = await chrome.runtime.sendNativeMessage(memory.nativeHostName, {
+    type,
+    ...payload,
+  });
+  if (!response) {
+    throw new Error('Native memory host returned no response');
+  }
+  if (response.ok === false || response.type === 'error') {
+    throw new Error(response.error || response.message || 'Native memory host error');
+  }
+  if (response.body !== undefined) return response.body;
+  if (response.result !== undefined) return response.result;
+  return response;
+}
+
+async function callDirectBridge(path, options = {}) {
+  const memory = state.options?.memory || DEFAULT_MEMORY_SETTINGS;
+  if (!memory.storedToken) {
+    throw new Error('Memory token missing. Use native host or set stored-token fallback.');
+  }
+  const headers = {
+    ...(options.headers || {}),
+    'X-Memory-Token': memory.storedToken,
+  };
+  const response = await fetch(`${memory.bridgeBaseUrl}${path}`, { ...options, headers });
+  const text = await response.text();
+  let body = text;
+  try {
+    body = text ? JSON.parse(text) : {};
+  } catch (_) {}
+  if (!response.ok) {
+    const detail = typeof body === 'object' ? (body.detail || body.error || response.statusText) : (body || response.statusText);
+    throw new Error(`Memory bridge ${response.status}: ${detail}`);
+  }
+  return body;
+}
+
+async function callMemoryPack(body) {
+  await loadSettings();
+  const memory = state.options?.memory || DEFAULT_MEMORY_SETTINGS;
+  if (memory.authMode === 'native_host') {
+    try {
+      return await callNativeMemory('memory_pack_browser', body);
+    } catch (err) {
+      if (!memory.storedToken) throw err;
+      console.warn('[MemoryPack] Native host failed; using stored-token fallback', { error: err?.message || String(err) });
+    }
+  }
+  return await callDirectBridge('/pack/browser', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+async function memoryHealthCheck() {
+  await loadSettings();
+  const memory = state.options?.memory || DEFAULT_MEMORY_SETTINGS;
+  const result = {
+    ok: false,
+    authMode: memory.authMode,
+    bridgeBaseUrl: memory.bridgeBaseUrl,
+    nativeHostName: memory.nativeHostName,
+    hasStoredToken: Boolean(memory.storedToken),
+    projects: [],
+  };
+  if (memory.authMode === 'native_host') {
+    try {
+      const native = await callNativeMemory('memory_healthz', {});
+      result.ok = true;
+      result.native = true;
+      result.health = native;
+      try {
+        const projects = await callNativeMemory('memory_projects', {});
+        result.projects = Array.isArray(projects?.projects) ? projects.projects : (Array.isArray(projects) ? projects : []);
+      } catch (_) {}
+      return result;
+    } catch (err) {
+      result.nativeError = err?.message || String(err);
+      if (!memory.storedToken) {
+        result.error = result.nativeError;
+        return result;
+      }
+    }
+  }
+  try {
+    const healthResponse = await fetch(`${memory.bridgeBaseUrl}/healthz`);
+    result.health = await healthResponse.json().catch(() => ({}));
+    result.ok = healthResponse.ok;
+    if (memory.storedToken) {
+      try {
+        const projects = await callDirectBridge('/memory/projects');
+        result.projects = Array.isArray(projects?.projects) ? projects.projects : [];
+      } catch (_) {}
+    }
+    if (!result.ok) {
+      result.error = `Memory bridge ${healthResponse.status}`;
+    }
+  } catch (err) {
+    result.error = err?.message || String(err);
+  }
+  return result;
 }
 
 async function ensureAutoConfirmContentScript() {
@@ -1021,7 +1805,7 @@ async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
-      files: ["content.js"],
+      files: ["content-targets.js", "content-input.js", "content-status.js", "content-chat-state.js", "content.js"],
     });
   } catch (err) {
     console.error("Failed to inject content script:", err);
@@ -1097,6 +1881,55 @@ function waitForTabLoad(tabId) {
   });
 }
 
+function waitForTriggeredTabLoad(tabId, triggerLoad, { timeoutMs = 20000 } = {}) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let triggerStarted = false;
+    let sawLoading = false;
+    let timeoutId = null;
+
+    const cleanup = () => {
+      if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+      chrome.tabs.onUpdated.removeListener(listener);
+    };
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(value);
+    };
+    const fail = (error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId !== tabId || !triggerStarted) return;
+      if (changeInfo.status === 'loading') {
+        sawLoading = true;
+        return;
+      }
+      if (changeInfo.status === 'complete' && sawLoading) {
+        finish(true);
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(listener);
+    timeoutId = setTimeout(() => finish(false), timeoutMs);
+
+    Promise.resolve()
+      .then(async () => {
+        triggerStarted = true;
+        await triggerLoad();
+      })
+      .catch(fail);
+  });
+}
+
 async function refreshTabInBackgroundBeforeSend(tabId) {
   const before = await chrome.tabs.get(tabId);
   if (!isSupportedUrl(before?.url)) {
@@ -1111,8 +1944,7 @@ async function refreshTabInBackgroundBeforeSend(tabId) {
     discarded: before.discarded === true,
   });
 
-  await chrome.tabs.reload(tabId);
-  const loaded = await waitForTabLoad(tabId);
+  const loaded = await waitForTriggeredTabLoad(tabId, () => chrome.tabs.reload(tabId));
   if (!loaded) {
     throw new Error('Timed out waiting for background tab reload.');
   }
@@ -1702,6 +2534,7 @@ async function dispatchParallelWorkerPrompt(workerId) {
 
   worker.inFlightPromptId = promptId;
   worker.inFlightPromptIndex = promptIndex;
+  worker.promptStartTime = dispatchStartedAt;
   worker.status = 'dispatching';
   state.parallel.workersByPromptId[promptId] = { workerId, promptIndex };
   state.lastActivityTime = Date.now();
@@ -1755,15 +2588,21 @@ async function dispatchParallelWorkerPrompt(workerId) {
       submissionTimeoutMs,
     );
 
+    const dispatchOptions = getParallelDispatchOptions();
+    await acquireSendLease({
+      tabId: worker.tabId,
+      promptId,
+      options: dispatchOptions,
+    });
     const sendAck = await sendToContent(worker.tabId, {
-      type: 'SEND_PROMPT',
+      type: CONTENT_SEND_PROMPT_MESSAGE,
       text: promptText,
       index: promptIndex,
       total: worker.prompts.length,
-      options: getParallelDispatchOptions(),
+      options: dispatchOptions,
       promptId,
     });
-    console.log('[Parallel] SEND_PROMPT acknowledged by content script', {
+    console.log('[Parallel] SEND_PROMPT_CURRENT acknowledged by content script', {
       workerId,
       tabId: worker.tabId,
       promptIndex,
@@ -1813,6 +2652,7 @@ async function dispatchParallelWorkerPrompt(workerId) {
     await emitParallelProgress();
     return true;
   } catch (err) {
+    releaseSendLease(promptId, 'parallel-dispatch-error');
     const liveWorker = state.parallel?.workersById?.[workerId];
     if (liveWorker && liveWorker.inFlightPromptId === promptId) {
       liveWorker.inFlightPromptId = null;
@@ -2012,6 +2852,8 @@ async function runParallelFanoutLaunch({ promptGroups, launchUrl }) {
       nextPromptIndex: 0,
       inFlightPromptId: null,
       inFlightPromptIndex: null,
+      promptStartTime: 0,
+      responseDurations: [],
       promptRetryCounts: {},
       nextRetryAt: 0,
       status: 'queued',
@@ -2066,7 +2908,10 @@ async function sendToContent(tabId, message) {
             console.error('[SendToContent] Error', { tabId, messageType: message?.type, error: errMsg });
             reject(new Error(errMsg));
           } else {
-            console.log('[SendToContent] Response received from content', { tabId, messageType: message?.type, response });
+            const safeResponse = message?.type === 'GET_MEMORY_SOURCE'
+              ? { ok: response?.ok !== false, source: response?.source, textLength: response?.textLength || 0 }
+              : response;
+            console.log('[SendToContent] Response received from content', { tabId, messageType: message?.type, response: safeResponse });
             resolve(response);
           }
         }
@@ -2114,7 +2959,9 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
   state.currentPromptId = null;
   state.currentRetryCount = 0;
   state.promptStartTime = 0;
+  state.responseDurations = [];
   state.stableCountdownMs = 0;
+  state.stepStatus = null;
   state.parallel = useParallel ? createEmptyParallelState() : null;
 
   await saveState();
@@ -2252,15 +3099,19 @@ async function sendNextPrompt() {
       if (!targetUrl) {
         throw new Error('Active tab not supported for new chat navigation.');
       }
-      await chrome.tabs.update(state.tabId, { url: targetUrl });
-      await waitForTabLoad(state.tabId);
+      await waitForTriggeredTabLoad(state.tabId, () => chrome.tabs.update(state.tabId, { url: targetUrl }));
       await ensureContentScriptReady(state.tabId);
     } else if (state.options?.refreshTabBeforeEachPrompt) {
       await refreshTabInBackgroundBeforeSend(state.tabId);
     }
 
+    await acquireSendLease({
+      tabId: state.tabId,
+      promptId: state.currentPromptId,
+      options: state.options,
+    });
     await sendToContent(state.tabId, { 
-      type: "SEND_PROMPT", 
+      type: CONTENT_SEND_PROMPT_MESSAGE,
       text: promptText, 
       index: state.currentIndex, 
       total: state.prompts.length, 
@@ -2268,6 +3119,7 @@ async function sendNextPrompt() {
       promptId: state.currentPromptId,
     });
   } catch (err) {
+    releaseSendLease(state.currentPromptId, 'sequential-dispatch-error');
     const sendError = String(err?.message || err);
     console.error("Error sending prompt to content:", sendError);
     const retried = await scheduleSequentialRetry(sendError, 'sendNextPrompt');
@@ -2289,37 +3141,11 @@ async function sendNextPrompt() {
 }
 
 function makeHistorySignature(item) {
-  const normalized = {
-    prompts: (item.prompts || []).map((p) => p.trim()),
-    settings: {
-      stableMs: item.settings?.stableMs || undefined,
-      maxWaitMs: item.settings?.maxWaitMs || undefined,
-      pollIntervalMs: item.settings?.pollIntervalMs || undefined,
-      systemPrompt: item.settings?.systemPrompt || '',
-      appendPromptText: item.settings?.appendPromptText || '',
-      prependSystemPrompt: item.settings?.prependSystemPrompt !== false,
-      appendSystemPrompt: item.settings?.appendSystemPrompt === true,
-      theme: item.settings?.theme === 'light' ? 'light' : 'dark',
-      autoConfirmDialogs: item.settings?.autoConfirmDialogs === true,
-      enableWatchedElementGate: item.settings?.enableWatchedElementGate === true,
-      watchedElementSelector: typeof item.settings?.watchedElementSelector === 'string'
-        ? item.settings.watchedElementSelector.trim()
-        : DEFAULT_SETTINGS.watchedElementSelector,
-      refreshTabBeforeEachPrompt: item.settings?.refreshTabBeforeEachPrompt === true,
-      parallelOneTabPerPrompt: item.settings?.parallelOneTabPerPrompt === true,
-      enableRetryOnFailure: item.settings?.enableRetryOnFailure !== false,
-      maxRetriesPerPrompt: coerceNumber(item.settings?.maxRetriesPerPrompt, 0, 10, DEFAULT_SETTINGS.maxRetriesPerPrompt),
-      retryDelayMs: coerceNumber(item.settings?.retryDelayMs, 0, 60000, DEFAULT_SETTINGS.retryDelayMs),
-      debugLoggingEnabled: item.settings?.debugLoggingEnabled === true,
-      enableMaxWaitTimeout: item.settings?.enableMaxWaitTimeout !== false,
-      enableStopWord: item.settings?.enableStopWord === true,
-      stopWord: typeof item.settings?.stopWord === 'string' ? item.settings.stopWord.trim() : '',
-      stopWordCaseSensitive: item.settings?.stopWordCaseSensitive === true,
-      openNewChatPerPrompt: item.settings?.openNewChatPerPrompt === true,
-      openNewChatPerPromptUrl: sanitizeUrlOrEmpty(item.settings?.openNewChatPerPromptUrl),
-    },
-  };
-  return JSON.stringify(normalized);
+  return JSON.stringify((item.prompts || []).map((p) => String(p || '').trim()));
+}
+
+function hasHistorySignature(history, signature) {
+  return (history || []).some((item) => item?.__sig === signature || makeHistorySignature(item) === signature);
 }
 
 // ============ MESSAGE HANDLERS ============
@@ -2351,8 +3177,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "SIDE_PANEL_OPENED": {
-          if (sender?.tab?.id) {
-            openSidePanels.add(sender.tab.id);
+          const panelTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          if (Number.isInteger(panelTabId)) {
+            openSidePanels.add(panelTabId);
           }
           return;
         }
@@ -2564,7 +3393,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: true, status: getStatus() });
           return;
         }
+        case "GET_AUTOMATION_QUEUE_STATE": {
+          const targetTabId = Number.isInteger(Number(message?.tabId))
+            ? Number(message.tabId)
+            : (Number.isInteger(sender?.tab?.id) ? sender.tab.id : null);
+          sendResponse({ ok: true, queue: buildQueueStateForTab(targetTabId) });
+          return;
+        }
         case "PROMPT_SUBMITTED": {
+          releaseSendLease(message.promptId, 'prompt-submitted');
           sendResponse({ ok: true });
           if (state.mode !== 'parallel' || !state.running || !state.parallel) {
             return;
@@ -2657,6 +3494,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "RESPONSE_COMPLETE": {
+          releaseSendLease(message.promptId, message.error ? 'response-complete-error' : 'response-complete');
           console.log('[ResponseComplete] Received', {
             messagePromptId: message.promptId,
             statePromptId: state.currentPromptId,
@@ -2681,6 +3519,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
               return;
             }
 
+            const completedAt = Date.now();
+            const completedPromptIndex = Number(session.currentIndex || 0);
+            const durationMs = pushPromptDuration(session, session.promptStartTime, completedAt);
+            if (!message.error && message.stoppedByStopWord !== true) {
+              await recordCapturedResponse({
+                promptId: session.currentPromptId,
+                promptIndex: completedPromptIndex,
+                tabId,
+                mode: 'tab-session',
+                promptText: session.prompts?.[completedPromptIndex] || '',
+                responseText: message.responseText || '',
+                site: message.site || '',
+                url: message.url || sender?.tab?.url || '',
+                durationMs,
+              });
+            }
             session.processing = false;
             session.promptStartTime = 0;
             session.lastActivityTime = Date.now();
@@ -2853,9 +3707,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 reason: 'response-complete-fallback',
               });
             }
+            const durationMs = pushPromptDuration(worker, worker.promptStartTime, Date.now());
+            await recordCapturedResponse({
+              promptId: resolvedPromptId,
+              promptIndex: resolvedPromptIndex,
+              tabId: worker.tabId,
+              mode: 'parallel',
+              promptText: worker.prompts?.[resolvedPromptIndex] || '',
+              responseText: message.responseText || '',
+              site: message.site || '',
+              url: message.url || sender?.tab?.url || '',
+              durationMs,
+            });
             if (isCurrentInFlight) {
               worker.inFlightPromptId = null;
               worker.inFlightPromptIndex = null;
+              worker.promptStartTime = 0;
             }
             delete state.parallel.workersByPromptId[resolvedPromptId];
             worker.nextPromptIndex = Math.max(worker.nextPromptIndex || 0, resolvedPromptIndex + 1);
@@ -2897,6 +3764,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             totalPrompts: state.prompts.length,
             error: message.error
           });
+          const completedAt = Date.now();
+          const completedPromptIndex = Number(state.currentIndex || 0);
+          const durationMs = pushPromptDuration(state, state.promptStartTime, completedAt);
+          if (!message.error && message.stoppedByStopWord !== true) {
+            await recordCapturedResponse({
+              promptId: state.currentPromptId,
+              promptIndex: completedPromptIndex,
+              tabId: state.tabId || sender?.tab?.id || null,
+              mode: 'sequential',
+              promptText: state.prompts?.[completedPromptIndex] || '',
+              responseText: message.responseText || '',
+              site: message.site || '',
+              url: message.url || sender?.tab?.url || '',
+              durationMs,
+            });
+          }
           state.processing = false;
           state.promptStartTime = 0;
           state.lastActivityTime = Date.now();
@@ -2942,16 +3825,46 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
           return;
         }
+        case "PROMPT_STEP_STATUS": {
+          const progress = setStepStatusForPrompt({
+            promptId: message.promptId,
+            senderTabId: sender?.tab?.id || null,
+            status: message.status || {},
+          });
+          if (progress?.status) {
+            emitProgressStatus(progress.tabId, progress.status);
+          }
+          sendResponse({ ok: true });
+          return;
+        }
+        case "SELECTOR_HEALTH": {
+          try {
+            chrome.runtime.sendMessage({
+              type: 'SELECTOR_HEALTH_UPDATE',
+              tabId: sender?.tab?.id || null,
+              site: message.site || '',
+              health: message.health || null,
+            });
+          } catch (_) {}
+          sendResponse({ ok: true });
+          return;
+        }
         case "SAVE_PROMPT_HISTORY": {
           const historyItem = message.item;
           if (historyItem && typeof historyItem === 'object') {
-            const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
-            const sig = makeHistorySignature(historyItem);
-            const exists = aiTaskSequencerHistory.some((h) => h.__sig === sig);
+            const storedHistory = await chrome.storage.local.get(HISTORY_STORAGE_KEY);
+            const aiTaskSequencerHistory = Array.isArray(storedHistory?.[HISTORY_STORAGE_KEY]) ? storedHistory[HISTORY_STORAGE_KEY] : [];
+            const safeHistoryItem = {
+              prompts: Array.isArray(historyItem.prompts)
+                ? historyItem.prompts.map((prompt) => String(prompt || ''))
+                : [],
+            };
+            const sig = makeHistorySignature(safeHistoryItem);
+            const exists = hasHistorySignature(aiTaskSequencerHistory, sig);
             if (!exists) {
-              aiTaskSequencerHistory.unshift({ ...historyItem, savedAt: Date.now(), __sig: sig });
+              aiTaskSequencerHistory.unshift({ ...safeHistoryItem, savedAt: Date.now(), __sig: sig });
               const trimmed = aiTaskSequencerHistory.slice(0, 50);
-              await chrome.storage.local.set({ aiTaskSequencerHistory: trimmed });
+              await chrome.storage.local.set({ [HISTORY_STORAGE_KEY]: trimmed });
             }
             sendResponse({ ok: true });
           } else {
@@ -2960,16 +3873,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "GET_PROMPT_HISTORY": {
-          const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
+          const storedHistory = await chrome.storage.local.get(HISTORY_STORAGE_KEY);
+          const aiTaskSequencerHistory = Array.isArray(storedHistory?.[HISTORY_STORAGE_KEY]) ? storedHistory[HISTORY_STORAGE_KEY] : [];
           sendResponse({ ok: true, history: aiTaskSequencerHistory });
+          return;
+        }
+        case "GET_CAPTURED_RESPONSES": {
+          const storedResponses = await chrome.storage.local.get(RESPONSE_LOG_STORAGE_KEY);
+          const responses = Array.isArray(storedResponses?.[RESPONSE_LOG_STORAGE_KEY]) ? storedResponses[RESPONSE_LOG_STORAGE_KEY] : [];
+          sendResponse({ ok: true, responses });
+          return;
+        }
+        case "CLEAR_CAPTURED_RESPONSES": {
+          await chrome.storage.local.set({ [RESPONSE_LOG_STORAGE_KEY]: [] });
+          sendResponse({ ok: true });
           return;
         }
         case "DELETE_PROMPT_HISTORY": {
           const index = message.index;
-          const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
+          const storedHistory = await chrome.storage.local.get(HISTORY_STORAGE_KEY);
+          const aiTaskSequencerHistory = Array.isArray(storedHistory?.[HISTORY_STORAGE_KEY]) ? storedHistory[HISTORY_STORAGE_KEY] : [];
           if (typeof index === 'number' && index >= 0 && index < aiTaskSequencerHistory.length) {
             aiTaskSequencerHistory.splice(index, 1);
-            await chrome.storage.local.set({ aiTaskSequencerHistory });
+            await chrome.storage.local.set({ [HISTORY_STORAGE_KEY]: aiTaskSequencerHistory });
             sendResponse({ ok: true });
           } else {
             sendResponse({ ok: false, error: 'Invalid index' });
@@ -2977,13 +3903,84 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "SAVE_SETTINGS": {
-          await saveSettings(message.settings || {});
-          sendResponse({ ok: true, settings: state.options });
+          try {
+            await saveSettings(message.settings || {});
+            sendResponse({ ok: true, settings: publicSettings() });
+          } catch (error) {
+            sendResponse({
+              ok: false,
+              error: error?.message || 'Failed to save settings',
+              validationErrors: error?.validationErrors || null,
+            });
+          }
           return;
         }
         case "GET_SETTINGS": {
           await loadSettings();
-          sendResponse({ ok: true, settings: state.options });
+          sendResponse({ ok: true, settings: publicSettings() });
+          return;
+        }
+        case "GET_MEMORY_SOURCE": {
+          const tabId = Number(message?.tabId);
+          if (!Number.isInteger(tabId)) {
+            sendResponse({ ok: false, error: 'Missing tabId' });
+            return;
+          }
+          const result = await sendToContent(tabId, {
+            type: 'GET_MEMORY_SOURCE',
+            source: message.source || 'prompt_box',
+          });
+          sendResponse({ ok: result?.ok !== false, result });
+          return;
+        }
+        case "PREVIEW_MEMORY_PACK": {
+          const result = await callMemoryPack(message.body || {});
+          sendResponse({ ok: true, result });
+          return;
+        }
+        case "INSERT_MEMORY_PACK": {
+          const tabId = Number(message?.tabId);
+          if (!Number.isInteger(tabId)) {
+            sendResponse({ ok: false, error: 'Missing tabId' });
+            return;
+          }
+          const result = await sendToContent(tabId, {
+            type: 'INSERT_MEMORY_PACK',
+            markdown: String(message.markdown || ''),
+            behavior: message.behavior || 'prepend_or_replace_managed_block',
+          });
+          sendResponse({ ok: result?.ok !== false, result });
+          return;
+        }
+        case "START_TARGET_PICKER": {
+          const tabId = Number(message?.tabId);
+          if (!Number.isInteger(tabId)) {
+            sendResponse({ ok: false, error: 'Missing tabId' });
+            return;
+          }
+          const result = await sendToContent(tabId, {
+            type: 'START_TARGET_PICKER',
+            role: message.role || 'promptInput',
+          });
+          sendResponse(result);
+          return;
+        }
+        case "CANCEL_TARGET_PICKER": {
+          const tabId = Number(message?.tabId);
+          if (!Number.isInteger(tabId)) {
+            sendResponse({ ok: false, error: 'Missing tabId' });
+            return;
+          }
+          const result = await sendToContent(tabId, {
+            type: 'CANCEL_TARGET_PICKER',
+            role: message.role || '',
+          });
+          sendResponse(result);
+          return;
+        }
+        case "MEMORY_HEALTH_CHECK": {
+          const result = await memoryHealthCheck();
+          sendResponse({ ok: result.ok === true, result, error: result.error || result.nativeError || null });
           return;
         }
         case "START_TRANSCRIPTION_MONITORING": {
@@ -3088,6 +4085,9 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
   (async () => {
     openSidePanels.delete(tabId);
+    if (sendLease?.tabId === tabId) {
+      releaseSendLease(sendLease.promptId, 'tab-closed');
+    }
     if (tabSessions.has(tabId)) {
       await stopTabSession(tabId);
     }

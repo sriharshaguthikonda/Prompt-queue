@@ -91,6 +91,18 @@ Use this mode when you want to launch multiple prompts concurrently.
 - Use Load to restore a specific history
 - Use Delete to remove entries
 
+## Memory Pack
+Prompt Queue can preview and insert a compact memory pack from the side panel. Tampermonkey is fallback only.
+
+1. Open a supported chat page and type the prompt you are about to send.
+2. Open the extension side panel.
+3. In **Memory Pack**, choose source, project, mode, token budget, top-K, score, class filters, and insert behavior.
+4. Click **Preview** to retrieve relevant memories from `http://127.0.0.1:5599/pack/browser`.
+5. Review checkboxes and edit the markdown textarea.
+6. Click **Insert** to prepend or replace the managed `C_MEMORY_BROWSER_PACK` block in the prompt box.
+
+Default auth uses the native host `com.aipromptqueue.transcription`, which reads `C:\.memory\config\local_token` at request time. Stored-token mode is a fallback only and is kept in `chrome.storage.local`; the token is not returned to the UI after save.
+
 ## Notes and tips
 - UIs of AI sites change frequently. If detection breaks, update selectors in `content.js`
 - ChatGPT uses a ProseMirror editor; we insert text using editor-safe events
@@ -103,6 +115,13 @@ Use this mode when you want to launch multiple prompts concurrently.
 ## Development
 - Edit files in place and reload the extension from `chrome://extensions`
 - Use DevTools for background (service worker) and popup to debug
+- Memory Pack checks:
+  - `node --check background.js`
+  - `node --check content.js`
+  - `node --check popup.js`
+  - `node --check popup-memory.js`
+  - `npm test -- --runInBand`
+  - `python -m unittest tests.test_native_host_memory tests.test_memory_extension_static -v`
 
 ## License
 MIT

@@ -1,5 +1,9 @@
 import { showHistoryLoading, showToast } from './popup-dom-utils.js';
-import { loadSettingsIntoUI } from './popup-settings.js';
+
+const PQ_CONSTANTS = globalThis.PromptQueueConstants || {};
+const MESSAGE_TYPES = PQ_CONSTANTS.MESSAGE_TYPES || {};
+const STORAGE_KEYS = PQ_CONSTANTS.STORAGE_KEYS || {};
+const HISTORY_STORAGE_KEY = STORAGE_KEYS.HISTORY || 'aiTaskSequencerHistory';
 
 function makeSignature(item) {
   return JSON.stringify((item.prompts || []).map((p) => p.trim()));
@@ -34,12 +38,8 @@ export function createHistoryRow(item, index, { onLoadPrompts } = {}) {
 
   const loadBtn = document.createElement('button');
   loadBtn.textContent = 'Load';
-  loadBtn.addEventListener('click', async () => {
+  loadBtn.addEventListener('click', () => {
     document.getElementById('prompts').value = (item.prompts || []).join('\n');
-    if (item.settings) {
-      await chrome.runtime.sendMessage({ type: 'SAVE_SETTINGS', settings: item.settings });
-      await loadSettingsIntoUI();
-    }
     if (typeof onLoadPrompts === 'function') {
       onLoadPrompts();
     }
@@ -76,7 +76,7 @@ export async function loadHistoryIntoUI(onLoadPrompts) {
 
     await new Promise((r) => setTimeout(r, 300));
 
-    const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
+    const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.GET_PROMPT_HISTORY || 'GET_PROMPT_HISTORY' });
     if (res?.ok) {
       const history = res.history || [];
       if (countBadge) {
@@ -113,39 +113,84 @@ export async function importHistoryItems(importData) {
     return { imported: 0, duplicates: 0, invalid: invalidCount };
   }
 
-  const { aiTaskSequencerHistory = [] } = await chrome.storage.local.get('aiTaskSequencerHistory');
+  const storedHistory = await chrome.storage.local.get(HISTORY_STORAGE_KEY);
+  const aiTaskSequencerHistory = Array.isArray(storedHistory?.[HISTORY_STORAGE_KEY]) ? storedHistory[HISTORY_STORAGE_KEY] : [];
   const existingSignatures = new Set(aiTaskSequencerHistory.map(makeSignature));
 
   const newItems = validItems.filter((item) => !existingSignatures.has(makeSignature(item)));
   const itemsWithTimestamp = newItems.map((item) => ({
-    ...item,
+    prompts: item.prompts,
     savedAt: item.savedAt || Date.now(),
   }));
 
   const mergedHistory = [...itemsWithTimestamp, ...aiTaskSequencerHistory].slice(0, 50);
-  await chrome.storage.local.set({ aiTaskSequencerHistory: mergedHistory });
+  await chrome.storage.local.set({ [HISTORY_STORAGE_KEY]: mergedHistory });
 
   return { imported: newItems.length, duplicates: validItems.length - newItems.length, invalid: invalidCount };
 }
 
 export async function clearHistory() {
-  await chrome.storage.local.set({ aiTaskSequencerHistory: [] });
+  await chrome.storage.local.set({ [HISTORY_STORAGE_KEY]: [] });
+  await chrome.runtime.sendMessage({ type: 'CLEAR_CAPTURED_RESPONSES' }).catch(() => {});
 }
 
 export async function exportHistory() {
-  const res = await chrome.runtime.sendMessage({ type: 'GET_PROMPT_HISTORY' });
+  const res = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.GET_PROMPT_HISTORY || 'GET_PROMPT_HISTORY' });
   if (!res?.ok || !res.history) return null;
+  const responseRes = await chrome.runtime.sendMessage({ type: MESSAGE_TYPES.GET_CAPTURED_RESPONSES || 'GET_CAPTURED_RESPONSES' }).catch(() => null);
   const exportData = {
     version: '1.0',
     exportedAt: new Date().toISOString(),
     history: res.history,
+    responses: responseRes?.ok && Array.isArray(responseRes.responses) ? responseRes.responses : [],
   };
   return exportData;
 }
 
-export async function saveHistoryItem(prompts, settings) {
+function mdEscape(text) {
+  return String(text || '').replace(/\r\n/g, '\n').trim();
+}
+
+export function exportHistoryMarkdown(exportData) {
+  if (!exportData) return '';
+  const lines = [
+    '# Prompt Queue Export',
+    '',
+    `Exported: ${exportData.exportedAt || new Date().toISOString()}`,
+    '',
+    '## Prompt Sets',
+    '',
+  ];
+  const history = Array.isArray(exportData.history) ? exportData.history : [];
+  if (history.length === 0) {
+    lines.push('_No saved prompt sets._', '');
+  } else {
+    history.forEach((item, index) => {
+      lines.push(`### Prompt Set ${index + 1}`, '');
+      (item.prompts || []).forEach((prompt, promptIndex) => {
+        lines.push(`#### Prompt ${promptIndex + 1}`, '', '```text', mdEscape(prompt), '```', '');
+      });
+    });
+  }
+
+  lines.push('## Captured Responses', '');
+  const responses = Array.isArray(exportData.responses) ? exportData.responses : [];
+  if (responses.length === 0) {
+    lines.push('_No captured responses._', '');
+  } else {
+    responses.forEach((item, index) => {
+      lines.push(`### Response ${index + 1}`, '');
+      if (item.promptPreview) lines.push(`Prompt: ${mdEscape(item.promptPreview)}`, '');
+      if (item.durationMs) lines.push(`Duration: ${Math.round(item.durationMs / 1000)}s`, '');
+      lines.push('```text', mdEscape(item.responseText), '```', '');
+    });
+  }
+  return `${lines.join('\n').trim()}\n`;
+}
+
+export async function saveHistoryItem(prompts) {
   await chrome.runtime.sendMessage({
-    type: 'SAVE_PROMPT_HISTORY',
-    item: { prompts, settings },
+    type: MESSAGE_TYPES.SAVE_PROMPT_HISTORY || 'SAVE_PROMPT_HISTORY',
+    item: { prompts },
   });
 }

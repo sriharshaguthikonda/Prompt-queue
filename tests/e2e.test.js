@@ -470,10 +470,30 @@ describe('Popup E2E Tests', () => {
   });
 
   describe('Theme Switching', () => {
+    let applyTheme;
+    let mediaQuery;
+
+    beforeAll(async () => {
+      ({ applyTheme } = await global.loadEsmModule(require('path').join(process.cwd(), 'popup-dom-utils.js')));
+    });
+
     beforeEach(() => {
+      mediaQuery = {
+        matches: false,
+        addEventListener: jest.fn((eventName, listener) => {
+          if (eventName === 'change') mediaQuery.listener = listener;
+        }),
+        removeEventListener: jest.fn((eventName, listener) => {
+          if (eventName === 'change' && mediaQuery.listener === listener) {
+            mediaQuery.listener = null;
+          }
+        }),
+      };
+      window.matchMedia = jest.fn(() => mediaQuery);
       document.body.innerHTML = `
         <body class="theme-dark">
           <select id="themeSelect">
+            <option value="system">System</option>
             <option value="dark">Dark</option>
             <option value="light">Light</option>
           </select>
@@ -482,29 +502,51 @@ describe('Popup E2E Tests', () => {
     });
 
     it('should switch to light theme', () => {
-      const body = document.body;
       const select = document.getElementById('themeSelect');
-      
-      select.value = 'light';
-      body.classList.remove('theme-dark');
-      body.classList.add('theme-light');
-      
-      expect(body.classList.contains('theme-light')).toBe(true);
-      expect(body.classList.contains('theme-dark')).toBe(false);
+
+      applyTheme('light');
+
+      expect(document.body.classList.contains('theme-light')).toBe(true);
+      expect(document.body.classList.contains('theme-dark')).toBe(false);
+      expect(select.value).toBe('light');
     });
 
     it('should switch back to dark theme', () => {
-      const body = document.body;
       const select = document.getElementById('themeSelect');
-      
-      body.classList.add('theme-light');
-      
-      select.value = 'dark';
-      body.classList.remove('theme-light');
-      body.classList.add('theme-dark');
-      
-      expect(body.classList.contains('theme-dark')).toBe(true);
-      expect(body.classList.contains('theme-light')).toBe(false);
+
+      applyTheme('dark');
+
+      expect(document.body.classList.contains('theme-dark')).toBe(true);
+      expect(document.body.classList.contains('theme-light')).toBe(false);
+      expect(select.value).toBe('dark');
+    });
+
+    it('should follow system theme changes when system is selected', () => {
+      const select = document.getElementById('themeSelect');
+
+      mediaQuery.matches = false;
+      applyTheme('system');
+      expect(document.body.classList.contains('theme-light')).toBe(true);
+      expect(select.value).toBe('system');
+
+      mediaQuery.matches = true;
+      mediaQuery.listener?.({ matches: true });
+
+      expect(document.body.classList.contains('theme-dark')).toBe(true);
+      expect(document.body.dataset.themePreference).toBe('system');
+    });
+
+    it('should remove the system theme listener when switching to a manual theme', () => {
+      applyTheme('system');
+      expect(mediaQuery.addEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+
+      applyTheme('dark');
+
+      expect(mediaQuery.removeEventListener).toHaveBeenCalledWith('change', expect.any(Function));
+      expect(document.body.classList.contains('theme-dark')).toBe(true);
+      expect(document.body.classList.contains('theme-light')).toBe(false);
+      expect(document.body.dataset.themePreference).toBe('dark');
+      expect(document.getElementById('themeSelect').value).toBe('dark');
     });
   });
 });

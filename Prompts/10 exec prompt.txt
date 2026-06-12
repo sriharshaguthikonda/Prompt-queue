@@ -1,0 +1,32 @@
+[$caveman:caveman](C:\\Users\\deletable\\.codex\\plugins\\cache\\caveman-repo\\caveman\\0.1.0\\skills\\caveman\\SKILL.md) [$superpowers:using-superpowers](C:\\Users\\deletable\\.codex\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\skills\\using-superpowers\\SKILL.md) use gsd skills as well
+
+
+you have to work beyound the repo in other folders as well !
+
+
+you know the usual workflow, talk to me in Q and A file, ask me questions, talk to me as freely as possible, don't stop working 
+frequently check time-based q&a file and report back to you file watcher type!
+
+you are gpt 5.5 extra high in codex, so don't waste tokens, use appropriate intelligence, sub-agents to do your work.
+
+
+non blocking execution can be done in some places
+
+
+
+form what i can observe is it sends one prompt out of 10 and stop the whole thing
+
+is it because the max wait is only 180 sec? max wait check box means infinity it should monitor untill the chatgpt resonds. 
+
+
+
+i get some error in between saying failed some prompts "error"
+
+
+add commit push small logical commits
+
+
+
+there are new console log in new console.log! see waht the issues are......
+
+i have the console log, the console log, the top half is related to the console from that particular tab, one particular tab and the background console service worker log is the bottom half.

@@ -37,6 +37,8 @@
 
   let currentPromptId = null; // Track per-prompt instead of global flag
 
+  const CHAT_COMPOSER_FALLBACK_SELECTOR = '#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"], textarea.wcDTda_fallbackTextarea';
+
   const DEFAULTS = {
     stableMs: 1200,
     maxWaitMs: 180000,
@@ -63,6 +65,7 @@
             'form textarea[name="prompt-textarea"]',
             'form textarea[aria-label*="message"]',
             'form textarea',
+            'textarea.wcDTda_fallbackTextarea',
           ],
           sendButtonCandidates: [
             'form button[data-testid="send-button"]',
@@ -490,7 +493,7 @@
           waitTime += checkInterval;
 
           if (waitTime % 5000 === 0) {
-
+            console.log('[HandleSendPrompt] Waiting for previous prompt to complete', {
               currentPromptId,
               newPromptId: promptId,
               waitedMs: waitTime,
@@ -540,11 +543,11 @@
 
       if ((site === 'chatgpt' || site === 'gemini' || site === 'claude') && !inputEl) {
         console.log('[HandleSendPrompt] Input not found, attempting to locate and focus');
-        const composer = document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+        const composer = document.querySelector(CHAT_COMPOSER_FALLBACK_SELECTOR);
         composer?.scrollIntoView({ block: 'end' });
         composer?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await new Promise((r) => setTimeout(r, 150));
-        inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+        inputEl = queryFirst(cfg.inputCandidates) || document.querySelector(CHAT_COMPOSER_FALLBACK_SELECTOR);
         sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
         messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
         console.log('[HandleSendPrompt] After focus attempt', { hasInputEl: !!inputEl, hasSendBtn: !!sendBtn });

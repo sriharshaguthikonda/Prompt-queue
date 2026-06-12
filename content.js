@@ -41,8 +41,9 @@
 })();
 
 (function () {
-  if (window.__aiTaskSequencerInjected) return;
-  window.__aiTaskSequencerInjected = true;
+  const CONTENT_SCRIPT_VERSION = '2026-06-12.response-timeout-owner-v2';
+  if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
+  window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
   let currentPromptId = null; // Track per-prompt instead of global flag
   let automationAborted = false; // Signal to queued prompts to stop
@@ -52,6 +53,7 @@
   let activeStopWordCaseSensitive = false;
   let stopWordGuardArmed = false;
   let stopWordBlockedAutoConfirm = false;
+  let currentTargetSettings = {};
 
   function setDebugLoggingEnabled(enabled) {
     const next = enabled === true;
@@ -62,6 +64,16 @@
     window.__aiPromptQueueDebugLoggingEnabled = next;
   }
 
+  function queryOneSafe(selector) {
+    if (!selector || typeof selector !== 'string') return null;
+    try {
+      return document.querySelector(selector);
+    } catch (error) {
+      console.warn('[Targets] Invalid selector', { selector, error: error?.message });
+      return null;
+    }
+  }
+
   const DEFAULTS = {
     stableMs: 10000,
     maxWaitMs: 180000,
@@ -69,8 +81,46 @@
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   };
 
+  function isInfiniteResponseWaitEnabled(options = {}) {
+    return options?.enableMaxWaitTimeout !== false;
+  }
+
+  function isFiniteResponseTimeoutEnabled(options = {}) {
+    return !isInfiniteResponseWaitEnabled(options);
+  }
+
+  function getConfiguredMaxWaitMs(options = {}) {
+    return typeof options?.maxWaitMs === 'number' ? options.maxWaitMs : DEFAULTS.maxWaitMs;
+  }
+
+  const RESPONSE_CAPTURE_CHARS = 20000;
+  const targetTools = window.PromptQueueTargets || {};
+  const inputTools = window.PromptQueueInput || {};
+  const {
+    getInputCurrentText,
+    getInputCurrentTextQuiet,
+    getInputTextLengthQuiet,
+    isContentEditableElement,
+    setTextInInput,
+  } = inputTools;
+  const statusTools = window.PromptQueueStatus || {};
+  const emitStepUpdate = typeof statusTools.emitStepUpdate === 'function'
+    ? statusTools.emitStepUpdate
+    : () => null;
+  const delayWithStatus = typeof statusTools.delayWithStatus === 'function'
+    ? statusTools.delayWithStatus
+    : ({ durationMs = 0 } = {}) => new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(durationMs) || 0)));
+  const chatStateTools = window.PromptQueueChatState || {};
+
   function detectSite() {
-    const host = location.hostname;
+    let host = location.hostname || '';
+    if (!host && location.href) {
+      try {
+        host = new URL(location.href).hostname;
+      } catch (_) {
+        host = '';
+      }
+    }
     if (host.includes('chat.openai.com') || host.includes('chatgpt.com')) return 'chatgpt';
     if (host.includes('gemini.google.com')) return 'gemini';
     if (host.includes('grok.x.ai')) return 'grok';
@@ -79,106 +129,16 @@
   }
 
   function selectorsForSite(site) {
-    switch (site) {
-      case 'chatgpt':
-        return {
-          inputCandidates: [
-            '#prompt-textarea.ProseMirror[contenteditable="true"]',
-            'div#prompt-textarea[contenteditable="true"]',
-            '.ProseMirror[contenteditable="true"]',
-            'form textarea[name="prompt-textarea"]',
-            'form textarea[aria-label*="message"]',
-            'form textarea',
-          ],
-          sendButtonCandidates: [
-            'form button[data-testid="send-button"]',
-            'form button[aria-label="Send message"]',
-            'form button[type="submit"]',
-          ],
-          stopButtonCandidates: [
-            'button[data-testid="stop-button"]',
-            'button[aria-label="Stop streaming"]',
-            'button[aria-label="Stop generating"]',
-          ],
-          messagesContainerCandidates: [
-            '[data-testid="conversation-turns"]',
-            'main',
-            'body'
-          ],
-        };
-      case 'gemini':
-        return {
-          inputCandidates: [
-            'textarea[aria-label="Enter a prompt here"]',
-            '[contenteditable="true"][aria-label*="Message"]',
-            '[contenteditable="true"]',
-            'textarea'
-          ],
-          sendButtonCandidates: [
-            'button[aria-label="Send"]',
-            'button[aria-label*="Send message"]',
-            'button[type="submit"]',
-          ],
-          stopButtonCandidates: [
-            'button[aria-label*="Stop"]',
-            'button[data-tooltip*="Stop"]'
-          ],
-          messagesContainerCandidates: [
-            'main',
-            'body'
-          ],
-        };
-      case 'grok':
-        return {
-          inputCandidates: [
-            'textarea',
-            '[contenteditable="true"]'
-          ],
-          sendButtonCandidates: [
-            'button[type="submit"]',
-            'button[aria-label*="Send"]'
-          ],
-          stopButtonCandidates: [
-            'button[aria-label*="Stop"]',
-            'button:has(svg[aria-label*="stop"])'
-          ],
-          messagesContainerCandidates: [
-            '[data-testid="conversation-root"]',
-            'main',
-            'body'
-          ],
-        };
-      case 'claude':
-        return {
-          inputCandidates: [
-            'textarea[aria-label*="Message"]',
-            'textarea[placeholder*="Message"]',
-            'textarea',
-            '[contenteditable="true"]'
-          ],
-          sendButtonCandidates: [
-            'button[aria-label="Send"]',
-            'button[type="submit"]',
-            'form button:not([disabled])'
-          ],
-          stopButtonCandidates: [
-            'button[aria-label*="Stop"]',
-            'button:has(svg[aria-label*="stop"])'
-          ],
-          messagesContainerCandidates: [
-            '[data-testid*="conversation"]',
-            'main',
-            'body'
-          ],
-        };
-      default:
-        return {
-          inputCandidates: ['textarea', '[contenteditable="true"]'],
-          sendButtonCandidates: ['button[type="submit"]', 'button[aria-label*="Send"]', 'button:has(svg[aria-label*="send"])'],
-          stopButtonCandidates: ['button[aria-label*="Stop"]'],
-          messagesContainerCandidates: ['main', 'body'],
-        };
+    if (typeof targetTools.getSiteTargets === 'function') {
+      return targetTools.getSiteTargets(site);
     }
+    return {
+      inputCandidates: ['textarea', '[contenteditable]'],
+      sendButtonCandidates: ['button[type="submit"]', 'button[aria-label*="Send"]', 'button:has(svg[aria-label*="send"])'],
+      stopButtonCandidates: ['button[aria-label*="Stop"]'],
+      messagesContainerCandidates: ['main', 'body'],
+      watchedElementCandidates: [DEFAULTS.watchedElementSelector],
+    };
   }
 
   function queryFirst(selectors) {
@@ -191,9 +151,109 @@
     return null;
   }
 
+  function buttonLooksLikeSend(el) {
+    if (!el || el.tagName !== 'BUTTON') return false;
+    const label = normalizeButtonText(el.innerText || el.textContent || el.getAttribute('aria-label') || el.title || '');
+    const testId = normalizeButtonText(el.getAttribute('data-testid') || '');
+    const type = normalizeButtonText(el.getAttribute('type') || '');
+    return label.includes('send')
+      || label.includes('submit')
+      || testId.includes('send')
+      || testId.includes('submit')
+      || type === 'submit';
+  }
+
+  function findChatGPTSendButton(inputEl) {
+    const roots = [
+      inputEl?.closest?.('form'),
+      inputEl?.closest?.('[data-testid*="composer"]'),
+      inputEl?.closest?.('[class*="composer"]'),
+      document,
+    ].filter(Boolean);
+    const selectors = [
+      'button[data-testid*="send"]',
+      'button[data-testid*="submit"]',
+      'button[aria-label*="Send"]',
+      'button[aria-label*="send"]',
+      'button[aria-label*="Submit"]',
+      'button[aria-label*="submit"]',
+      'button[aria-label*="Send prompt"]',
+      'button[type="submit"]',
+    ];
+    for (const root of roots) {
+      for (const selector of selectors) {
+        let candidates = [];
+        try {
+          candidates = Array.from(root.querySelectorAll(selector));
+        } catch (_) {
+          candidates = [];
+        }
+        const match = candidates.find((candidate) => buttonLooksLikeSend(candidate));
+        if (match) return match;
+      }
+    }
+    return null;
+  }
+
+  function findPromptInputForSite(site, settings = currentTargetSettings) {
+    const resolved = typeof targetTools.resolveTarget === 'function'
+      ? targetTools.resolveTarget('promptInput', { site, settings })
+      : null;
+    if (resolved?.element) return resolved.element;
+    return queryFirst(selectorsForSite(site).inputCandidates);
+  }
+
+  function findSendButtonForSite(site, inputEl, settings = currentTargetSettings) {
+    const resolved = typeof targetTools.resolveTarget === 'function'
+      ? targetTools.resolveTarget('sendButton', { site, settings })
+      : null;
+    if (resolved?.element) return resolved.element;
+    if (site === 'chatgpt') {
+      const direct = queryFirst(selectorsForSite(site).sendButtonCandidates);
+      return direct || findChatGPTSendButton(inputEl);
+    }
+    return queryFirst(selectorsForSite(site).sendButtonCandidates);
+  }
+
+  function resolveStopButtonSelector(site, settings = currentTargetSettings) {
+    if (typeof targetTools.getCustomSelectorForRole === 'function') {
+      const customSelector = targetTools.getCustomSelectorForRole('stopButton', settings);
+      if (customSelector) return customSelector;
+    }
+    if (typeof targetTools.resolveSelector === 'function') {
+      const resolved = targetTools.resolveSelector('stopButton', { site, settings });
+      if (resolved?.selector) return resolved.selector;
+    }
+    return selectorsForSite(site).stopButtonCandidates?.[0] || null;
+  }
+
+  function emitSelectorHealth(site, settings = currentTargetSettings) {
+    if (typeof targetTools.resolveSelector !== 'function') return;
+    const roles = ['promptInput', 'sendButton', 'stopButton', 'watchedElement'];
+    const health = {};
+    for (const role of roles) {
+      try {
+        const resolved = targetTools.resolveSelector(role, { site, settings });
+        health[role] = {
+          selector: resolved?.selector || '',
+          source: resolved?.source || 'none',
+          matchedCount: Number(resolved?.matchedCount || 0),
+          visible: !!resolved?.element,
+        };
+      } catch (error) {
+        health[role] = { selector: '', source: 'error', matchedCount: 0, visible: false, error: error?.message || String(error) };
+      }
+    }
+    try {
+      chrome.runtime.sendMessage({ type: 'SELECTOR_HEALTH', site, health });
+    } catch (_) {}
+  }
+
   function isButtonEnabled(btn) {
     if (!btn) return false;
-    const disabled = btn.getAttribute('disabled') !== null || btn.ariaDisabled === 'true';
+    const disabled = btn.getAttribute('disabled') !== null
+      || btn.getAttribute('aria-disabled') === 'true'
+      || btn.ariaDisabled === 'true';
     const opacity = parseFloat(getComputedStyle(btn).opacity || '1');
     return !disabled && opacity > 0.5;
   }
@@ -256,6 +316,8 @@
       if (res?.ok && res.settings) {
         setAutoConfirmDialogs(res.settings.autoConfirmDialogs === true, source);
         setDebugLoggingEnabled(res.settings.debugLoggingEnabled === true);
+        currentTargetSettings = res.settings || {};
+        emitSelectorHealth(detectSite(), currentTargetSettings);
       }
     } catch (_) {}
   }
@@ -264,86 +326,170 @@
     maybeClickConfirmButtons('interval');
   }, 1000);
 
-  function setProseMirrorText(el, text) {
-    el.focus({ preventScroll: true });
-    const selection = window.getSelection();
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    selection.removeAllRanges();
-    selection.addRange(range);
-    document.execCommand('delete', false, null);
-
-    const paragraphs = String(text || '')
-      .replace(/\r\n/g, '\n')
-      .split('\n')
-      .map((line) => line.length === 0 ? '<p><br></p>' : `<p>${line.replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`)
-      .join('');
-
-    const insertHtmlOk = document.execCommand('insertHTML', false, paragraphs);
-    if (insertHtmlOk) return;
-
-    // Fallback: chunked insertText to avoid length limits
-    const chunks = [];
-    const maxChunk = 4000;
-    for (let i = 0; i < text.length; i += maxChunk) {
-      chunks.push(text.slice(i, i + maxChunk));
-    }
-    try {
-      for (const chunk of chunks) {
-        document.execCommand('insertText', false, chunk);
+  function findPromptInput() {
+    const active = document.activeElement;
+    if (active) {
+      const isTextarea = active.tagName === 'TEXTAREA';
+      const isContentEditable = isContentEditableElement(active);
+      if (isTextarea || isContentEditable) {
+        return active;
       }
-      return;
-    } catch (_) {
-      // Last resort: set textContent and dispatch events
-      el.textContent = text;
-      el.dispatchEvent(new InputEvent('input', { data: text, bubbles: true, cancelable: true }));
-      el.dispatchEvent(new Event('change', { bubbles: true }));
     }
+    const site = detectSite();
+    const cfg = selectorsForSite(site);
+    return findPromptInputForSite(site, currentTargetSettings)
+      || queryFirst(cfg.inputCandidates)
+      || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable], form textarea, [contenteditable], textarea, textarea.wcDTda_fallbackTextarea');
   }
 
-  function setTextInInput(el, text) {
-    if (!el) throw new Error('Input element not found');
-    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
-    if (isContentEditable) {
-      if (el.id === 'prompt-textarea' || el.classList.contains('ProseMirror')) {
-        setProseMirrorText(el, text);
-      } else {
-        el.focus();
-        el.textContent = text;
-        el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      return;
-    }
+  function waitForComposerReady({
+    site,
+    settings = currentTargetSettings,
+    inputEl = null,
+    maxWaitMs = Math.min(DEFAULTS.maxWaitMs || 60000, 10000),
+    stableWindowMs = 300,
+    pollMs = 100,
+  } = {}) {
+    return new Promise((resolve, reject) => {
+      const start = Date.now();
+      let readySince = null;
+      let stableElement = null;
 
-    const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
-    if (descriptor && descriptor.set) {
-      descriptor.set.call(el, text);
-    } else {
-      el.value = text;
-    }
-    el.focus();
-    el.dispatchEvent(new InputEvent('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
+      const getComposerCandidate = () => inputEl && inputEl.isConnected && isElementVisible(inputEl)
+        ? inputEl
+        : (findPromptInputForSite(site, settings)
+          || queryFirst(selectorsForSite(site).inputCandidates)
+          || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable], form textarea, [contenteditable], textarea, textarea.wcDTda_fallbackTextarea'));
+
+      const check = () => {
+        const elapsed = Date.now() - start;
+        const candidate = getComposerCandidate();
+
+        if (candidate && candidate.isConnected && isElementVisible(candidate)) {
+          if (stableElement !== candidate) {
+            stableElement = candidate;
+            readySince = Date.now();
+          } else if (readySince !== null && Date.now() - readySince >= stableWindowMs) {
+            resolve(candidate);
+            return;
+          }
+        } else {
+          stableElement = null;
+          readySince = null;
+        }
+
+        if (elapsed >= maxWaitMs) {
+          reject(new Error('Composer did not become ready before timeout'));
+          return;
+        }
+
+        setTimeout(check, pollMs);
+      };
+
+      check();
+    });
   }
 
-  function getInputCurrentText(el) {
-    if (!el) {
-      console.warn('[GetInputCurrentText] Called with null/undefined element');
-      return '';
+  function coerceDelayWindow(options = {}) {
+    const fallbackMin = 500;
+    const fallbackMax = 1500;
+    const rawMin = Number(options.postPopulateDelayMinMs);
+    const rawMax = Number(options.postPopulateDelayMaxMs);
+    const min = Number.isFinite(rawMin) ? Math.min(60000, Math.max(0, rawMin)) : fallbackMin;
+    const max = Number.isFinite(rawMax) ? Math.min(60000, Math.max(0, rawMax)) : fallbackMax;
+    return {
+      minMs: Math.min(min, max),
+      maxMs: Math.max(min, max),
+    };
+  }
+
+  function randomDelayFromWindow(windowConfig) {
+    const min = Math.max(0, Number(windowConfig?.minMs) || 0);
+    const max = Math.max(min, Number(windowConfig?.maxMs) || min);
+    if (max <= min) return Math.round(min);
+    return Math.round(min + Math.random() * (max - min));
+  }
+
+  function getVisiblePageContext() {
+    const root = document.querySelector('main') || document.body;
+    return (root?.innerText || document.body?.innerText || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 8000);
+  }
+
+  function getMemorySource(source) {
+    const requested = source || 'prompt_box';
+    if (requested === 'selection') {
+      return { source: requested, text: String(window.getSelection?.() || '').trim() };
     }
-    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
-    let text = '';
-    if (isContentEditable) {
-      text = el.textContent || '';
-    } else if (typeof el.value === 'string') {
-      text = el.value;
+    if (requested === 'page') {
+      return { source: requested, text: getVisiblePageContext() };
+    }
+    const inputEl = findPromptInput();
+    const promptText = getInputCurrentTextQuiet(inputEl).trim();
+    if (requested === 'combined') {
+      const selectionText = String(window.getSelection?.() || '').trim();
+      return {
+        source: requested,
+        text: [promptText, selectionText].filter(Boolean).join('\n\n'),
+      };
+    }
+    return { source: 'prompt_box', text: promptText };
+  }
+
+  function replaceSelectedTextInInput(inputEl, markdown) {
+    if (!inputEl) return false;
+    const isTextarea = inputEl.tagName === 'TEXTAREA' || typeof inputEl.value === 'string';
+    if (isTextarea && Number.isFinite(inputEl.selectionStart) && inputEl.selectionStart !== inputEl.selectionEnd) {
+      const before = inputEl.value.slice(0, inputEl.selectionStart);
+      const after = inputEl.value.slice(inputEl.selectionEnd);
+      setTextInInput(inputEl, `${before}${markdown}${after}`);
+      return true;
+    }
+    const isContentEditable = isContentEditableElement(inputEl);
+    const selection = window.getSelection?.();
+    if (isContentEditable && selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+      const range = selection.getRangeAt(0);
+      if (inputEl.contains(range.commonAncestorContainer)) {
+        range.deleteContents();
+        range.insertNode(document.createTextNode(markdown));
+        inputEl.dispatchEvent(new InputEvent('input', { bubbles: true }));
+        inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function insertMemoryPack(markdown, behavior) {
+    const pack = String(markdown || '').trim();
+    if (!pack) throw new Error('Memory pack is empty.');
+    const begin = '<!-- BEGIN C_MEMORY_BROWSER_PACK -->';
+    const end = '<!-- END C_MEMORY_BROWSER_PACK -->';
+    if (!pack.includes(begin) || !pack.includes(end)) {
+      throw new Error('Memory pack is missing managed block markers.');
+    }
+    const inputEl = findPromptInput();
+    if (!inputEl) throw new Error('Could not find prompt input.');
+    if (behavior === 'replace_selected_text' && replaceSelectedTextInInput(inputEl, pack)) {
+      return { ok: true, replaced: true, behavior };
+    }
+
+    const current = getInputCurrentTextQuiet(inputEl);
+    const blockPattern = new RegExp(`${begin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[\\s\\S]*?${end.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\n*`, 'm');
+    let nextText = '';
+    let replaced = false;
+    if (blockPattern.test(current)) {
+      nextText = current.replace(blockPattern, `${pack}\n\n`);
+      replaced = true;
+    } else if (behavior === 'append') {
+      nextText = current.trim() ? `${current.trimEnd()}\n\n${pack}` : pack;
     } else {
-      text = el.textContent || '';
+      nextText = current.trim() ? `${pack}\n\n${current.trimStart()}` : pack;
     }
-    const preview = text.length > 80 ? text.slice(0, 80) + '…' : text;
-    console.log('[GetInputCurrentText] Read text from input', { length: text.length, preview });
-    return text;
+    setTextInInput(inputEl, nextText);
+    return { ok: true, replaced, behavior: behavior || 'prepend_or_replace_managed_block' };
   }
 
   function normalizeWhitespace(text) {
@@ -367,7 +513,25 @@
   function findRenderedMessageMatch(targetText) {
     const target = normalizeWhitespace(targetText);
     if (!target) return null;
-    const candidates = Array.from(document.querySelectorAll('div.whitespace-pre-wrap'));
+    const selectors = [
+      'div.whitespace-pre-wrap',
+      '[data-message-author-role="user"]',
+      'article[data-testid^="conversation-turn-"]',
+      'article[data-turn-id]',
+      'main [data-testid*="message"]',
+    ];
+    const seen = new Set();
+    const candidates = [];
+    for (const selector of selectors) {
+      try {
+        for (const el of document.querySelectorAll(selector)) {
+          if (!seen.has(el)) {
+            seen.add(el);
+            candidates.push(el);
+          }
+        }
+      } catch (_) {}
+    }
     for (const el of candidates) {
       const content = normalizeWhitespace(el.textContent || '');
       if (fuzzyIncludes(content, target)) {
@@ -377,131 +541,280 @@
     return null;
   }
 
+  function cleanCapturedResponseText(text) {
+    const cleaned = String(text || '')
+      .replace(/\u00a0/g, ' ')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    if (cleaned.length <= RESPONSE_CAPTURE_CHARS) return cleaned;
+    return `${cleaned.slice(0, RESPONSE_CAPTURE_CHARS - 28)}\n\n[response truncated]`;
+  }
+
+  function responseCandidateSelectors(site) {
+    if (site === 'chatgpt') {
+      return [
+        'article[data-testid^="conversation-turn-"]',
+        '[data-message-author-role="assistant"]',
+        'main .markdown',
+      ];
+    }
+    if (site === 'claude') {
+      return [
+        '[data-testid*="conversation"]',
+        '[data-testid*="message"]',
+        'main .font-claude-message',
+        'main article',
+      ];
+    }
+    if (site === 'gemini') {
+      return [
+        'message-content',
+        'model-response',
+        'main [id^="model-response"]',
+        'main article',
+      ];
+    }
+    if (site === 'grok') {
+      return [
+        'main article',
+        '[data-testid*="message"]',
+        '[class*="message"]',
+      ];
+    }
+    return ['main article', '[data-testid*="message"]', '.markdown'];
+  }
+
+  function captureLatestAssistantResponse(promptText) {
+    const site = detectSite();
+    const seen = new Set();
+    const candidates = [];
+    for (const selector of responseCandidateSelectors(site)) {
+      let nodes = [];
+      try {
+        nodes = Array.from(document.querySelectorAll(selector));
+      } catch (_) {
+        nodes = [];
+      }
+      for (const node of nodes) {
+        if (!node || seen.has(node)) continue;
+        seen.add(node);
+        candidates.push(node);
+      }
+    }
+    candidates.sort((a, b) => {
+      if (a === b) return 0;
+      const position = a.compareDocumentPosition(b);
+      if (position & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+      if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+      return 0;
+    });
+
+    const candidateTexts = candidates.map((candidate) => cleanCapturedResponseText(candidate.innerText || candidate.textContent || ''));
+    let promptIndex = -1;
+    for (let i = 0; i < candidateTexts.length; i += 1) {
+      if (fuzzyIncludes(candidateTexts[i], promptText)) promptIndex = i;
+    }
+
+    for (let i = candidates.length - 1; i >= 0; i -= 1) {
+      if (site === 'chatgpt' && promptIndex >= 0 && i <= promptIndex) continue;
+      const text = candidateTexts[i];
+      if (!text) continue;
+      if (fuzzyIncludes(text, promptText)) continue;
+      const responseScope = candidates[i].closest?.('article[data-testid^="conversation-turn-"], article[data-turn-id], [data-message-author-role="assistant"]') || candidates[i];
+      return {
+        ok: true,
+        site,
+        url: location.href,
+        responseText: text,
+        responseLength: text.length,
+        responseScope,
+      };
+    }
+    return { ok: false, site, url: location.href, responseText: '', responseLength: 0, responseScope: null };
+  }
+
   async function verifyPromptRendered({ text, promptId, attempts = 4, delayMs = 600 }) {
-    const target = normalizeWhitespace(text);
     for (let attempt = 1; attempt <= attempts; attempt++) {
-      const nodes = Array.from(document.querySelectorAll('div.whitespace-pre-wrap'));
-      const matchNode = nodes.find((node) => fuzzyIncludes(node.textContent, target));
-      if (matchNode) {
-        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt, nodesChecked: nodes.length, contentPreview: normalizeWhitespace(matchNode.textContent).slice(0, 120) });
+      const match = findRenderedMessageMatch(text);
+      if (match) {
+        console.log('[PromptQueue] Prompt render verified in chat', { promptId, attempt });
         return true;
       }
-      console.warn('[PromptQueue] Prompt render not found yet, retrying', { promptId, attempt, attempts, nodesChecked: nodes.length });
+      console.warn('[PromptQueue] Prompt render not found yet, retrying', { promptId, attempt, attempts });
       await new Promise((r) => setTimeout(r, delayMs));
     }
     throw new Error('Prompt text not found in chat after send');
   }
 
   async function clickSend(btn, inputEl) {
-    if (!btn) {
+    if (btn && isButtonEnabled(btn)) {
+      console.log('[ClickSend] Dispatching click on enabled send button', {
+        tagName: btn.tagName,
+        ariaLabel: btn.getAttribute?.('aria-label') || '',
+        testId: btn.getAttribute?.('data-testid') || '',
+        type: btn.getAttribute?.('type') || '',
+      });
       inputEl?.focus();
-      const down = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
-      const press = new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
-      const up = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true });
-      inputEl?.dispatchEvent(down);
-      inputEl?.dispatchEvent(press);
-      inputEl?.dispatchEvent(up);
+      btn.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+      for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup']) {
+        btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+      }
+      btn.click();
       return;
     }
-    btn.click();
+
+    console.warn('[ClickSend] No enabled send button; dispatching Enter fallback', {
+      hasButton: !!btn,
+      buttonEnabled: isButtonEnabled(btn),
+      hasInput: !!inputEl,
+      inputLength: getInputTextLengthQuiet(inputEl),
+    });
+    inputEl?.focus();
+    const down = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true });
+    const press = new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true });
+    const up = new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', which: 13, keyCode: 13, bubbles: true, cancelable: true });
+    inputEl?.dispatchEvent(down);
+    inputEl?.dispatchEvent(press);
+    inputEl?.dispatchEvent(up);
   }
 
-  function getTailConversationTurns(maxTurns = 2) {
-    const turns = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id]'));
-    if (turns.length === 0) return [];
-    return turns.slice(Math.max(0, turns.length - maxTurns));
-  }
-
-  function findElementInTailTurns(selector, tailTurns) {
-    let matches = [];
-    try {
-      matches = Array.from(document.querySelectorAll(selector));
-    } catch (_) {
-      return null;
+  function getChatGPTThinkingSignals(options = {}) {
+    if (typeof chatStateTools.getChatGPTThinkingSignals === 'function') {
+      return chatStateTools.getChatGPTThinkingSignals({
+        stopButtonSelector: resolveStopButtonSelector('chatgpt', currentTargetSettings),
+        targetSettings: currentTargetSettings,
+        ...options,
+      });
     }
-    if (matches.length === 0) return null;
-    if (!tailTurns || tailTurns.length === 0) return matches[matches.length - 1] || null;
-    for (let i = matches.length - 1; i >= 0; i -= 1) {
-      const candidate = matches[i];
-      if (tailTurns.some((turn) => turn.contains(candidate))) {
-        return candidate;
-      }
-    }
-    return null;
+    const composerRole = getChatGPTComposerRole();
+    return {
+      loadingShimmer: false,
+      loadingShimmerHardBlock: false,
+      staleLoadingShimmer: false,
+      thinkingIndicator: false,
+      activeToolStatus: false,
+      stopPresent: composerRole.role === 'stop-active',
+      confirmVisible: false,
+      composerRole,
+      active: composerRole.role === 'stop-active',
+      hardActivityPresent: composerRole.role === 'stop-active',
+      blockingReasons: composerRole.role === 'stop-active' ? ['stopButton'] : [],
+      hardBlockingReasons: composerRole.role === 'stop-active' ? ['stopButton'] : [],
+      staleActivityReasons: [],
+      responseCompletionMarkers: [],
+      responseCompletionMarkerNames: [],
+      hasStableCapturedResponse: false,
+      responseCompletionEvidence: false,
+    };
   }
 
-  function hasActiveToolStatusInTailTurns(tailTurns) {
-    if (!tailTurns || tailTurns.length === 0) return false;
-    const activePatterns = [
-      /\btalking to\b/i,
-      /\bwants to talk to\b/i,
-      /\brunning\b/i,
-      /\bprocessing\b/i,
-    ];
-    const inactivePatterns = [
-      /\btalked to\b/i,
-      /\bstopped talking to\b/i,
-      /\byou allowed this action\b/i,
-      /\byou denied this action\b/i,
-    ];
+  function isChatGPTThinking() {
+    return getChatGPTThinkingSignals().active;
+  }
 
-    for (const turn of tailTurns) {
-      if (!turn) continue;
-      const loadingInTurn = findElementInTailTurns('.loading-shimmer', [turn]);
-      if (loadingInTurn) return true;
+  function getChatGPTComposerRole(button) {
+    if (typeof chatStateTools.getComposerActionRole === 'function') {
+      return chatStateTools.getComposerActionRole(button || undefined);
+    }
+    return { role: 'missing', enabled: false, reason: 'missing' };
+  }
 
-      let statusNodes = [];
-      try {
-        statusNodes = Array.from(turn.querySelectorAll('[class*="tool-message"] .text-start, [class*="tool-message"] button, [class*="tool-message"] .loading-shimmer'));
-      } catch (_) {
-        statusNodes = [];
-      }
-
-      for (const node of statusNodes) {
-        if (!node || !isElementVisible(node)) continue;
-        const text = normalizeButtonText(node.textContent || node.innerText || '');
-        if (!text) continue;
-        if (inactivePatterns.some((pattern) => pattern.test(text))) continue;
-        if (activePatterns.some((pattern) => pattern.test(text))) return true;
-      }
+  function isActiveStopButton(button) {
+    if (typeof chatStateTools.isActiveStopButton === 'function') {
+      return chatStateTools.isActiveStopButton(button || undefined);
     }
     return false;
   }
 
-  function isChatGPTThinking() {
-    // Ignore stale indicators in older turns; only tail turns can block sending.
-    const tailTurns = getTailConversationTurns(2);
-    const loadingShimmer = findElementInTailTurns('.loading-shimmer', tailTurns);
-    const thinkingIndicator = findElementInTailTurns('[class*="thinking"], [data-testid*="thinking"]', tailTurns);
-    const activeToolStatus = hasActiveToolStatusInTailTurns(tailTurns);
-    const stopPresent = document.querySelector('button[aria-label="Stop generating"], button[data-testid="stop-button"]');
-    const confirmVisible = isConfirmDialogVisible();
-    return !!loadingShimmer || !!thinkingIndicator || !!activeToolStatus || !!stopPresent || confirmVisible;
+  function findChatGPTResponseCompletionMarkers(responseScope) {
+    if (typeof chatStateTools.findResponseCompletionMarkers === 'function') {
+      return chatStateTools.findResponseCompletionMarkers(responseScope);
+    }
+    return [];
   }
 
-  function waitForChatGPTSendWindow({ sendButton, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
+  function getChatGPTActivityDiagnostics(options = {}) {
+    const signals = getChatGPTThinkingSignals(options);
+    const diagnostics = signals?.activityDiagnostics || {};
+    return {
+      selectorUsed: diagnostics.selectorUsed || options?.stopButtonSelector || null,
+      stopButtonCandidates: diagnostics.stopButtonCandidates || { selector: options?.stopButtonSelector || null, count: 0, candidates: [], invalidSelector: false },
+      fallbackStopCandidates: diagnostics.fallbackStopCandidates || { selector: 'button[aria-label="Stop generating"], button[data-testid="stop-button"]', count: 0, candidates: [], invalidSelector: false },
+      explicitStop: diagnostics.explicitStop || null,
+      fallbackStop: diagnostics.fallbackStop || null,
+      composerAction: diagnostics.composerAction || null,
+      loadingShimmer: diagnostics.loadingShimmer || null,
+      thinkingIndicator: diagnostics.thinkingIndicator || null,
+      counts: diagnostics.counts || { stopButtonCandidates: 0, fallbackStopCandidates: 0, responseCompletionMarkers: 0 },
+      hardBlockingReasons: diagnostics.hardBlockingReasons || signals?.hardBlockingReasons || [],
+      staleActivityReasons: diagnostics.staleActivityReasons || signals?.staleActivityReasons || [],
+      responseCompletionMarkers: diagnostics.responseCompletionMarkers || [],
+      hasStableCapturedResponse: diagnostics.hasStableCapturedResponse || signals?.hasStableCapturedResponse || false,
+      responseCompletionEvidence: diagnostics.responseCompletionEvidence || signals?.responseCompletionEvidence || false,
+      activeToolStatus: diagnostics.activeToolStatus || signals?.activeToolStatus || false,
+      confirmVisible: diagnostics.confirmVisible || signals?.confirmVisible || false,
+      finalDecisionReason: diagnostics.finalDecisionReason || 'unknown',
+    };
+  }
+
+  function waitForChatGPTSendWindow({ sendButton, inputEl, maxWaitMs = 60000, quietWindowMs = 1200, pollMs = 250 }) {
     return new Promise((resolve, reject) => {
       const start = Date.now();
       let readySince = null;
+      let lastDebugAt = 0;
 
       const check = () => {
         maybeClickConfirmButtons('waitForChatGPTSendWindow');
         const elapsed = Date.now() - start;
         const busy = isChatGPTThinking();
-        const directReady = sendButton ? isButtonEnabled(sendButton) : false;
-        const canSend = directReady || isChatGPTReadyToSend();
+        const currentSendButton = findSendButtonForSite('chatgpt', inputEl) || sendButton;
+        const directReady = currentSendButton ? isButtonEnabled(currentSendButton) : false;
+        const canSend = directReady || isChatGPTReadyToSend(inputEl);
+        if (elapsed - lastDebugAt >= 5000) {
+          lastDebugAt = elapsed;
+          console.log('[PreSendGuard] Still waiting for send window', {
+            elapsed,
+            busy,
+            hasSendButton: !!currentSendButton,
+            directReady,
+            canSend,
+            preSendQuietWindowMs: quietWindowMs,
+            quietWindowMs,
+            inputLength: getInputTextLengthQuiet(inputEl),
+          });
+        }
 
         if (!busy && canSend) {
+          if (quietWindowMs <= 0) {
+            console.log('[PreSendGuard] Quiet send window reached', {
+              elapsed,
+              preSendQuietWindowMs: quietWindowMs,
+              quietWindowMs,
+              reason: 'disabledQuietWindow',
+            });
+            resolve();
+            return;
+          }
           if (readySince === null) {
             readySince = Date.now();
           } else if (Date.now() - readySince >= quietWindowMs) {
-            console.log('[PreSendGuard] Quiet send window reached', { elapsed, quietWindowMs });
+            console.log('[PreSendGuard] Quiet send window reached', {
+              elapsed,
+              preSendQuietWindowMs: quietWindowMs,
+              quietWindowMs,
+            });
             resolve();
             return;
           }
         } else {
           if (readySince !== null) {
-            console.log('[PreSendGuard] Busy signal returned; resetting quiet window', { elapsed, busy, canSend });
+            console.log('[PreSendGuard] Busy signal returned; resetting quiet window', {
+              elapsed,
+              busy,
+              canSend,
+              preSendQuietWindowMs: quietWindowMs,
+            });
           }
           readySince = null;
         }
@@ -515,6 +828,108 @@
 
       check();
     });
+  }
+
+  function getChatGPTPreSendQuietWindowMs(settings = currentTargetSettings) {
+    const raw = Number(settings?.preSendQuietWindowMs ?? settings?.chatgptPreSendQuietWindowMs);
+    if (!Number.isFinite(raw)) return 1200;
+    return Math.min(60000, Math.max(0, Math.round(raw)));
+  }
+
+  function waitForEnabledSendButton({
+    site = 'chatgpt',
+    inputEl,
+    settings = currentTargetSettings,
+    maxWaitMs = 5000,
+    pollMs = 100,
+    reason = 'unknown',
+  } = {}) {
+    return new Promise((resolve) => {
+      const startedAt = Date.now();
+      let settled = false;
+      let observer = null;
+      let interval = null;
+      let timeout = null;
+
+      const finish = (button, source) => {
+        if (settled) return;
+        settled = true;
+        if (observer) observer.disconnect();
+        if (interval) clearInterval(interval);
+        if (timeout) clearTimeout(timeout);
+        const payload = {
+          reason,
+          source,
+          elapsedMs: Date.now() - startedAt,
+          hasButton: !!button,
+          buttonEnabled: isButtonEnabled(button),
+          inputLength: getInputTextLengthQuiet(inputEl),
+        };
+        if (button) {
+          console.log('[SendButtonObserver] Enabled send button found', payload);
+        } else {
+          console.warn('[SendButtonObserver] No enabled send button found before timeout', payload);
+        }
+        resolve(button || null);
+      };
+
+      const check = (source) => {
+        const button = findSendButtonForSite(site, inputEl, settings);
+        if (button && isButtonEnabled(button)) {
+          finish(button, source);
+        }
+      };
+
+      if (typeof MutationObserver === 'function' && (document.body || document.documentElement)) {
+        observer = new MutationObserver(() => check('mutation'));
+        observer.observe(document.body || document.documentElement, {
+          childList: true,
+          subtree: true,
+          attributes: true,
+          attributeFilter: ['aria-disabled', 'aria-label', 'class', 'data-testid', 'disabled', 'style', 'type'],
+        });
+      }
+
+      interval = setInterval(() => check('interval'), pollMs);
+      timeout = setTimeout(() => finish(null, 'timeout'), maxWaitMs);
+      check('initial');
+    });
+  }
+
+  async function recoverSendButtonAfterPreSendTimeout({
+    promptId,
+    site,
+    inputEl,
+    sendBtn,
+    options,
+    stopBtnSel,
+    error,
+    attempt = null,
+  }) {
+    console.warn('[PromptQueue] Pre-send guard timed out; trying enabled-button observer fallback', {
+      promptId,
+      attempt,
+      error: error?.message || String(error),
+      snapshot: buildPromptQueueDebugSnapshot({
+        site,
+        inputEl,
+        sendBtn,
+        stopButtonSelector: stopBtnSel,
+        promptId,
+        attempt,
+      }),
+    });
+
+    const observedSendBtn = await waitForEnabledSendButton({
+      site,
+      inputEl,
+      settings: options,
+      maxWaitMs: 5000,
+      reason: attempt === null ? 'pre-send-timeout' : 'retry-pre-send-timeout',
+    });
+
+    if (observedSendBtn) return observedSendBtn;
+    throw error;
   }
 
   function checkForStopWord(stopWord, caseSensitive) {
@@ -562,30 +977,19 @@
     return blockAutoConfirmForStopWord(source);
   }
 
-  function isChatGPTReadyToSend() {
+  function isChatGPTReadyToSend(inputEl) {
     // Check if send button is enabled or if we're in a state where we can send
-    const sendBtn = document.querySelector('[data-testid="send-button"]');
+    const sendBtn = findSendButtonForSite('chatgpt', inputEl);
     if (sendBtn && isButtonEnabled(sendBtn)) return true;
     const regenPresent = document.querySelector('button:has([data-testid="regenerate-response-button"]) , button[aria-label*="Regenerate"]');
     const isThinking = isChatGPTThinking();
-    return (!!sendBtn || !!regenPresent) && !isThinking;
-  }
-
-  function getInputTextLengthQuiet(el) {
-    if (!el) return 0;
-    const isContentEditable = el.getAttribute && el.getAttribute('contenteditable') === 'true';
-    if (isContentEditable) {
-      return (el.textContent || '').length;
-    }
-    if (typeof el.value === 'string') {
-      return el.value.length;
-    }
-    return (el.textContent || '').length;
+    const hasDraft = getInputTextLengthQuiet(inputEl || findPromptInput()) > 0;
+    return (!!sendBtn || !!regenPresent || hasDraft) && !isThinking;
   }
 
   function buildPromptQueueDebugSnapshot({ site, inputEl, sendBtn, stopButtonSelector, promptId, attempt }) {
     const resolvedSite = site || detectSite();
-    const resolvedSendBtn = sendBtn || queryFirst(selectorsForSite(resolvedSite).sendButtonCandidates);
+    const resolvedSendBtn = sendBtn || findSendButtonForSite(resolvedSite, inputEl);
     const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
     const inputLength = getInputTextLengthQuiet(inputEl);
     return {
@@ -599,7 +1003,7 @@
       hasSendButton: !!resolvedSendBtn,
       sendButtonEnabled: isButtonEnabled(resolvedSendBtn),
       stopButtonSelector: stopButtonSelector || null,
-      stopButtonPresent: !!stopBtn && isButtonEnabled(stopBtn),
+      stopButtonPresent: isActiveStopButton(stopBtn),
       isChatGPTThinking: resolvedSite === 'chatgpt' ? isChatGPTThinking() : null,
       hasConfirmDialog: isConfirmDialogVisible(),
       activeElementTag: document.activeElement?.tagName || null,
@@ -621,7 +1025,11 @@
     const enabled = options?.enableWatchedElementGate === true;
     if (!enabled) return { enabled: false };
 
-    const selector = (options?.watchedElementSelector || DEFAULTS.watchedElementSelector || '').trim();
+    const site = detectSite();
+    const resolved = typeof targetTools.resolveSelector === 'function'
+      ? targetTools.resolveSelector('watchedElement', { site, settings: options || {} })
+      : null;
+    const selector = (resolved?.selector || options?.watchedElementSelector || DEFAULTS.watchedElementSelector || '').trim();
     if (!selector) return { enabled: false };
 
     const baselineElements = getElementsBySelector(selector);
@@ -630,7 +1038,11 @@
     const baselineCount = baselineElements.length;
     const baselineElementSet = new Set(baselineElements);
 
-    console.log('[WatchGate] Baseline captured', { selector, baselineCount });
+    console.log('[WatchGate] Baseline captured', {
+      selector,
+      baselineCount,
+      source: resolved?.source || 'legacy',
+    });
     return { enabled: true, selector, baselineCount, baselineElementSet };
   }
 
@@ -652,19 +1064,40 @@
     return !stop && !spinner;
   }
 
-  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, stopWord, stopWordCaseSensitive, watchGate }) {
+  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, enableTimeout, stopWord, stopWordCaseSensitive, watchGate, promptText, inputEl }) {
     const site = detectSite();
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
     const effectivePollMs = typeof pollIntervalMs === 'number' ? pollIntervalMs : DEFAULTS.pollIntervalMs;
-    const enableTimeout = enableMaxWaitTimeout !== false;
+    const finiteResponseTimeoutEnabled = typeof enableTimeout === 'boolean'
+      ? enableTimeout
+      : enableMaxWaitTimeout === false;
     const completionId = Math.random();
 
-    console.log('[WaitForCompletion] Starting', { completionId, effectiveStableMs, effectiveMaxWaitMs, effectivePollMs, enableTimeout, stopWord });
+    console.log('[WaitForCompletion] Starting', {
+      completionId,
+      effectiveStableMs,
+      effectiveMaxWaitMs,
+      effectivePollMs,
+      finiteResponseTimeoutEnabled,
+      infiniteResponseWait: !finiteResponseTimeoutEnabled,
+      stopWord,
+      hasPromptText: !!promptText,
+    });
+    emitStepUpdate({
+      step: 'completion_wait',
+      detail: 'Waiting for assistant response stability',
+      durationMs: effectiveStableMs,
+      log: false,
+    });
 
     return new Promise((resolve) => {
       const startTime = Date.now();
       let lastChange = Date.now();
+      let lastStatusAt = 0;
+      let lastResponseLength = 0;
+      let responseStableSince = null;
+      let responseSnapshot = { ok: false, responseLength: 0 };
 
       const container = messagesContainer || document.body;
       const observer = new MutationObserver(() => {
@@ -687,12 +1120,19 @@
         maybeClickConfirmButtons('waitForCompletion');
         const elapsed = Date.now() - startTime;
         const stableFor = Date.now() - lastChange;
-        const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
-        const stopBtnPresent = stopBtn && isButtonEnabled(stopBtn);
+        const stopBtn = stopButtonSelector ? queryOneSafe(stopButtonSelector) : null;
+        const stopBtnPresent = isActiveStopButton(stopBtn);
+        let activeGenerationPresent = stopBtnPresent;
+        let chatGptThinkingSignals = null;
+        let chatGptActivityDiagnostics = null;
+        let composerActionRole = null;
 
-        let canSend = isButtonEnabled(sendButton);
+        let currentSendButton = sendButton;
+        let canSend = isButtonEnabled(currentSendButton);
         if (site === 'chatgpt') {
-          if (!sendButton) canSend = true; else if (!canSend) canSend = isChatGPTReadyToSend();
+          currentSendButton = findSendButtonForSite('chatgpt', inputEl || findPromptInput()) || sendButton;
+          composerActionRole = getChatGPTComposerRole(currentSendButton);
+          canSend = isButtonEnabled(currentSendButton) || isChatGPTReadyToSend(inputEl || findPromptInput());
         } else if (site === 'gemini') {
           canSend = isGeminiDone();
         } else if (site === 'grok') {
@@ -718,20 +1158,138 @@
           }
         }
 
-        if (stableFor >= effectiveStableMs && !stopBtnPresent && canSend && watchGateSatisfied) {
+        let responseStableFor = 0;
+        if (site === 'chatgpt' && promptText) {
+          responseSnapshot = captureLatestAssistantResponse(promptText);
+          if (responseSnapshot.ok) {
+            if (responseSnapshot.responseLength !== lastResponseLength) {
+              lastResponseLength = responseSnapshot.responseLength;
+              responseStableSince = Date.now();
+            } else if (responseStableSince !== null) {
+              responseStableFor = Date.now() - responseStableSince;
+            }
+          } else {
+            responseStableSince = null;
+            lastResponseLength = 0;
+          }
+        }
+
+        if (site === 'chatgpt') {
+          chatGptThinkingSignals = getChatGPTThinkingSignals({
+            responseScope: responseSnapshot.responseScope,
+            responseText: responseSnapshot.responseText,
+            responseStableForMs: responseStableFor,
+            stableMs: effectiveStableMs,
+          });
+          chatGptActivityDiagnostics = getChatGPTActivityDiagnostics({
+            responseScope: responseSnapshot.responseScope,
+            responseText: responseSnapshot.responseText,
+            responseStableForMs: responseStableFor,
+            stableMs: effectiveStableMs,
+            stopButtonSelector,
+          });
+          composerActionRole = chatGptThinkingSignals.composerRole || composerActionRole;
+          activeGenerationPresent = stopBtnPresent || chatGptThinkingSignals.active;
+        }
+
+        const domStableEnough = stableFor >= effectiveStableMs;
+        const responseStableEnough = site === 'chatgpt' && responseSnapshot.ok && responseStableFor >= effectiveStableMs;
+        const responseCompletionMarkers = site === 'chatgpt' && responseSnapshot.ok
+          ? (chatGptThinkingSignals?.responseCompletionMarkers || findChatGPTResponseCompletionMarkers(responseSnapshot.responseScope))
+          : [];
+        const responseCompletionMarkerNames = responseCompletionMarkers.map((marker) => marker.label || marker.selector);
+        const responseActionSatisfied = watchGateSatisfied || responseCompletionMarkers.length > 0;
+        const hardChatGptActivityPresent = !!chatGptThinkingSignals?.hardActivityPresent;
+        const activityBlockerReasons = chatGptThinkingSignals?.hardBlockingReasons || chatGptThinkingSignals?.blockingReasons || [];
+        const composerStopActive = composerActionRole?.role === 'stop-active';
+        const currentStopActive = !!(stopBtnPresent || composerStopActive || chatGptThinkingSignals?.stopPresent);
+        const stopOnlyChatGptActivity = site === 'chatgpt'
+          && activeGenerationPresent
+          && !hardChatGptActivityPresent;
+        const chatGptResponseComplete = responseStableEnough
+          && responseActionSatisfied
+          && !currentStopActive
+          && !hardChatGptActivityPresent;
+        const domComplete = domStableEnough && !activeGenerationPresent && canSend && watchGateSatisfied;
+        const completeEnough = site === 'chatgpt' ? (chatGptResponseComplete || domComplete) : domComplete;
+        const finalDecisionReason = site === 'chatgpt'
+          ? (
+            chatGptResponseComplete ? 'chatgptResponseComplete'
+              : domComplete ? 'domComplete'
+                : currentStopActive ? 'blocked:stopActive'
+                  : hardChatGptActivityPresent ? `blocked:${activityBlockerReasons.join(',') || 'hardActivity'}`
+                    : !responseActionSatisfied ? 'waiting:responseMarkersOrWatchGate'
+                      : !responseStableEnough ? 'waiting:responseStability'
+                        : !domStableEnough ? 'waiting:domStability'
+                          : !canSend ? 'waiting:sendReady'
+                            : 'waiting:unknown'
+          )
+          : (
+            domComplete ? 'domComplete'
+              : activeGenerationPresent ? 'blocked:activeGeneration'
+                : !domStableEnough ? 'waiting:domStability'
+                  : !canSend ? 'waiting:sendReady'
+                    : !watchGateSatisfied ? 'waiting:watchGate'
+                      : 'waiting:unknown'
+          );
+
+        if (elapsed - lastStatusAt >= 5000) {
+          lastStatusAt = elapsed;
+          emitStepUpdate({
+            step: 'completion_wait',
+            detail: responseSnapshot.ok ? 'Assistant response captured; waiting for stability' : 'Waiting for assistant response',
+            durationMs: finiteResponseTimeoutEnabled ? Math.max(0, effectiveMaxWaitMs - elapsed) : 0,
+            endAt: finiteResponseTimeoutEnabled ? Date.now() + Math.max(0, effectiveMaxWaitMs - elapsed) : 0,
+            log: false,
+          });
+          console.log('[WaitForCompletion] Waiting status', {
+            completionId,
+            elapsed,
+            stableFor,
+            responseStableFor,
+            responseCaptured: responseSnapshot.ok,
+            responseLength: responseSnapshot.responseLength || 0,
+            stopBtnPresent,
+            activeGenerationPresent,
+            hardChatGptActivityPresent,
+            stopOnlyChatGptActivity,
+            hasCurrentSendButton: !!currentSendButton,
+            composerActionRole: composerActionRole?.role || null,
+            responseCompletionMarkers: responseCompletionMarkerNames,
+            activityBlockerReasons,
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+            canSend,
+            chatGptResponseComplete,
+            watchGateSatisfied,
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
+          });
+        }
+
+        if (completeEnough) {
           console.log('[WaitForCompletion] Completion condition met', { 
             completionId, 
             elapsed, 
             stableFor, 
+            responseStableFor,
+            responseCaptured: responseSnapshot.ok,
             stopBtnPresent, 
+            activeGenerationPresent,
+            composerActionRole: composerActionRole?.role || null,
+            responseCompletionMarkers: responseCompletionMarkerNames,
+            activityBlockerReasons,
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
             canSend,
-            watchGateSatisfied
+            chatGptResponseComplete,
+            watchGateSatisfied,
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
           });
           cleanup();
           resolve();
           return;
         }
-        if (enableTimeout && elapsed > effectiveMaxWaitMs) {
+        if (finiteResponseTimeoutEnabled && elapsed > effectiveMaxWaitMs) {
           if (watchGate?.enabled && !watchGateSatisfied) {
             console.warn('[WatchGate] Max wait reached and gate is not satisfied; proceeding due timeout', {
               selector: watchGate.selector,
@@ -744,10 +1302,16 @@
             effectiveMaxWaitMs, 
             stableFor, 
             stopBtnPresent, 
-            canSend
+            canSend,
+            responseCaptured: responseSnapshot.ok,
+            responseLength: responseSnapshot.responseLength || 0,
+            activityBlockerReasons,
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
           });
           cleanup();
-          resolve();
+          resolve({ timedOut: true, error: 'waitForCompletion timeout' });
         }
       }, effectivePollMs);
 
@@ -769,45 +1333,112 @@
       const requiredNoStopChecks = 3; // Require 3 consecutive checks without stop button
       const site = detectSite();
 
+      function buildWaitForStreamsLogPayload({
+        elapsed,
+        stopPresent,
+        stillStreaming,
+        chatGptThinkingSignals,
+        chatGptActivityDiagnostics,
+        finalDecisionReason,
+      }) {
+        return {
+          site,
+          stopButtonSelector: stopButtonSelector || null,
+          elapsed,
+          enableTimeout: enableTimeoutCheck,
+          noStopButtonCount,
+          requiredNoStopChecks,
+          stopPresent,
+          stillStreaming,
+          explicitStop: chatGptActivityDiagnostics?.explicitStop || null,
+          fallbackStop: chatGptActivityDiagnostics?.fallbackStop || null,
+          composerAction: chatGptActivityDiagnostics?.composerAction || null,
+          candidateCounts: {
+            stopButtonCandidates: chatGptActivityDiagnostics?.counts?.stopButtonCandidates ?? 0,
+            fallbackStopCandidates: chatGptActivityDiagnostics?.counts?.fallbackStopCandidates ?? 0,
+          },
+          hardBlockingReasons: chatGptThinkingSignals?.hardBlockingReasons || (stopPresent ? ['stopButton'] : []),
+          staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+          finalDecisionReason,
+          activityDiagnostics: chatGptActivityDiagnostics || null,
+        };
+      }
+
       const checkStop = () => {
         maybeClickConfirmButtons('waitForStreamsToStop');
         const elapsed = Date.now() - startTime;
-        const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
-        const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
+        const stopBtn = stopButtonSelector ? queryOneSafe(stopButtonSelector) : null;
+        const stopPresent = isActiveStopButton(stopBtn);
 
         let stillStreaming = stopPresent;
+        let chatGptThinkingSignals = null;
+        let chatGptActivityDiagnostics = null;
+        let finalDecisionReason = stopPresent ? 'blocked:stopButton' : 'waiting:quietChecks';
 
         // For ChatGPT, also treat thinking indicators as active streaming
         if (site === 'chatgpt') {
-          if (isChatGPTThinking()) {
+          chatGptThinkingSignals = getChatGPTThinkingSignals({ stopButtonSelector, targetSettings: currentTargetSettings });
+          chatGptActivityDiagnostics = getChatGPTActivityDiagnostics({ stopButtonSelector, targetSettings: currentTargetSettings });
+          if (chatGptThinkingSignals.active) {
             stillStreaming = true;
+            finalDecisionReason = `blocked:${chatGptActivityDiagnostics.finalDecisionReason || 'chatgptActivity'}`;
+          } else if (!stopPresent) {
+            finalDecisionReason = noStopButtonCount + 1 >= requiredNoStopChecks
+              ? 'resolved:quietChecksSatisfied'
+              : 'waiting:quietChecks';
           }
         }
 
+        const diagnosticPayload = buildWaitForStreamsLogPayload({
+          elapsed,
+          stopPresent,
+          stillStreaming,
+          chatGptThinkingSignals,
+          chatGptActivityDiagnostics,
+          finalDecisionReason,
+        });
+
         if (!stillStreaming) {
           noStopButtonCount++;
-          console.log('[WaitForStreamsToStop] No stop button detected', { 
-            noStopButtonCount, 
-            requiredNoStopChecks,
-            elapsed,
-            enableTimeout: enableTimeoutCheck
+          console.log('[WaitForStreamsToStop] No stop button detected', {
+            ...diagnosticPayload,
+            noStopButtonCount,
           });
           
           // Require multiple consecutive checks without stop button to confirm not streaming
           if (noStopButtonCount >= requiredNoStopChecks) {
-            console.log('[WaitForStreamsToStop] Confirmed: No active stream, safe to proceed');
+            console.log('[WaitForStreamsToStop] Confirmed: No active stream, safe to proceed', {
+              elapsed,
+              noStopButtonCount,
+              requiredNoStopChecks,
+              selectorUsed: stopButtonSelector || null,
+              finalDecisionReason: 'resolved:quietChecksSatisfied',
+              activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
+            });
             resolve();
             return;
           }
         } else {
           // Reset counter if stop button appears
           noStopButtonCount = 0;
-          console.log('[WaitForStreamsToStop] Stop button detected, resetting counter', { enableTimeout: enableTimeoutCheck });
+          console.log('[WaitForStreamsToStop] Stop button detected, resetting counter', {
+            ...diagnosticPayload,
+            noStopButtonCount,
+          });
         }
 
         if (elapsed > effectiveMaxWaitMs) {
           // Timeout: reject instead of proceeding with potentially active stream
-          console.error('[WaitForStreamsToStop] Timeout waiting for stream to stop after ' + effectiveMaxWaitMs + 'ms. Stop button still present.');
+          console.error('[WaitForStreamsToStop] Timeout waiting for stream to stop after ' + effectiveMaxWaitMs + 'ms. Stop button still present.', {
+            elapsed,
+            selectorUsed: stopButtonSelector || null,
+            stopPresent,
+            activityBlockerReasons: chatGptThinkingSignals?.hardBlockingReasons || (stopPresent ? ['stopButton'] : []),
+            staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+            responseCompletionMarkers: chatGptThinkingSignals?.responseCompletionMarkerNames || [],
+            finalDecisionReason,
+            activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
+          });
           reject(new Error('Stream did not stop within timeout period. Stopping automation to prevent queue rush.'));
           return;
         }
@@ -833,7 +1464,7 @@
         maybeClickConfirmButtons('waitForStreamStart');
         const elapsed = Date.now() - startTime;
         const stopBtn = stopButtonSelector ? document.querySelector(stopButtonSelector) : null;
-        const stopPresent = !!stopBtn && isButtonEnabled(stopBtn);
+        const stopPresent = isActiveStopButton(stopBtn);
 
         let streaming = false;
 
@@ -874,6 +1505,7 @@
 
   async function PromptQueue(text, options, promptId) {
     console.log('[PromptQueue] Received prompt request', { promptId, currentPromptId, textLength: text?.length });
+    currentTargetSettings = options || {};
   
     // Wait for any currently processing prompt to complete
     if (currentPromptId !== null && currentPromptId !== promptId) {
@@ -884,9 +1516,9 @@
       };
       console.warn('[PromptQueue] QUEUED: Waiting for current prompt to complete', queueMeta, JSON.stringify(queueMeta));
       
-      const enableQueueTimeout = options?.enableMaxWaitTimeout !== false;
-      // When queue timeout is enabled, wait up to 30 seconds for current prompt to finish.
-      // When disabled, wait indefinitely until currentPromptId is cleared by the previous prompt.
+      const finiteResponseTimeoutEnabled = isFiniteResponseTimeoutEnabled(options);
+      // Finite max-wait mode waits up to 30 seconds for current prompt to finish.
+      // Infinite mode waits until currentPromptId is cleared by the previous prompt.
       let waitTime = 0;
       const maxWaitTime = 30000;
       const checkInterval = 100;
@@ -897,7 +1529,7 @@
         checkInterval,
       });
       
-      if (enableQueueTimeout) {
+      if (finiteResponseTimeoutEnabled) {
         while (currentPromptId !== null && waitTime < maxWaitTime && !automationAborted) {
           await new Promise(r => setTimeout(r, checkInterval));
           waitTime += checkInterval;
@@ -962,42 +1594,53 @@
     configureStopWordGuard(options?.enableStopWord ? options?.stopWord : null, options?.stopWordCaseSensitive);
     console.log('[PromptQueue] Starting processing', { promptId, timestamp: Date.now(), options });
     
-    // Set a safety timeout to force cleanup if this prompt takes too long
     const isParallelDispatch = options?.parallelDispatchMode === true;
-    const enablePromptTimeout = options?.enableMaxWaitTimeout !== false && !isParallelDispatch;
-    const maxPromptDuration = (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 10000; // Add 10s buffer
+    const finiteResponseTimeoutEnabled = isFiniteResponseTimeoutEnabled(options);
+    const responseTimeoutMs = getConfiguredMaxWaitMs(options);
     console.log('[PromptQueue] Prompt timeout configuration', {
       promptId,
       isParallelDispatch,
-      enablePromptTimeout,
-      maxPromptDuration,
-      maxWaitMs: options?.maxWaitMs || DEFAULTS.maxWaitMs,
+      finiteResponseTimeoutEnabled,
+      infiniteResponseWait: !finiteResponseTimeoutEnabled,
+      maxWaitMs: responseTimeoutMs,
       stableMs: options?.stableMs || DEFAULTS.stableMs,
       pollIntervalMs: options?.pollIntervalMs || DEFAULTS.pollIntervalMs,
     });
-    const timeoutId = enablePromptTimeout
-      ? setTimeout(() => {
-          console.error('[PromptQueue] TIMEOUT: Prompt processing exceeded max duration', { 
-            promptId, 
-            maxPromptDuration,
-            timestamp: Date.now()
-          });
-          currentPromptId = null;
-          try {
-            chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, error: 'Prompt processing timeout' });
-          } catch (_) {}
-        }, maxPromptDuration)
-      : null;
     
     try {
       const site = detectSite();
       console.log('[PromptQueue] Detected site:', site);
+      emitSelectorHealth(site, options);
       const cfg = selectorsForSite(site);
 
-      let inputEl = queryFirst(cfg.inputCandidates);
-      let sendBtn = queryFirst(cfg.sendButtonCandidates);
-      const stopBtnSel = cfg.stopButtonCandidates?.[0] || null;
+      let inputEl = findPromptInputForSite(site, options);
+      let sendBtn = findSendButtonForSite(site, inputEl, options);
+      const stopBtnSel = resolveStopButtonSelector(site, options);
       let messagesContainer = queryFirst(cfg.messagesContainerCandidates);
+      let promptSubmittedNotified = false;
+
+      async function notifyPromptSubmitted(reason) {
+        if (promptSubmittedNotified) return;
+        promptSubmittedNotified = true;
+        try {
+          const submittedResp = await chrome.runtime.sendMessage({
+            type: 'PROMPT_SUBMITTED',
+            promptId,
+            reason,
+          });
+          console.log('[PromptQueue] PROMPT_SUBMITTED sent; background should release cross-tab send lock now', {
+            promptId,
+            reason,
+            response: submittedResp || null,
+          });
+        } catch (submissionErr) {
+          console.warn('[PromptQueue] Failed to send PROMPT_SUBMITTED', {
+            promptId,
+            reason,
+            error: submissionErr?.message || String(submissionErr),
+          });
+        }
+      }
       
       console.log('[PromptQueue] Initial element detection', { 
         hasInputEl: !!inputEl, 
@@ -1008,22 +1651,21 @@
 
       if ((site === 'chatgpt' || site === 'gemini' || site === 'claude') && !inputEl) {
         console.log('[PromptQueue] Input not found, attempting to locate and focus');
-        const composer = document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
+        const composer = document.querySelector('#prompt-textarea, .ProseMirror[contenteditable], form textarea, [contenteditable], textarea.wcDTda_fallbackTextarea');
         composer?.scrollIntoView({ block: 'end' });
         composer?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
         await new Promise((r) => setTimeout(r, 150));
-        inputEl = queryFirst(cfg.inputCandidates) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable="true"], form textarea, [contenteditable="true"]');
-        sendBtn = sendBtn || queryFirst(cfg.sendButtonCandidates);
+        inputEl = findPromptInputForSite(site, options) || document.querySelector('#prompt-textarea, .ProseMirror[contenteditable], form textarea, [contenteditable], textarea.wcDTda_fallbackTextarea');
+        sendBtn = sendBtn || findSendButtonForSite(site, inputEl, options);
         messagesContainer = messagesContainer || queryFirst(cfg.messagesContainerCandidates) || document.body;
         console.log('[PromptQueue] After focus attempt', { hasInputEl: !!inputEl, hasSendBtn: !!sendBtn });
       }
-
-      if (!inputEl) throw new Error('Could not find chat input on this page.');
 
       const watchGate = buildWatchGate(options);
 
       // Wait for any active streaming/processing to complete before sending
       const streamWaitStartedAt = Date.now();
+      emitStepUpdate({ step: 'waiting_for_response', promptId, detail: 'Waiting for existing stream to stop', log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Waiting for streams to stop', { promptId, enableTimeout: false });
       try {
         await waitForStreamsToStop({ stopButtonSelector: stopBtnSel, maxWaitMs: undefined, enableTimeout: false });
@@ -1043,6 +1685,39 @@
         }),
       });
 
+      const composerReadyMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 10000);
+      emitStepUpdate({ step: 'waiting_for_tab', promptId, detail: 'Waiting for visible composer', durationMs: composerReadyMaxWaitMs, endAt: Date.now() + composerReadyMaxWaitMs, log: options?.perStepConsoleLogging === true });
+      console.log('[PromptQueue] Waiting for composer readiness', {
+        promptId,
+        composerReadyMaxWaitMs,
+      });
+      try {
+        inputEl = await waitForComposerReady({
+          site,
+          settings: options,
+          inputEl,
+          maxWaitMs: composerReadyMaxWaitMs,
+          stableWindowMs: 300,
+          pollMs: 100,
+        });
+      } catch (readyErr) {
+        console.error('[PromptQueue] Composer readiness wait failed', {
+          promptId,
+          error: readyErr?.message || String(readyErr),
+          snapshot: buildPromptQueueDebugSnapshot({
+            site,
+            inputEl,
+            sendBtn,
+            stopButtonSelector: stopBtnSel,
+            promptId,
+          }),
+        });
+        throw readyErr;
+      }
+
+      if (!inputEl) throw new Error('Could not find chat input on this page.');
+
+      emitStepUpdate({ step: 'populating', promptId, detail: 'Writing prompt into visible composer', log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Setting text input', { promptId, textLength: text?.length });
       setTextInInput(inputEl, text);
       await new Promise((r) => setTimeout(r, 150));
@@ -1078,16 +1753,56 @@
         });
         throw new Error('Input field empty before sending');
       }
-      console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length, preview: finalNormalized.slice(0, 120) });
+      console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length });
+      if (options?.dryRunPopulateOnly === true) {
+        emitStepUpdate({ step: 'complete', promptId, detail: 'Dry-run populated composer', log: options?.perStepConsoleLogging === true });
+        console.log('[PromptQueue] Dry-run populate complete; send skipped', { promptId, finalLength: finalNormalized.length });
+        try {
+          await chrome.runtime.sendMessage({
+            type: 'RESPONSE_COMPLETE',
+            promptId,
+            dryRun: true,
+            site,
+            url: location.href,
+          });
+        } catch (_) {}
+        return;
+      }
+      const postPopulateDelayWindow = coerceDelayWindow(options);
+      const postPopulateDelayMs = randomDelayFromWindow(postPopulateDelayWindow);
+      if (postPopulateDelayMs > 0) {
+        console.log('[PromptQueue] Waiting post-populate delay before send', {
+          promptId,
+          postPopulateDelayMs,
+          minMs: postPopulateDelayWindow.minMs,
+          maxMs: postPopulateDelayWindow.maxMs,
+        });
+        await delayWithStatus({
+          step: 'post_populate_delay',
+          promptId,
+          durationMs: postPopulateDelayMs,
+          detail: 'Waiting before send click',
+          log: options?.perStepConsoleLogging === true,
+        });
+      }
+      sendBtn = findSendButtonForSite(site, inputEl, options) || sendBtn;
 
       if (site === 'chatgpt') {
         const preSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
-        console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', { promptId, preSendMaxWaitMs });
+        const configuredQuietWindowMs = getChatGPTPreSendQuietWindowMs(options);
+        emitStepUpdate({ step: 'pre_send_quiet_window', promptId, detail: 'Waiting for ChatGPT send window', durationMs: preSendMaxWaitMs, endAt: Date.now() + preSendMaxWaitMs, log: options?.perStepConsoleLogging === true });
+        console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window', {
+          promptId,
+          preSendMaxWaitMs,
+          preSendQuietWindowMs: configuredQuietWindowMs,
+          quietWindowMs: configuredQuietWindowMs,
+        });
         try {
           await waitForChatGPTSendWindow({
             sendButton: sendBtn,
+            inputEl,
             maxWaitMs: preSendMaxWaitMs,
-            quietWindowMs: 1200,
+            quietWindowMs: configuredQuietWindowMs,
             pollMs: 250,
           });
         } catch (preSendErr) {
@@ -1102,12 +1817,27 @@
               promptId,
             }),
           });
-          throw preSendErr;
+          sendBtn = await recoverSendButtonAfterPreSendTimeout({
+            promptId,
+            site,
+            inputEl,
+            sendBtn,
+            options,
+            stopBtnSel,
+            error: preSendErr,
+          });
         }
       }
       
-      console.log('[PromptQueue] Clicking send button', { promptId });
+      emitStepUpdate({ step: 'sending', promptId, detail: 'Clicking send button', log: options?.perStepConsoleLogging === true });
+      console.log('[PromptQueue] Clicking send button', {
+        promptId,
+        hasSendBtn: !!sendBtn,
+        sendButtonEnabled: isButtonEnabled(sendBtn),
+      });
+      sendBtn = findSendButtonForSite(site, inputEl, options) || sendBtn;
       await clickSend(sendBtn, inputEl);
+      await notifyPromptSubmitted('send-click-dispatched');
 
       let attempt = 0;
       const maxAttempts = 2;
@@ -1115,6 +1845,7 @@
 
       while (attempt < maxAttempts && !streamStarted) {
         attempt += 1;
+        emitStepUpdate({ step: 'waiting_for_response', promptId, detail: 'Verifying stream start', log: options?.perStepConsoleLogging === true });
         console.log('[PromptQueue] Verifying stream started', { promptId, attempt, maxAttempts });
         streamStarted = await waitForStreamStart({
           stopButtonSelector: stopBtnSel,
@@ -1129,7 +1860,7 @@
               promptId, 
               attempt, 
               maxAttempts, 
-              contentPreview: renderMatch.contentPreview 
+              matchedRenderedPrompt: true
             });
             streamStarted = true;
             break;
@@ -1150,16 +1881,20 @@
           await new Promise((r) => setTimeout(r, 250));
           if (site === 'chatgpt') {
             const retryPreSendMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 60000);
+            const configuredQuietWindowMs = getChatGPTPreSendQuietWindowMs(options);
             console.log('[PromptQueue] Waiting for ChatGPT pre-send quiet window before retry', {
               promptId,
               attempt,
               retryPreSendMaxWaitMs,
+              preSendQuietWindowMs: configuredQuietWindowMs,
+              quietWindowMs: configuredQuietWindowMs,
             });
             try {
               await waitForChatGPTSendWindow({
                 sendButton: sendBtn,
+                inputEl,
                 maxWaitMs: retryPreSendMaxWaitMs,
-                quietWindowMs: 1200,
+                quietWindowMs: configuredQuietWindowMs,
                 pollMs: 250,
               });
             } catch (retryPreSendErr) {
@@ -1176,10 +1911,21 @@
                   attempt,
                 }),
               });
-              throw retryPreSendErr;
+              sendBtn = await recoverSendButtonAfterPreSendTimeout({
+                promptId,
+                site,
+                inputEl,
+                sendBtn,
+                options,
+                stopBtnSel,
+                error: retryPreSendErr,
+                attempt,
+              });
             }
           }
+          sendBtn = findSendButtonForSite(site, inputEl, options) || sendBtn;
           await clickSend(sendBtn, inputEl);
+          await notifyPromptSubmitted('retry-send-click-dispatched');
         }
       }
 
@@ -1200,19 +1946,7 @@
       }
       console.log('[PromptQueue] Stream detected or render found, proceeding to render verification', { promptId, streamStarted });
 
-      try {
-        const submittedResp = await chrome.runtime.sendMessage({
-          type: 'PROMPT_SUBMITTED',
-          promptId,
-          reason: 'stream-start-detected',
-        });
-        console.log('[PromptQueue] PROMPT_SUBMITTED sent', { promptId, response: submittedResp || null });
-      } catch (submissionErr) {
-        console.warn('[PromptQueue] Failed to send PROMPT_SUBMITTED', {
-          promptId,
-          error: submissionErr?.message || String(submissionErr),
-        });
-      }
+      await notifyPromptSubmitted('stream-start-detected');
 
       // Verify the prompt text appears in the rendered chat (e.g., ChatGPT message bubble)
       try {
@@ -1223,42 +1957,42 @@
         throw e;
       }
 
-      const enableCompletionTimeout = options?.enableMaxWaitTimeout !== false;
       const effectiveStopWord = options?.enableStopWord ? options?.stopWord : null;
       armStopWordGuard('PromptQueue');
-      console.log('[PromptQueue] Waiting for completion', { promptId, stableMs: options?.stableMs, maxWaitMs: options?.maxWaitMs, enableMaxWaitTimeout: enableCompletionTimeout, enableStopWord: options?.enableStopWord, stopWord: effectiveStopWord, watchGate });
+      emitStepUpdate({
+        step: 'completion_wait',
+        promptId,
+        detail: 'Waiting for completion',
+        durationMs: finiteResponseTimeoutEnabled ? responseTimeoutMs : 0,
+        endAt: finiteResponseTimeoutEnabled ? Date.now() + responseTimeoutMs : 0,
+        log: options?.perStepConsoleLogging === true
+      });
+      console.log('[PromptQueue] Waiting for completion', {
+        promptId,
+        stableMs: options?.stableMs,
+        maxWaitMs: responseTimeoutMs,
+        finiteResponseTimeoutEnabled,
+        infiniteResponseWait: !finiteResponseTimeoutEnabled,
+        enableMaxWaitTimeout: options?.enableMaxWaitTimeout !== false,
+        enableStopWord: options?.enableStopWord,
+        stopWord: effectiveStopWord,
+        watchGate,
+      });
       try {
-        let result;
-        if (enableCompletionTimeout && !watchGate?.enabled) {
-          result = await Promise.race([
-            waitForCompletion({
-              sendButton: sendBtn,
-              stopButtonSelector: stopBtnSel,
-              messagesContainer,
-              stableMs: options?.stableMs,
-              maxWaitMs: options?.maxWaitMs,
-              pollIntervalMs: options?.pollIntervalMs,
-              enableMaxWaitTimeout: enableCompletionTimeout,
-              stopWord: effectiveStopWord,
-              stopWordCaseSensitive: options?.stopWordCaseSensitive,
-              watchGate,
-            }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('waitForCompletion timeout')), (options?.maxWaitMs || DEFAULTS.maxWaitMs) + 5000))
-          ]);
-        } else {
-          result = await waitForCompletion({
-            sendButton: sendBtn,
-            stopButtonSelector: stopBtnSel,
-            messagesContainer,
-            stableMs: options?.stableMs,
-            maxWaitMs: options?.maxWaitMs,
-            pollIntervalMs: options?.pollIntervalMs,
-            enableMaxWaitTimeout: enableCompletionTimeout,
-            stopWord: effectiveStopWord,
-            stopWordCaseSensitive: options?.stopWordCaseSensitive,
-            watchGate,
-          });
-        }
+        const result = await waitForCompletion({
+          sendButton: sendBtn,
+          stopButtonSelector: stopBtnSel,
+          messagesContainer,
+          stableMs: options?.stableMs,
+          maxWaitMs: responseTimeoutMs,
+          pollIntervalMs: options?.pollIntervalMs,
+          enableTimeout: finiteResponseTimeoutEnabled,
+          stopWord: effectiveStopWord,
+          stopWordCaseSensitive: options?.stopWordCaseSensitive,
+          watchGate,
+          promptText: text,
+          inputEl,
+        });
 
         // Check if automation was stopped by stop word
         if (result?.stoppedByStopWord) {
@@ -1269,6 +2003,9 @@
             chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId, stoppedByStopWord: true });
           } catch (_) {}
           return;
+        }
+        if (result?.timedOut) {
+          throw new Error(result.error || 'waitForCompletion timeout');
         }
         console.log('[PromptQueue] Completion wait finished (no stop word)', { promptId });
       } catch (e) {
@@ -1286,9 +2023,20 @@
         throw e;
       }
       
-      console.log('[PromptQueue] Completion detected, sending RESPONSE_COMPLETE', { promptId });
+      const capturedResponse = captureLatestAssistantResponse(text);
+      console.log('[PromptQueue] Completion detected, sending RESPONSE_COMPLETE', {
+        promptId,
+        responseCaptured: capturedResponse.ok,
+        responseLength: capturedResponse.responseLength,
+      });
       try {
-        const resp = await chrome.runtime.sendMessage({ type: 'RESPONSE_COMPLETE', promptId });
+        const resp = await chrome.runtime.sendMessage({
+          type: 'RESPONSE_COMPLETE',
+          promptId,
+          responseText: capturedResponse.responseText,
+          site: capturedResponse.site,
+          url: capturedResponse.url,
+        });
         console.log('[PromptQueue] RESPONSE_COMPLETE sent, got response', { promptId, resp });
       } catch (e) {
         console.error('[PromptQueue] Failed to send RESPONSE_COMPLETE', { promptId, error: e?.message });
@@ -1296,9 +2044,9 @@
     } catch (e) {
       const catchSite = detectSite();
       const catchCfg = selectorsForSite(catchSite);
-      const catchInputEl = queryFirst(catchCfg.inputCandidates);
-      const catchSendBtn = queryFirst(catchCfg.sendButtonCandidates);
-      const catchStopBtnSel = catchCfg.stopButtonCandidates?.[0] || null;
+      const catchInputEl = findPromptInputForSite(catchSite, options);
+      const catchSendBtn = findSendButtonForSite(catchSite, catchInputEl, options);
+      const catchStopBtnSel = resolveStopButtonSelector(catchSite, options);
       console.error('[PromptQueue] Error during processing', { 
         promptId, 
         error: e?.message, 
@@ -1317,9 +2065,27 @@
       } catch (_) {}
     } finally {
       console.log('[PromptQueue] Cleanup - clearing currentPromptId', { promptId, timestamp: Date.now() });
-      clearTimeout(timeoutId);
       currentPromptId = null;
     }
+  }
+
+  if (window.__PROMPT_QUEUE_TEST__) {
+    window.PromptQueueContentTest = {
+      clickSend,
+      detectSite,
+      findPromptInputForSite,
+      findRenderedMessageMatch,
+      findSendButtonForSite,
+      isButtonEnabled,
+      isChatGPTReadyToSend,
+      resolveStopButtonSelector,
+      selectorsForSite,
+      setTextInInput,
+      waitForComposerReady,
+      waitForCompletion,
+      waitForChatGPTSendWindow,
+      waitForStreamsToStop,
+    };
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -1327,18 +2093,38 @@
       try {
         if (message?.type === 'PING') {
           console.log('[MessageListener] PING received');
-          sendResponse({ ok: true, timestamp: Date.now() });
+          sendResponse({ ok: true, timestamp: Date.now(), version: CONTENT_SCRIPT_VERSION });
+          return;
+        }
+
+        if (message?.type === 'PING_CURRENT') {
+          console.log('[MessageListener] PING_CURRENT received');
+          sendResponse({ ok: true, timestamp: Date.now(), version: CONTENT_SCRIPT_VERSION });
           return;
         }
 
         if (message?.type === 'SETTINGS_UPDATED' && message.settings) {
+          currentTargetSettings = message.settings || {};
           setAutoConfirmDialogs(message.settings.autoConfirmDialogs === true, 'settings_updated');
           setDebugLoggingEnabled(message.settings.debugLoggingEnabled === true);
+          emitSelectorHealth(detectSite(), currentTargetSettings);
           sendResponse({ ok: true });
           return;
         }
 
-        if (message?.type === 'SEND_PROMPT' && typeof message.text === 'string') {
+        if (message?.type === 'GET_MEMORY_SOURCE') {
+          const result = getMemorySource(message.source || 'prompt_box');
+          sendResponse({ ok: true, source: result.source, text: result.text, textLength: result.text.length });
+          return;
+        }
+
+        if (message?.type === 'INSERT_MEMORY_PACK') {
+          const result = insertMemoryPack(message.markdown, message.behavior);
+          sendResponse(result);
+          return;
+        }
+
+        if ((message?.type === 'SEND_PROMPT_CURRENT' || message?.type === 'SEND_PROMPT') && typeof message.text === 'string') {
           const promptId = message.promptId || Math.random();
           if (message.options && typeof message.options.autoConfirmDialogs === 'boolean') {
             setAutoConfirmDialogs(message.options.autoConfirmDialogs, 'send_prompt');
@@ -1386,6 +2172,6 @@
     return true;
   });
 
-  chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
+  chrome.runtime.sendMessage({ type: 'CONTENT_READY', version: CONTENT_SCRIPT_VERSION }).catch(() => {});
   refreshAutoConfirmSetting('content_ready');
 })();

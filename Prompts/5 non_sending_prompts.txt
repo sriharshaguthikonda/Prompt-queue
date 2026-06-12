@@ -1,0 +1,22 @@
+
+last time you used codex ollama worker like this :
+
+
+rtk proxy pwsh -NoProfile -Command '
+$prompt = @"
+You are a Codex CLI worker in C:\Windows_software\Chrome_extensions\Prompt-queue.
+Use terse cavecrew-style final.
+Task: fix only the syntax error in tampermonkey-automation-core.user.js around lines 493-498.
+Context: node --check currently fails at line 496 Unexpected token ':' because a log object/call fragment is dangling inside waitTime % 5000 block.
+Requirements:
+- Edit only tampermonkey-automation-core.user.js.
+- Preserve existing ChatGPT fallback selector additions, including textarea.wcDTda_fallbackTextarea.
+- Do not touch content.js, popup.html, tests, docs, untracked files, or git state.
+- Run node --check tampermonkey-automation-core.user.js.
+- Do not commit.
+Final: list changed file and exact verification result.
+"@
+$prompt | codex --oss --local-provider ollama --model gpt-oss:120b-cloud -C "C:\Windows_software\Chrome_extensions\Prompt-queue" -s workspace-write -a never exec -o ".agent-reports\tampermonkey-parse-fix-last.txt" -
+
+
+

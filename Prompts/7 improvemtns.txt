@@ -1,0 +1,37 @@
+
+mpt
+
+1. update the roadmap and phase plans for this extension regarding htese:
+1. refactor the content.js etc files. modulaize it. are you tyring to do one file operating system or what?!?!
+2. send button is clicked / the prompts are sent after a certain time interval, but the time interval is not configurable, make it configurable idk if 
+3. the typing error generation in the prompts if they are same should be behind a checkbox. disable it by default.
+4. if one tab is sending a prompt then other tabs should wait for a random time configurable in ui before sending next prompt.
+5. the ui does not show what is exactly happening if there is a timer going on for a particular step it should be colour coded and shown....for example, after populating the text field, it just waits and there are no ui updates, but after some time the prompt will be sent.!?!?
+6. think of all other improvements that can be made and get back to me in question and answers file. will approve or deny? go with basic defaults. see if there are better implementations of the existing things as well.
+7. the text box doesnt show the text that is injected into the prompt textarea, i still have to reload the page to see the text.
+
+
+<div class="wcDTda_prosemirror-parent text-token-text-primary max-h-[max(30svh,5rem)] max-h-52 min-h-[var(--deep-research-composer-extra-height,unset)] flex-1 overflow-auto [scrollbar-width:thin] default-browser vertical-scroll-fade-mask group-data-[expanded-composer-mode-button]/composer:pe-9"><textarea class="wcDTda_fallbackTextarea" name="prompt-textarea" autofocus="" placeholder="Ask anything" aria-label="Chat with ChatGPT" data-virtualkeyboard="true" style="display: none;"></textarea><script nonce="">window.__oai_logHTML?window.__oai_logHTML():window.__oai_SSR_HTML=window.__oai_SSR_HTML||Date.now();requestAnimationFrame((function(){window.__oai_logTTI?window.__oai_logTTI():window.__oai_SSR_TTI=window.__oai_SSR_TTI||Date.now()}))</script><div contenteditable="true" translate="no" class="ProseMirror" id="prompt-textarea" data-virtualkeyboard="true" role="textbox" aria-multiline="true" aria-label="Chat with ChatGPT"><p data-placeholder="Ask anything" class="placeholder"><br class="ProseMirror-trailingBreak"></p></div></div>
+
+
+it does not populate the text box even if i use the pic prompt text area user interface as well.
+
+
+i still have to reload the page and only then it shows up.!
+
+
+you know the usual workflow, talk to me in Q and A file, ask me questions, talk to me as freely as possible, don't stop working 
+have mall old model based subagent to frequently check time-based q&a file and report back to you file watcher type!
+
+you are gpt 5.5 extra high in codex, so don't waste tokens, use appropriate intelligence, sub-agents to do your work.
+
+
+non blocking execution can be done in some places
+
+
+
+you only orchestrate!!!
+
+ and let other agents do the work, kill the agents when they are done doing the work or hand over next appropriate tasks to the same sub-agents.
+
+

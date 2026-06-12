@@ -304,6 +304,62 @@ Then open `coverage/index.html` in your browser.
 
 ## Troubleshooting
 
+### Memory Pack Verification
+Run these checks after changing the sidepanel memory-pack flow:
+
+```bash
+node --check background.js
+node --check content.js
+node --check popup.js
+node --check popup-memory.js
+python -m unittest tests.test_native_host_memory tests.test_memory_extension_static -v
+```
+
+Live local bridge smoke:
+
+```powershell
+@'
+import json
+from native_host import TranscriptionMonitor
+
+result = TranscriptionMonitor().handle_message({
+    "type": "memory_pack_browser",
+    "query": "Prompt Queue sidepanel memory pack smoke",
+    "project": "global",
+    "mode": "smart",
+    "max_tokens": 600,
+    "top_k": 5,
+    "min_score": 0.0,
+    "include_classes": [
+        "beliefs_preferences",
+        "world_facts",
+        "entity_observations",
+        "agent_experiences",
+        "reflections",
+    ],
+    "pinned_policy": "relevant_only",
+})
+body = result.get("body", {})
+print(json.dumps({
+    "ok": result.get("ok"),
+    "status": result.get("status"),
+    "hitCount": len(body.get("hits", [])),
+    "markdownLength": len(body.get("markdown", "")),
+    "estimatedTokens": body.get("estimated_tokens"),
+}))
+'@ | python -
+```
+
+Manual browser smoke:
+
+- Reload unpacked extension from this folder.
+- ChatGPT prompt box: type prompt -> Memory Pack source `Prompt box` -> Preview -> Insert -> Insert again; second insert must replace the existing managed block.
+- ChatGPT selected text: select text -> source `Selected text` -> Preview.
+- Clipboard: source `Clipboard` -> Preview after a user gesture.
+- Claude prompt box: Preview -> Insert.
+- Bridge down: Preview/Health shows a clean sidepanel error.
+- Wrong token in fallback mode: Preview/Health shows auth error and does not expose the token.
+
 ### Tests Not Running
 ```bash
 # Clear Jest cache
