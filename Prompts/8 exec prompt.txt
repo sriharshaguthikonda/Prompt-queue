@@ -1,0 +1,23 @@
+
+
+[$caveman:caveman](C:\\Users\\deletable\\.codex\\plugins\\cache\\caveman-repo\\caveman\\0.1.0\\skills\\caveman\\SKILL.md) [$caveman:cavecrew](C:\\Users\\deletable\\.codex\\plugins\\cache\\caveman-repo\\caveman\\0.1.0\\skills\\cavecrew\\SKILL.md) [$superpowers:using-superpowers](C:\\Users\\deletable\\.codex\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\skills\\using-superpowers\\SKILL.md) [$superpowers:subagent-driven-development](C:\\Users\\deletable\\.codex\\plugins\\cache\\claude-plugins-official\\superpowers\\5.1.0\\skills\\subagent-driven-development\\SKILL.md) use GSD skills as well.  
+
+
+you have to work beyound the repo in other folders as well !
+
+
+you know the usual workflow, talk to me in Q and A file, ask me questions, talk to me as freely as possible, don't stop working 
+frequently check time-based q&a file and report back to you file watcher type!
+
+you are gpt 5.5 extra high in codex, so don't waste tokens, use appropriate intelligence, sub-agents to do your work.
+
+
+non blocking execution can be done in some places
+
+
+
+you only orchestrate!!!
+
+ and let other agents do the work, kill the agents when they are done doing the work or hand over next appropriate tasks to the same sub-agents.
+
+

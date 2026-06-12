@@ -1,0 +1,5 @@
+error: unexpected argument 'repo' found
+
+Usage: codex exec review [OPTIONS] [PROMPT]
+
+For more information, try '--help'.

@@ -36,7 +36,7 @@ export async function loadSettingsIntoUI() {
       ensureTargetSettingsUI();
       ensureSendTimingSettingsUI();
       applyMaxWaitSemanticsText();
-      applyTheme(s.theme || 'dark');
+      applyTheme(s.theme || 'system');
       document.getElementById('maxWaitSec').value = msToSec(s.maxWaitMs);
       document.getElementById('stableMinSec').value = msToSec(s.stableMinMs ?? s.stableMs);
       document.getElementById('stableMaxSec').value = msToSec(s.stableMaxMs ?? s.stableMs);
@@ -101,7 +101,7 @@ export async function saveSettingsFromUI() {
     }
 
     settings = {
-      theme: document.getElementById('themeSelect')?.value || 'dark',
+      theme: document.getElementById('themeSelect')?.value || 'system',
       maxWaitMs: secToMs(maxWaitSec),
       stableMinMs: secToMs(stableMinOrdered),
       stableMaxMs: secToMs(stableMaxOrdered),
