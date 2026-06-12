@@ -24,7 +24,9 @@ Live query: `gh issue list --repo sriharshaguthikonda/Prompt-queue --state open`
 4. Create or switch to a feature branch from updated `main`.
 
 ## Separate Worktree Workflow
-- When the user is actively working in one branch, do implementation work in a separate Git worktree by default.
+- Work in this folder on the current branch by default.
+- Do not create a separate Git worktree unless the user explicitly asks for one.
+- If useful work exists in a separate worktree, migrate it back into this folder, verify it here, then remove the extra worktree.
 - Preferred pattern:
   - Create: `git worktree add ..\\Prompt-queue-<branch-name> <branch-name>`
   - Or create new branch + worktree: `git worktree add -b <new-branch> ..\\Prompt-queue-<new-branch> main`
@@ -61,6 +63,7 @@ Live query: `gh issue list --repo sriharshaguthikonda/Prompt-queue --state open`
 - At minimum:
   - syntax checks for changed JS files
   - targeted manual verification for extension behavior
+- When changing `CONTENT_SCRIPT_VERSION` in `content.js`, update the matching `background.js` expected version and tests in the same commit. Run `rg "CONTENT_SCRIPT_VERSION|expectedVersion|actualVersion|<old-version>" background.js content.js tests` before committing.
 - If tests are skipped, document why in PR notes.
 
 ## Code Safety Rules
