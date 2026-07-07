@@ -168,6 +168,12 @@ const DEFAULT_MEMORY_SETTINGS = {
   debug: false,
 };
 
+const DEFAULT_PROMPT_JOBS_SETTINGS = {
+  enabled: false,
+  folder: 'C:\\Windows_software\\openai whisper\\prompt_jobs',
+  priority: 0,
+};
+
 const DEFAULT_SETTINGS = {
   stableMs: 10000,
   stableMinMs: 10000,
@@ -211,6 +217,7 @@ const DEFAULT_SETTINGS = {
   openNewChatPerPrompt: false,
   openNewChatPerPromptUrl: '',
   memory: DEFAULT_MEMORY_SETTINGS,
+  promptJobs: DEFAULT_PROMPT_JOBS_SETTINGS,
 };
 const CONTENT_SCRIPT_VERSION = '2026-06-12.response-timeout-owner-v2';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
@@ -401,6 +408,15 @@ function validateMemorySettings(input = {}) {
   };
 }
 
+function validatePromptJobsSettings(input = {}) {
+  const jobsInput = input && typeof input === 'object' ? input : {};
+  return {
+    enabled: jobsInput.enabled === true,
+    folder: typeof jobsInput.folder === 'string' ? jobsInput.folder.trim() : DEFAULT_PROMPT_JOBS_SETTINGS.folder,
+    priority: coerceNumber(jobsInput.priority, 0, 10, DEFAULT_PROMPT_JOBS_SETTINGS.priority),
+  };
+}
+
 function validateSettings(input = {}, options = {}) {
   const sanitizedUrl = sanitizeUrlOrEmpty(input.openNewChatPerPromptUrl);
   const targetResult = validateTargetSelectors(input.targetSelectors, input, options);
@@ -467,6 +483,7 @@ function validateSettings(input = {}, options = {}) {
     openNewChatPerPrompt: input.openNewChatPerPrompt === true,
     openNewChatPerPromptUrl: sanitizedUrl,
     memory: validateMemorySettings(input.memory || {}),
+    promptJobs: validatePromptJobsSettings(input.promptJobs || {}),
   };
 }
 
@@ -1622,7 +1639,11 @@ async function saveSettings(newSettings) {
   if (!Object.prototype.hasOwnProperty.call(incomingMemory, 'storedToken')) {
     nextMemory.storedToken = currentMemory.storedToken || '';
   }
-  const merged = validateSettings({ ...state.options, ...newSettings, memory: nextMemory }, { strict: true });
+  const currentPromptJobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
+  const incomingPromptJobs = newSettings?.promptJobs || {};
+  const nextPromptJobs = { ...currentPromptJobs, ...incomingPromptJobs };
+  const merged = validateSettings({ ...state.options, ...newSettings, memory: nextMemory, promptJobs: nextPromptJobs }, { strict: true });
+  const prevPromptJobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
   state.options = merged;
   applyDebugLoggingSetting(state.options?.debugLoggingEnabled === true);
   try {
@@ -1633,6 +1654,12 @@ async function saveSettings(newSettings) {
   }
   await broadcastSettingsUpdate();
   await ensureAutoConfirmContentScript();
+  if (
+    prevPromptJobs.enabled !== merged.promptJobs.enabled ||
+    prevPromptJobs.folder !== merged.promptJobs.folder
+  ) {
+    reconcilePromptJobsWatch();
+  }
 }
 
 if (self.__PROMPT_QUEUE_TEST__) {
@@ -2990,6 +3017,90 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
   await sendNextPrompt();
 }
 
+// Shared core behind the START_AUTOMATION message handler. Used both by the
+// onMessage listener (external callers, e.g. popup/side panel) and by the
+// prompt-jobs pipeline, which starts automation for a claimed job without a
+// message round-trip. Returns the same { ok, error } shape sendResponse used
+// to receive directly, so external behavior of the message handler is unchanged.
+async function startAutomationForTab(tabId, promptsInput, options = {}, { tabPromptGroups = null } = {}) {
+  console.log('[StartAutomation] Received request', {
+    running: state.running,
+    processing: state.processing,
+    currentIndex: state.currentIndex,
+    promptsInRequest: promptsInput?.length,
+    tabGroupsInRequest: tabPromptGroups?.length,
+    activeTabSessions: tabSessions.size,
+  });
+
+  const prompts = Array.isArray(promptsInput) ? promptsInput.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
+  const effectiveOptions = validateSettings({ ...state.options, ...options });
+  if (!tabId || prompts.length === 0) {
+    return { ok: false, error: "Missing tabId or prompts." };
+  }
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (!isSupportedUrl(tab?.url)) {
+      return { ok: false, error: 'Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.' };
+    }
+    const useParallelCheck = shouldUseParallelMode(effectiveOptions, tabPromptGroups);
+    const parallelPromptGroupsCheck = useParallelCheck ? resolveParallelPromptGroups(prompts, tabPromptGroups) : [];
+    if (useParallelCheck && parallelPromptGroupsCheck.length > PARALLEL_CONFIG.maxTabs) {
+      return { ok: false, error: `Parallel mode supports up to ${PARALLEL_CONFIG.maxTabs} prompts at a time.` };
+    }
+    if (useParallelCheck) {
+      const launchUrl = resolveParallelLaunchUrl(tab.url, effectiveOptions);
+      if (!launchUrl) {
+        return { ok: false, error: 'Parallel launch URL is invalid or unsupported.' };
+      }
+    }
+  } catch (e) {
+    return { ok: false, error: 'Unable to read active tab.' };
+  }
+
+  const useParallel = shouldUseParallelMode(effectiveOptions, tabPromptGroups);
+
+  if (!useParallel) {
+    const existingTabSession = tabSessions.get(tabId);
+    if (existingTabSession?.running) {
+      return { ok: false, error: "Automation is already running in this tab. Stop the current automation first." };
+    }
+    if (state.running) {
+      return { ok: false, error: "A global automation run is active. Stop it before starting tab-scoped automation." };
+    }
+    (async () => {
+      try {
+        await startTabSession({ prompts, tabId, options: effectiveOptions });
+      } catch (e) {
+        console.error('[StartAutomation][TabSession] Error:', e);
+        await emitTabSessionError(tabId, e);
+      }
+    })();
+    return { ok: true };
+  }
+
+  if (tabSessions.size > 0) {
+    return { ok: false, error: "Tab-scoped automations are already running. Stop them before starting a tab-group parallel run." };
+  }
+  if (state.running) {
+    console.log('[StartAutomation] Automation already running, REJECTING new start request');
+    return { ok: false, error: "Automation is already running. Stop the current automation first." };
+  }
+
+  (async () => {
+    try {
+      await startAutomation({ prompts, tabId, options: effectiveOptions, tabPromptGroups });
+    } catch (e) {
+      console.error('[StartAutomation] Error:', e);
+      state.running = false;
+      await saveState();
+      try {
+        chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(e), status: getStatus() });
+      } catch (_) {}
+    }
+  })();
+  return { ok: true };
+}
+
 function buildMessageText(text) {
   const {
     systemPrompt,
@@ -3194,91 +3305,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           return;
         }
         case "START_AUTOMATION": {
-          console.log('[StartAutomation] Received request', {
-            running: state.running,
-            processing: state.processing,
-            currentIndex: state.currentIndex,
-            promptsInRequest: message.prompts?.length,
-            tabGroupsInRequest: message.tabPromptGroups?.length,
-            activeTabSessions: tabSessions.size,
-          });
-          
-          const prompts = Array.isArray(message.prompts) ? message.prompts.filter((p) => typeof p === "string" && p.trim().length > 0) : [];
           const tabPromptGroups = Array.isArray(message.tabPromptGroups) ? message.tabPromptGroups : null;
-          const tabId = message.tabId;
-          const options = message.options || {};
-          const effectiveOptions = validateSettings({ ...state.options, ...options });
-          if (!tabId || prompts.length === 0) {
-            sendResponse({ ok: false, error: "Missing tabId or prompts." });
-            return;
-          }
-          try {
-            const tab = await chrome.tabs.get(tabId);
-            if (!isSupportedUrl(tab?.url)) {
-              sendResponse({ ok: false, error: 'Active tab not supported. Open ChatGPT/Gemini/Grok/Claude and try again.' });
-              return;
-            }
-            const useParallel = shouldUseParallelMode(effectiveOptions, tabPromptGroups);
-            const parallelPromptGroups = useParallel ? resolveParallelPromptGroups(prompts, tabPromptGroups) : [];
-            if (useParallel && parallelPromptGroups.length > PARALLEL_CONFIG.maxTabs) {
-              sendResponse({ ok: false, error: `Parallel mode supports up to ${PARALLEL_CONFIG.maxTabs} prompts at a time.` });
-              return;
-            }
-            if (useParallel) {
-              const launchUrl = resolveParallelLaunchUrl(tab.url, effectiveOptions);
-              if (!launchUrl) {
-                sendResponse({ ok: false, error: 'Parallel launch URL is invalid or unsupported.' });
-                return;
-              }
-            }
-          } catch (e) {
-            sendResponse({ ok: false, error: 'Unable to read active tab.' });
-            return;
-          }
-
-          const useParallel = shouldUseParallelMode(effectiveOptions, tabPromptGroups);
-
-          if (!useParallel) {
-            const existingTabSession = tabSessions.get(tabId);
-            if (existingTabSession?.running) {
-              sendResponse({ ok: false, error: "Automation is already running in this tab. Stop the current automation first." });
-              return;
-            }
-            if (state.running) {
-              sendResponse({ ok: false, error: "A global automation run is active. Stop it before starting tab-scoped automation." });
-              return;
-            }
-            sendResponse({ ok: true });
-            try {
-              await startTabSession({ prompts, tabId, options: effectiveOptions });
-            } catch (e) {
-              console.error('[StartAutomation][TabSession] Error:', e);
-              await emitTabSessionError(tabId, e);
-            }
-            return;
-          }
-
-          if (tabSessions.size > 0) {
-            sendResponse({ ok: false, error: "Tab-scoped automations are already running. Stop them before starting a tab-group parallel run." });
-            return;
-          }
-          if (state.running) {
-            console.log('[StartAutomation] Automation already running, REJECTING new start request');
-            sendResponse({ ok: false, error: "Automation is already running. Stop the current automation first." });
-            return;
-          }
-
-          sendResponse({ ok: true });
-          try {
-            await startAutomation({ prompts, tabId, options: effectiveOptions, tabPromptGroups });
-          } catch (e) {
-            console.error('[StartAutomation] Error:', e);
-            state.running = false;
-            await saveState();
-            try {
-              chrome.runtime.sendMessage({ type: "AUTOMATION_ERROR", error: String(e), status: getStatus() });
-            } catch (_) {}
-          }
+          const result = await startAutomationForTab(message.tabId, message.prompts, message.options || {}, { tabPromptGroups });
+          sendResponse(result);
           return;
         }
         case "STOP_AUTOMATION": {
@@ -4039,6 +4068,8 @@ chrome.runtime.onStartup.addListener(async () => {
     state.lastActivityTime = Date.now() - RECOVERY_CONFIG.staleThresholdMs - 1000;
     await saveState();
   }
+  await loadSettings();
+  reconcilePromptJobsWatch();
 });
 
 chrome.runtime.onInstalled.addListener(async () => {
@@ -4050,6 +4081,8 @@ chrome.runtime.onInstalled.addListener(async () => {
   if (transcriptionState.isEnabled && transcriptionState.watchFolder) {
     startTranscriptionPolling();
   }
+  await loadSettings();
+  reconcilePromptJobsWatch();
 });
 
 // ============ NOTIFICATIONS ============
@@ -4386,3 +4419,308 @@ function startTranscriptionPolling() {
 }
 
 // Transcription monitoring messages handled in main message handler above.
+
+// ============ PROMPT JOBS (voice command pipeline) ============
+//
+// External program drops job_<id>.json files into a watched folder. The
+// native host (native_host.py, already implemented) watches that folder over
+// a persistent chrome.runtime.connectNative port and pushes job_found for
+// each new file. Every browser profile that has promptJobs enabled sees the
+// same job_found push, so claiming is a cross-profile race arbitrated by the
+// native host via an atomic file rename (claim_job -> claim_result). Exactly
+// one profile wins; losers do nothing. priority staggers which profile tries
+// first (priority 0 claims instantly; higher priorities wait priority*1500ms
+// before attempting a claim, so a "designated" profile normally wins).
+const PROMPT_JOBS_CLAIMANT_STORAGE_KEY = 'promptJobsClaimantId';
+const PROMPT_JOBS_RECONNECT_BASE_MS = 1000;
+const PROMPT_JOBS_RECONNECT_MAX_MS = 30000;
+const PROMPT_JOBS_TAB_SETTLE_MS = 2000;
+
+let promptJobsPort = null;
+let promptJobsWatchedFolder = '';
+let promptJobsReconnectTimer = null;
+let promptJobsReconnectDelayMs = PROMPT_JOBS_RECONNECT_BASE_MS;
+let promptJobsClaimantIdCache = null;
+// jobFile -> { text, id, timer } for jobs currently waiting out their priority delay.
+const promptJobsPendingClaims = new Map();
+// jobFile -> { claimedFile } for jobs this profile is actively running, used to correlate finish_job.
+const promptJobsActiveRuns = new Map();
+
+async function getPromptJobsClaimantId() {
+  if (promptJobsClaimantIdCache) return promptJobsClaimantIdCache;
+  try {
+    const stored = await chrome.storage.local.get(PROMPT_JOBS_CLAIMANT_STORAGE_KEY);
+    if (typeof stored?.[PROMPT_JOBS_CLAIMANT_STORAGE_KEY] === 'string' && stored[PROMPT_JOBS_CLAIMANT_STORAGE_KEY]) {
+      promptJobsClaimantIdCache = stored[PROMPT_JOBS_CLAIMANT_STORAGE_KEY];
+      return promptJobsClaimantIdCache;
+    }
+  } catch (_) {}
+  const generated = crypto.randomUUID();
+  promptJobsClaimantIdCache = generated;
+  try {
+    await chrome.storage.local.set({ [PROMPT_JOBS_CLAIMANT_STORAGE_KEY]: generated });
+  } catch (e) {
+    console.error('[PromptJobs] Failed to persist claimant id:', e);
+  }
+  return generated;
+}
+
+function isAutomationActiveInThisProfile() {
+  return state.running === true || tabSessions.size > 0;
+}
+
+function promptJobsNotify(title, messageText) {
+  try {
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: chrome.runtime.getURL('images/icon.png'),
+      title,
+      message: messageText,
+    });
+  } catch (_) {}
+}
+
+// Reconcile the native port lifecycle against current settings. Safe to call
+// repeatedly: connects when enabled+folder and not already connected to that
+// folder, disconnects when disabled, reconnects when the folder changed.
+function reconcilePromptJobsWatch() {
+  const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
+  clearTimeout(promptJobsReconnectTimer);
+  promptJobsReconnectTimer = null;
+
+  if (!jobs.enabled || !jobs.folder) {
+    disconnectPromptJobsPort();
+    return;
+  }
+  if (promptJobsPort && promptJobsWatchedFolder === jobs.folder) {
+    return; // Already watching the right folder.
+  }
+  connectPromptJobsPort(jobs.folder);
+}
+
+function disconnectPromptJobsPort() {
+  clearTimeout(promptJobsReconnectTimer);
+  promptJobsReconnectTimer = null;
+  promptJobsReconnectDelayMs = PROMPT_JOBS_RECONNECT_BASE_MS;
+  if (promptJobsPort) {
+    try {
+      promptJobsPort.disconnect();
+    } catch (_) {}
+  }
+  promptJobsPort = null;
+  promptJobsWatchedFolder = '';
+  for (const pending of promptJobsPendingClaims.values()) {
+    clearTimeout(pending.timer);
+  }
+  promptJobsPendingClaims.clear();
+}
+
+function connectPromptJobsPort(folder) {
+  if (promptJobsPort) {
+    disconnectPromptJobsPort();
+  }
+  const memory = state.options?.memory || DEFAULT_MEMORY_SETTINGS;
+  try {
+    promptJobsPort = chrome.runtime.connectNative(memory.nativeHostName);
+  } catch (e) {
+    console.error('[PromptJobs] connectNative failed:', e);
+    promptJobsPort = null;
+    schedulePromptJobsReconnect();
+    return;
+  }
+  promptJobsWatchedFolder = folder;
+
+  promptJobsPort.onMessage.addListener((msg) => {
+    handlePromptJobsPortMessage(msg).catch((e) => {
+      console.error('[PromptJobs] Error handling port message:', e);
+    });
+  });
+  promptJobsPort.onDisconnect.addListener(() => {
+    const err = chrome.runtime.lastError;
+    console.log('[PromptJobs] Native port disconnected', { error: err?.message || null });
+    promptJobsPort = null;
+    promptJobsWatchedFolder = '';
+    const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
+    if (jobs.enabled && jobs.folder) {
+      schedulePromptJobsReconnect();
+    }
+  });
+
+  try {
+    promptJobsPort.postMessage({ type: 'watch_jobs', folder });
+    console.log('[PromptJobs] Sent watch_jobs', { folder });
+  } catch (e) {
+    console.error('[PromptJobs] Failed to post watch_jobs:', e);
+    schedulePromptJobsReconnect();
+  }
+}
+
+function schedulePromptJobsReconnect() {
+  if (promptJobsReconnectTimer) return;
+  const delay = promptJobsReconnectDelayMs;
+  promptJobsReconnectTimer = setTimeout(() => {
+    promptJobsReconnectTimer = null;
+    const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
+    if (!jobs.enabled || !jobs.folder) return;
+    connectPromptJobsPort(jobs.folder);
+  }, delay);
+  promptJobsReconnectDelayMs = Math.min(promptJobsReconnectDelayMs * 2, PROMPT_JOBS_RECONNECT_MAX_MS);
+}
+
+async function handlePromptJobsPortMessage(msg) {
+  switch (msg?.type) {
+    case 'watch_started': {
+      promptJobsReconnectDelayMs = PROMPT_JOBS_RECONNECT_BASE_MS;
+      console.log('[PromptJobs] watch_started', { folder: msg.folder });
+      return;
+    }
+    case 'job_found': {
+      await handleJobFound(msg);
+      return;
+    }
+    case 'claim_result': {
+      await handleClaimResult(msg);
+      return;
+    }
+    case 'finish_result': {
+      console.log('[PromptJobs] finish_result', msg);
+      return;
+    }
+    default: {
+      console.log('[PromptJobs] Unhandled port message', msg);
+      return;
+    }
+  }
+}
+
+// job_found arrives at every profile watching the folder. Ignore if this
+// profile is already busy; otherwise wait out this profile's priority delay
+// (0 = claim instantly) and re-check before attempting the claim, so a busy
+// profile that becomes free mid-wait still backs off correctly.
+async function handleJobFound(msg) {
+  const jobFile = msg?.jobFile;
+  if (!jobFile || promptJobsPendingClaims.has(jobFile) || promptJobsActiveRuns.has(jobFile)) {
+    return;
+  }
+  if (isAutomationActiveInThisProfile()) {
+    console.log('[PromptJobs] Ignoring job_found, automation already active', { jobFile });
+    return;
+  }
+
+  const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
+  const delayMs = Math.max(0, Number(jobs.priority) || 0) * 1500;
+
+  const attemptClaim = async () => {
+    promptJobsPendingClaims.delete(jobFile);
+    if (isAutomationActiveInThisProfile()) {
+      console.log('[PromptJobs] Skipping claim, automation became active during priority delay', { jobFile });
+      return;
+    }
+    if (!promptJobsPort) return;
+    const claimantId = await getPromptJobsClaimantId();
+    try {
+      promptJobsPort.postMessage({
+        type: 'claim_job',
+        folder: promptJobsWatchedFolder,
+        jobFile,
+        claimantId,
+      });
+      console.log('[PromptJobs] Sent claim_job', { jobFile });
+    } catch (e) {
+      console.error('[PromptJobs] Failed to post claim_job:', e);
+    }
+  };
+
+  if (delayMs <= 0) {
+    await attemptClaim();
+    return;
+  }
+  const timer = setTimeout(() => { attemptClaim(); }, delayMs);
+  promptJobsPendingClaims.set(jobFile, { text: msg.text, id: msg.id, timer });
+}
+
+async function handleClaimResult(msg) {
+  const jobFile = msg?.jobFile;
+  if (!msg?.ok) {
+    console.log('[PromptJobs] Lost claim race (or claim failed)', { jobFile });
+    return;
+  }
+  const claimedFile = msg.claimedFile;
+  const text = typeof msg.text === 'string' ? msg.text : '';
+  console.log('[PromptJobs] Claimed job', { jobFile, claimedFile, id: msg.id });
+  promptJobsActiveRuns.set(jobFile, { claimedFile });
+
+  if (!text.trim()) {
+    console.error('[PromptJobs] Claimed job has empty text, reporting error', { jobFile, claimedFile });
+    await finishPromptJob(claimedFile, 'error');
+    promptJobsActiveRuns.delete(jobFile);
+    promptJobsNotify('Voice prompt job failed', 'Claimed job had no text to send.');
+    return;
+  }
+
+  try {
+    const tab = await findOrCreatePromptJobsTab();
+    const result = await startAutomationForTab(tab.id, [text], state.options || {});
+    if (!result?.ok) {
+      throw new Error(result?.error || 'Automation refused to start.');
+    }
+    await finishPromptJob(claimedFile, 'done');
+    promptJobsNotify('Voice prompt sent', 'Prompt job was sent to ChatGPT.');
+  } catch (e) {
+    console.error('[PromptJobs] Failed to send claimed job:', e);
+    await finishPromptJob(claimedFile, 'error');
+    promptJobsNotify('Voice prompt job failed', e?.message || 'Could not send prompt to ChatGPT.');
+  } finally {
+    promptJobsActiveRuns.delete(jobFile);
+  }
+}
+
+async function finishPromptJob(claimedFile, status) {
+  if (!promptJobsPort || !claimedFile) return;
+  try {
+    promptJobsPort.postMessage({
+      type: 'finish_job',
+      folder: promptJobsWatchedFolder,
+      claimedFile,
+      status,
+    });
+  } catch (e) {
+    console.error('[PromptJobs] Failed to post finish_job:', e);
+  }
+}
+
+async function findOrCreatePromptJobsTab() {
+  const tabs = await chrome.tabs.query({ url: ['*://chatgpt.com/*', '*://chat.openai.com/*'] });
+  if (tabs.length > 0) {
+    const mostRecent = tabs.slice().sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+    return mostRecent;
+  }
+  const created = await chrome.tabs.create({ url: 'https://chatgpt.com/', active: false });
+  await waitForTabComplete(created.id);
+  await new Promise((resolve) => setTimeout(resolve, PROMPT_JOBS_TAB_SETTLE_MS));
+  return created;
+}
+
+function waitForTabComplete(tabId, { timeoutMs = 30000 } = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      clearTimeout(timeoutTimer);
+      resolve();
+    };
+    const listener = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') {
+        finish();
+      }
+    };
+    chrome.tabs.onUpdated.addListener(listener);
+    chrome.tabs.get(tabId, (tab) => {
+      if (chrome.runtime.lastError) return;
+      if (tab?.status === 'complete') finish();
+    });
+    const timeoutTimer = setTimeout(finish, timeoutMs);
+  });
+}

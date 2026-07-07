@@ -63,6 +63,13 @@ export async function loadSettingsIntoUI() {
       document.getElementById('debugLoggingEnabled').checked = s.debugLoggingEnabled === true;
       document.getElementById('openNewChatPerPrompt').checked = s.openNewChatPerPrompt === true;
       document.getElementById('openNewChatPerPromptUrl').value = s.openNewChatPerPromptUrl || '';
+      const promptJobs = s.promptJobs || {};
+      const promptJobsEnabled = document.getElementById('promptJobsEnabled');
+      if (promptJobsEnabled) promptJobsEnabled.checked = promptJobs.enabled === true;
+      const promptJobsFolder = document.getElementById('promptJobsFolder');
+      if (promptJobsFolder) promptJobsFolder.value = promptJobs.folder || '';
+      const promptJobsPriority = document.getElementById('promptJobsPriority');
+      if (promptJobsPriority) promptJobsPriority.value = Number.isFinite(Number(promptJobs.priority)) ? Number(promptJobs.priority) : 0;
       loadSendTimingSettingsIntoUI(s);
       loadTargetSettingsIntoUI(s);
       setDebugLoggingEnabled(s.debugLoggingEnabled === true);
@@ -126,6 +133,11 @@ export async function saveSettingsFromUI() {
       openNewChatPerPrompt: document.getElementById('openNewChatPerPrompt').checked,
       openNewChatPerPromptUrl: (document.getElementById('openNewChatPerPromptUrl').value || '').trim(),
       targetSelectors: targetValidation.targetSelectors,
+      promptJobs: {
+        enabled: document.getElementById('promptJobsEnabled')?.checked === true,
+        folder: (document.getElementById('promptJobsFolder')?.value || '').trim(),
+        priority: Number(document.getElementById('promptJobsPriority')?.value) || 0,
+      },
       ...readSendTimingSettingsFromUI(),
     };
     settings.watchedElementSelector = settings.targetSelectors.watchedElement || settings.watchedElementSelector;
@@ -163,7 +175,7 @@ export function initSettingsUI() {
     });
   }
 
-  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'enableRetryOnFailure', 'maxRetriesPerPrompt', 'retryDelaySec', 'systemPrompt', 'appendPromptText', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt'].forEach((id) => {
+  ['maxWaitSec', 'stableMinSec', 'stableMaxSec', 'pollSec', 'enableRetryOnFailure', 'maxRetriesPerPrompt', 'retryDelaySec', 'systemPrompt', 'appendPromptText', 'prependSystemPrompt', 'appendSystemPrompt', 'enableMaxWaitTimeout', 'autoConfirmDialogs', 'enableWatchedElementGate', 'watchedElementSelector', 'refreshTabBeforeEachPrompt', 'parallelOneTabPerPrompt', 'promptJobsEnabled', 'promptJobsFolder', 'promptJobsPriority'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', saveSettingsFromUI);
   });

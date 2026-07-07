@@ -778,6 +778,13 @@ document.getElementById('memorySettingsHeader')?.addEventListener('click', () =>
   content?.classList.toggle('collapsed');
 });
 
+document.getElementById('promptJobsHeader')?.addEventListener('click', () => {
+  const toggle = document.querySelector('#promptJobsHeader .collapsible-toggle');
+  const content = document.getElementById('promptJobsContent');
+  toggle?.classList.toggle('collapsed');
+  content?.classList.toggle('collapsed');
+});
+
 
 // Prompt counter
 const promptsTextarea = document.getElementById('prompts');
