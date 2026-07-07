@@ -8,6 +8,8 @@ import sys
 import json
 import struct
 import os
+import re
+import threading
 import time
 import glob
 from pathlib import Path
@@ -24,6 +26,11 @@ ALLOWED_MEMORY_TYPES = {
     "memory_projects",
     "memory_get",
 }
+JOB_FILE_RE = re.compile(r"^job_([A-Za-z0-9_-]+)\.json$")
+CLAIMED_JOB_FILE_RE = re.compile(
+    r"^job_([A-Za-z0-9_-]+)\.claimed\.([A-Za-z0-9_-]+)\.json$"
+)
+CLAIMANT_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 
 class TranscriptionMonitor:
     def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
@@ -32,13 +39,20 @@ class TranscriptionMonitor:
         self.running = True
         self.memory_base_url = memory_base_url.rstrip("/")
         self.http_open = http_open or urlopen
+        self.send_lock = threading.Lock()
+        self.job_claim_lock = threading.Lock()
+        self.job_watch_thread = None
+        self.job_watch_stop = None
+        self.job_watch_folder = ""
+        self.job_watch_announced = set()
         
     def send_message(self, message):
         """Send message to Chrome extension"""
         encoded_message = json.dumps(message).encode('utf-8')
-        sys.stdout.buffer.write(struct.pack('@I', len(encoded_message)))
-        sys.stdout.buffer.write(encoded_message)
-        sys.stdout.buffer.flush()
+        with self.send_lock:
+            sys.stdout.buffer.write(struct.pack('@I', len(encoded_message)))
+            sys.stdout.buffer.write(encoded_message)
+            sys.stdout.buffer.flush()
         
     def read_message(self):
         """Read message from Chrome extension"""
@@ -118,6 +132,15 @@ class TranscriptionMonitor:
         elif msg_type == 'stop_monitoring':
             self.watch_folder = ""
             return {"type": "monitoring_stopped"}
+
+        elif msg_type == 'claim_job':
+            return self.claim_job(message)
+
+        elif msg_type == 'finish_job':
+            return self.finish_job(message)
+
+        elif msg_type == 'watch_jobs':
+            return self.watch_jobs(message)
 
         elif msg_type in ALLOWED_MEMORY_TYPES:
             return self.handle_memory_message(message)
@@ -241,6 +264,125 @@ class TranscriptionMonitor:
         if "application/json" in content_type:
             return json.loads(text) if text else {}
         return text
+
+    def claim_job(self, message):
+        folder = message.get("folder", "")
+        job_file = message.get("jobFile", "")
+        match = JOB_FILE_RE.fullmatch(job_file)
+        if not match:
+            return {"type": "claim_result", "ok": False, "jobFile": job_file}
+
+        claimant_id = self.sanitize_claimant_id(message.get("claimantId", ""))
+        claimed_file = f"job_{match.group(1)}.claimed.{claimant_id}.json"
+        source_path = Path(folder) / job_file
+        claimed_path = Path(folder) / claimed_file
+
+        with self.job_claim_lock:
+            try:
+                os.rename(source_path, claimed_path)
+            except (FileNotFoundError, PermissionError):
+                return {"type": "claim_result", "ok": False, "jobFile": job_file}
+            except OSError:
+                return {"type": "claim_result", "ok": False, "jobFile": job_file}
+            job_id, text = self.read_job_payload(claimed_path)
+
+        return {
+            "type": "claim_result",
+            "ok": True,
+            "jobFile": job_file,
+            "claimedFile": claimed_file,
+            "id": job_id,
+            "text": text,
+        }
+
+    def finish_job(self, message):
+        folder = message.get("folder", "")
+        claimed_file = message.get("claimedFile", "")
+        status = message.get("status", "")
+        match = CLAIMED_JOB_FILE_RE.fullmatch(claimed_file)
+        if not match or status not in {"done", "error"}:
+            return {"type": "finish_result", "ok": False}
+
+        claimed_path = Path(folder) / claimed_file
+        try:
+            if status == "done":
+                claimed_path.unlink()
+            else:
+                error_path = Path(folder) / f"job_{match.group(1)}.error.json"
+                os.replace(claimed_path, error_path)
+            return {"type": "finish_result", "ok": True}
+        except OSError:
+            return {"type": "finish_result", "ok": False}
+
+    def watch_jobs(self, message):
+        folder = message.get("folder", "")
+        poll_ms = message.get("pollMs", 1000)
+        try:
+            poll_seconds = max(float(poll_ms) / 1000.0, 0.001)
+        except (TypeError, ValueError):
+            poll_seconds = 1.0
+
+        if folder != self.job_watch_folder:
+            self.stop_job_watcher()
+            self.job_watch_announced = set()
+        elif self.job_watch_thread and self.job_watch_thread.is_alive():
+            return {"type": "watch_started", "folder": folder}
+
+        self.job_watch_folder = folder
+        self.job_watch_stop = threading.Event()
+        self.job_watch_thread = threading.Thread(
+            target=self.job_watch_loop,
+            args=(folder, poll_seconds, self.job_watch_stop),
+            daemon=True,
+        )
+        self.job_watch_thread.start()
+        return {"type": "watch_started", "folder": folder}
+
+    def stop_job_watcher(self):
+        if self.job_watch_stop:
+            self.job_watch_stop.set()
+        if self.job_watch_thread and self.job_watch_thread.is_alive():
+            self.job_watch_thread.join(timeout=1.0)
+        self.job_watch_thread = None
+        self.job_watch_stop = None
+
+    def job_watch_loop(self, folder, poll_seconds, stop_event):
+        while not stop_event.is_set():
+            current_files = set()
+            try:
+                for path in Path(folder).glob("job_*.json"):
+                    name = path.name
+                    if ".claimed." in name or ".error." in name:
+                        continue
+                    if not JOB_FILE_RE.fullmatch(name):
+                        continue
+                    current_files.add(name)
+                    if name in self.job_watch_announced:
+                        continue
+                    job_id, text = self.read_job_payload(path)
+                    self.job_watch_announced.add(name)
+                    self.send_message({
+                        "type": "job_found",
+                        "jobFile": name,
+                        "id": job_id,
+                        "text": text,
+                    })
+                self.job_watch_announced.intersection_update(current_files)
+            except OSError:
+                self.job_watch_announced = set()
+            stop_event.wait(poll_seconds)
+
+    def read_job_payload(self, path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("id"), data.get("text")
+        except (OSError, json.JSONDecodeError, TypeError):
+            return None, None
+
+    def sanitize_claimant_id(self, claimant_id):
+        sanitized = CLAIMANT_SAFE_RE.sub("", str(claimant_id or ""))
+        return sanitized or "claimant"
             
     def read_state_file(self, state_file):
         """Read the state file content"""
