@@ -1,13 +1,20 @@
+import inspect
 import json
+import os
 import threading
 import time
 
 import native_host
 
 
-def write_job(path, job_id="abc", text="hello"):
+def write_job(path, job_id="abc", text="hello", want_result=False, source=None):
+    payload = {"id": job_id, "text": text, "ts": 123}
+    if want_result:
+        payload["want_result"] = True
+    if source:
+        payload["source"] = source
     path.write_text(
-        json.dumps({"id": job_id, "text": text, "ts": 123}),
+        json.dumps(payload),
         encoding="utf-8",
     )
 
@@ -74,6 +81,126 @@ def test_finish_job_done_deletes_and_error_renames(tmp_path):
     assert not done_file.exists()
     assert not error_file.exists()
     assert (tmp_path / "job_error.error.json").exists()
+
+
+def test_finish_job_want_result_done_writes_result_and_removes_claim(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    claimed_file = tmp_path / "job_bridge.claimed.worker_1.json"
+    write_job(claimed_file, job_id="bridge", text="prompt text", want_result=True)
+
+    response = monitor.handle_message({
+        "type": "finish_job",
+        "folder": str(tmp_path),
+        "claimedFile": claimed_file.name,
+        "status": "done",
+        "responseText": "assistant answer",
+    })
+
+    result_file = tmp_path / "result_bridge.json"
+    assert response == {"type": "finish_result", "ok": True}
+    assert not claimed_file.exists()
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["id"] == "bridge"
+    assert result["status"] == "done"
+    assert result["text"] == "assistant answer"
+    assert result["error"] is None
+    assert result["truncated"] is False
+    assert result["text_chars"] == len("assistant answer")
+    assert "ts" in result
+
+
+def test_finish_job_want_result_error_writes_error_result(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    claimed_file = tmp_path / "job_bridge_err.claimed.worker_1.json"
+    write_job(claimed_file, job_id="bridge_err", text="prompt text", want_result=True)
+
+    response = monitor.handle_message({
+        "type": "finish_job",
+        "folder": str(tmp_path),
+        "claimedFile": claimed_file.name,
+        "status": "error",
+        "error": "missing_response",
+    })
+
+    result = json.loads((tmp_path / "result_bridge_err.json").read_text(encoding="utf-8"))
+    assert response == {"type": "finish_result", "ok": True}
+    assert not claimed_file.exists()
+    assert not (tmp_path / "job_bridge_err.error.json").exists()
+    assert result["id"] == "bridge_err"
+    assert result["status"] == "error"
+    assert result["text"] == ""
+    assert result["error"] == "missing_response"
+    assert result["truncated"] is False
+    assert result["text_chars"] == 0
+
+
+def test_finish_job_voice_job_writes_no_result(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    claimed_file = tmp_path / "job_voice.claimed.worker_1.json"
+    write_job(claimed_file, job_id="voice", text="voice prompt")
+
+    response = monitor.handle_message({
+        "type": "finish_job",
+        "folder": str(tmp_path),
+        "claimedFile": claimed_file.name,
+        "status": "done",
+        "responseText": "ignored",
+    })
+
+    assert response == {"type": "finish_result", "ok": True}
+    assert not claimed_file.exists()
+    assert not (tmp_path / "result_voice.json").exists()
+
+
+def test_finish_job_want_result_truncates_text(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    claimed_file = tmp_path / "job_long.claimed.worker_1.json"
+    write_job(claimed_file, job_id="long", text="prompt text", want_result=True)
+    response_text = "x" * (native_host.PROMPT_JOB_RESULT_TEXT_CHARS + 5)
+
+    response = monitor.handle_message({
+        "type": "finish_job",
+        "folder": str(tmp_path),
+        "claimedFile": claimed_file.name,
+        "status": "done",
+        "responseText": response_text,
+    })
+
+    result = json.loads((tmp_path / "result_long.json").read_text(encoding="utf-8"))
+    assert response == {"type": "finish_result", "ok": True}
+    assert result["truncated"] is True
+    assert result["text_chars"] == len(response_text)
+    assert len(result["text"]) == native_host.PROMPT_JOB_RESULT_TEXT_CHARS
+
+
+def test_watch_jobs_claim_expired_writes_error_result(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.send_message = lambda message: None
+    claimed_file = tmp_path / "job_expired.claimed.worker_1.json"
+    write_job(claimed_file, job_id="expired", text="prompt text", want_result=True)
+    old_time = time.time() - 10
+    os.utime(claimed_file, (old_time, old_time))
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+        "claimTtlSeconds": 1,
+    })
+    wait_for(lambda: (tmp_path / "result_expired.json").exists())
+    monitor.stop_job_watcher()
+
+    result = json.loads((tmp_path / "result_expired.json").read_text(encoding="utf-8"))
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert not claimed_file.exists()
+    assert result["status"] == "error"
+    assert result["error"] == "claim_expired"
+
+
+def test_result_writer_uses_tmp_then_replace():
+    source = inspect.getsource(native_host.TranscriptionMonitor.write_result_file)
+    assert ".tmp" in source
+    assert "os.replace" in source
 
 
 def test_watch_jobs_announces_once_and_reannounces_after_recreate(tmp_path):

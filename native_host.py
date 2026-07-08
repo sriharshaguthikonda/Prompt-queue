@@ -12,6 +12,7 @@ import re
 import threading
 import time
 import glob
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
@@ -30,8 +31,12 @@ JOB_FILE_RE = re.compile(r"^job_([A-Za-z0-9_-]+)\.json$")
 CLAIMED_JOB_FILE_RE = re.compile(
     r"^job_([A-Za-z0-9_-]+)\.claimed\.([A-Za-z0-9_-]+)\.json$"
 )
+RESULT_FILE_RE = re.compile(r"^result_([A-Za-z0-9_-]+)\.json$")
 CLAIMANT_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS = 300
+PROMPT_JOB_RESULT_TEXT_CHARS = 20000
+PROMPT_JOB_CLAIM_TTL_SECONDS = 300
+PROMPT_JOB_RESULT_MAX_AGE_SECONDS = JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
 
 class TranscriptionMonitor:
     def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
@@ -46,6 +51,8 @@ class TranscriptionMonitor:
         self.job_watch_stop = None
         self.job_watch_folder = ""
         self.job_watch_announced = set()
+        self.prompt_job_claim_ttl_seconds = PROMPT_JOB_CLAIM_TTL_SECONDS
+        self.prompt_job_result_max_age_seconds = PROMPT_JOB_RESULT_MAX_AGE_SECONDS
         
     def send_message(self, message):
         """Send message to Chrome extension"""
@@ -285,16 +292,22 @@ class TranscriptionMonitor:
                 return {"type": "claim_result", "ok": False, "jobFile": job_file}
             except OSError:
                 return {"type": "claim_result", "ok": False, "jobFile": job_file}
-            job_id, text = self.read_job_payload(claimed_path)
+            payload = self.read_job_payload(claimed_path)
+            job_id = payload.get("id")
+            text = payload.get("text")
 
-        return {
+        result = {
             "type": "claim_result",
             "ok": True,
             "jobFile": job_file,
             "claimedFile": claimed_file,
             "id": job_id,
             "text": text,
+            "wantResult": payload.get("want_result") is True,
         }
+        if payload.get("source"):
+            result["source"] = payload.get("source")
+        return result
 
     def finish_job(self, message):
         folder = message.get("folder", "")
@@ -306,11 +319,31 @@ class TranscriptionMonitor:
 
         claimed_path = Path(folder) / claimed_file
         try:
+            payload = self.read_job_payload(claimed_path)
+            want_result = payload.get("want_result") is True
             if status == "done":
+                if want_result:
+                    self.write_result_file(
+                        Path(folder),
+                        match.group(1),
+                        status,
+                        message.get("responseText", ""),
+                        None,
+                    )
                 claimed_path.unlink()
             else:
-                error_path = Path(folder) / f"job_{match.group(1)}.error.json"
-                os.replace(claimed_path, error_path)
+                if want_result:
+                    self.write_result_file(
+                        Path(folder),
+                        match.group(1),
+                        status,
+                        "",
+                        message.get("error") or status,
+                    )
+                    claimed_path.unlink()
+                else:
+                    error_path = Path(folder) / f"job_{match.group(1)}.error.json"
+                    os.replace(claimed_path, error_path)
             return {"type": "finish_result", "ok": True}
         except OSError:
             return {"type": "finish_result", "ok": False}
@@ -318,6 +351,14 @@ class TranscriptionMonitor:
     def watch_jobs(self, message):
         folder = message.get("folder", "")
         poll_ms = message.get("pollMs", 1000)
+        self.prompt_job_claim_ttl_seconds = self.coerce_seconds(
+            message.get("claimTtlSeconds"),
+            PROMPT_JOB_CLAIM_TTL_SECONDS,
+        )
+        self.prompt_job_result_max_age_seconds = self.coerce_seconds(
+            message.get("resultMaxAgeSeconds"),
+            PROMPT_JOB_RESULT_MAX_AGE_SECONDS,
+        )
         try:
             poll_seconds = max(float(poll_ms) / 1000.0, 0.001)
         except (TypeError, ValueError):
@@ -351,6 +392,8 @@ class TranscriptionMonitor:
         while not stop_event.is_set():
             current_files = set()
             try:
+                self.write_expired_claim_results(Path(folder))
+                self.cleanup_stale_result_files(Path(folder))
                 for path in Path(folder).glob("job_*.json"):
                     name = path.name
                     if ".claimed." in name or ".error." in name:
@@ -365,16 +408,22 @@ class TranscriptionMonitor:
                             continue
                     except OSError:
                         continue
-                    job_id, text = self.read_job_payload(path)
+                    payload = self.read_job_payload(path)
+                    job_id = payload.get("id")
+                    text = payload.get("text")
                     if not self.is_usable_job_payload(job_id, text):
                         continue
                     self.job_watch_announced.add(name)
-                    self.send_message({
+                    message = {
                         "type": "job_found",
                         "jobFile": name,
                         "id": job_id,
                         "text": text,
-                    })
+                        "wantResult": payload.get("want_result") is True,
+                    }
+                    if payload.get("source"):
+                        message["source"] = payload.get("source")
+                    self.send_message(message)
                 self.job_watch_announced.intersection_update(current_files)
             except OSError:
                 self.job_watch_announced = set()
@@ -384,9 +433,99 @@ class TranscriptionMonitor:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data.get("id"), data.get("text")
+            source = data.get("source")
+            return {
+                "id": data.get("id"),
+                "text": data.get("text"),
+                "want_result": data.get("want_result") is True,
+                "source": source if isinstance(source, str) else "",
+            }
         except (OSError, json.JSONDecodeError, TypeError):
-            return None, None
+            return {
+                "id": None,
+                "text": None,
+                "want_result": False,
+                "source": "",
+            }
+
+    def write_result_file(self, folder, job_id, status, text, error=None, reason=None):
+        response_text = text if isinstance(text, str) else ""
+        text_chars = len(response_text)
+        truncated = text_chars > PROMPT_JOB_RESULT_TEXT_CHARS
+        if truncated:
+            response_text = response_text[:PROMPT_JOB_RESULT_TEXT_CHARS]
+        payload = {
+            "id": job_id,
+            "status": status,
+            "text": response_text,
+            "error": None if status == "done" else str(error or status),
+            "truncated": truncated,
+            "text_chars": text_chars,
+            "ts": datetime.now(timezone.utc).isoformat(),
+        }
+        if reason:
+            payload["reason"] = reason
+        result_path = folder / f"result_{job_id}.json"
+        tmp_path = folder / f".result_{job_id}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp_path, result_path)
+        finally:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+
+    def write_expired_claim_results(self, folder):
+        now = time.time()
+        for path in folder.glob("job_*.claimed.*.json"):
+            match = CLAIMED_JOB_FILE_RE.fullmatch(path.name)
+            if not match:
+                continue
+            result_path = folder / f"result_{match.group(1)}.json"
+            try:
+                if now - path.stat().st_mtime <= self.prompt_job_claim_ttl_seconds:
+                    continue
+            except OSError:
+                continue
+            payload = self.read_job_payload(path)
+            if payload.get("want_result") is not True:
+                continue
+            if not result_path.exists():
+                self.write_result_file(
+                    folder,
+                    match.group(1),
+                    "error",
+                    "",
+                    "claim_expired",
+                    reason="claim_expired",
+                )
+            try:
+                path.unlink()
+            except OSError:
+                pass
+
+    def cleanup_stale_result_files(self, folder):
+        now = time.time()
+        for path in folder.glob("result_*.json"):
+            if not RESULT_FILE_RE.fullmatch(path.name):
+                continue
+            try:
+                if now - path.stat().st_mtime > self.prompt_job_result_max_age_seconds:
+                    path.unlink()
+            except OSError:
+                pass
+
+    def coerce_seconds(self, value, fallback):
+        try:
+            seconds = float(value)
+        except (TypeError, ValueError):
+            return fallback
+        if seconds <= 0:
+            return fallback
+        return seconds
 
     def is_usable_job_payload(self, job_id, text):
         return (
