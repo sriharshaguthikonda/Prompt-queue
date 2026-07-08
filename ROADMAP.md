@@ -19,8 +19,8 @@ Current sidepanel branch:
 | ChatGPT send regression + native host install incident | [plans/incident-2026-05-31-chatgpt-send-native-host.md](plans/incident-2026-05-31-chatgpt-send-native-host.md) | implemented in code; live verify + residual hardening pending |
 | ChatGPT send hardening + composer visibility | [plans/phase-chatgpt-send-hardening.md](plans/phase-chatgpt-send-hardening.md) | in progress |
 | Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; automated tests pass; manual browser smokes pending |
-| Bridge → ChatGPT round-trip (result return path) | [plans/phase-bridge-chatgpt-roundtrip.md](plans/phase-bridge-chatgpt-roundtrip.md) | in progress |
-| Sidepanel visual hierarchy polish (accents, button tiers) | this file, see UI Direction below | in progress |
+| Bridge → ChatGPT round-trip (result return path) | [plans/phase-bridge-chatgpt-roundtrip.md](plans/phase-bridge-chatgpt-roundtrip.md) | implemented; native host + extension tests green; live browser E2E pending |
+| Sidepanel visual hierarchy polish (accents, button tiers) | this file, see UI Direction below | implemented |
 
 ## Planned Hardening Phases
 
