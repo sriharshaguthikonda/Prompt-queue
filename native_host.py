@@ -31,6 +31,7 @@ CLAIMED_JOB_FILE_RE = re.compile(
     r"^job_([A-Za-z0-9_-]+)\.claimed\.([A-Za-z0-9_-]+)\.json$"
 )
 CLAIMANT_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
+JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS = 300
 
 class TranscriptionMonitor:
     def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
@@ -359,7 +360,14 @@ class TranscriptionMonitor:
                     current_files.add(name)
                     if name in self.job_watch_announced:
                         continue
+                    try:
+                        if time.time() - path.stat().st_mtime > JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS:
+                            continue
+                    except OSError:
+                        continue
                     job_id, text = self.read_job_payload(path)
+                    if not self.is_usable_job_payload(job_id, text):
+                        continue
                     self.job_watch_announced.add(name)
                     self.send_message({
                         "type": "job_found",
@@ -379,6 +387,14 @@ class TranscriptionMonitor:
             return data.get("id"), data.get("text")
         except (OSError, json.JSONDecodeError, TypeError):
             return None, None
+
+    def is_usable_job_payload(self, job_id, text):
+        return (
+            isinstance(job_id, str)
+            and bool(job_id.strip())
+            and isinstance(text, str)
+            and bool(text.strip())
+        )
 
     def sanitize_claimant_id(self, claimant_id):
         sanitized = CLAIMANT_SAFE_RE.sub("", str(claimant_id or ""))

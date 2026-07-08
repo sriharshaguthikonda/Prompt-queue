@@ -110,6 +110,39 @@ def test_watch_jobs_announces_once_and_reannounces_after_recreate(tmp_path):
     assert [message["text"] for message in messages] == ["first", "second"]
 
 
+def test_watch_jobs_retries_unreadable_payload_without_announcing(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    sent = []
+    sent_lock = threading.Lock()
+
+    def capture(message):
+        with sent_lock:
+            sent.append(message)
+
+    monitor.send_message = capture
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+    })
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+
+    job_file = tmp_path / "job_retry.json"
+    job_file.write_text("{", encoding="utf-8")
+    time.sleep(0.08)
+    assert job_messages(sent) == []
+    assert "job_retry.json" not in monitor.job_watch_announced
+
+    write_job(job_file, job_id="retry", text="ready")
+    wait_for(lambda: len(job_messages(sent)) == 1)
+    monitor.stop_job_watcher()
+
+    messages = job_messages(sent)
+    assert messages[0]["jobFile"] == "job_retry.json"
+    assert messages[0]["id"] == "retry"
+    assert messages[0]["text"] == "ready"
+
+
 def test_claim_job_rejects_path_traversal_and_nested_paths(tmp_path):
     monitor = native_host.TranscriptionMonitor()
     outside = tmp_path.parent / "evil.json"

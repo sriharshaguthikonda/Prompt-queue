@@ -4704,11 +4704,14 @@ async function findOrCreatePromptJobsTab() {
 function waitForTabComplete(tabId, { timeoutMs = 30000 } = {}) {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = () => {
+    let timeoutTimer = null;
+    const finish = ({ clearTimer = true } = {}) => {
       if (settled) return;
       settled = true;
       chrome.tabs.onUpdated.removeListener(listener);
-      clearTimeout(timeoutTimer);
+      if (clearTimer && timeoutTimer) {
+        clearTimeout(timeoutTimer);
+      }
       resolve();
     };
     const listener = (updatedTabId, changeInfo) => {
@@ -4721,6 +4724,8 @@ function waitForTabComplete(tabId, { timeoutMs = 30000 } = {}) {
       if (chrome.runtime.lastError) return;
       if (tab?.status === 'complete') finish();
     });
-    const timeoutTimer = setTimeout(finish, timeoutMs);
+    timeoutTimer = setTimeout(() => {
+      finish({ clearTimer: false });
+    }, timeoutMs);
   });
 }
