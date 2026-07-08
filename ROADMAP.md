@@ -19,6 +19,8 @@ Current sidepanel branch:
 | ChatGPT send regression + native host install incident | [plans/incident-2026-05-31-chatgpt-send-native-host.md](plans/incident-2026-05-31-chatgpt-send-native-host.md) | implemented in code; live verify + residual hardening pending |
 | ChatGPT send hardening + composer visibility | [plans/phase-chatgpt-send-hardening.md](plans/phase-chatgpt-send-hardening.md) | in progress |
 | Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; automated tests pass; manual browser smokes pending |
+| Bridge → ChatGPT round-trip (result return path) | [plans/phase-bridge-chatgpt-roundtrip.md](plans/phase-bridge-chatgpt-roundtrip.md) | in progress |
+| Sidepanel visual hierarchy polish (accents, button tiers) | this file, see UI Direction below | in progress |
 
 ## Planned Hardening Phases
 
@@ -26,6 +28,9 @@ Current sidepanel branch:
 |---|---|---|
 | Content/send-path modularization | [plans/phase-content-script-modularization.md](plans/phase-content-script-modularization.md) | proposed |
 | Send timing + cross-tab coordination + status controls | [plans/phase-send-timing-status-controls.md](plans/phase-send-timing-status-controls.md) | in progress |
+| Send-lock escalation ladder: L2 desktop-level (next, separate session) → L3 LAN coordinator → L4 router-level | [plans/phase-send-lock-escalation.md](plans/phase-send-lock-escalation.md) | proposed |
+| Multi-account ChatGPT support | [plans/phase-send-lock-escalation.md](plans/phase-send-lock-escalation.md) (related items) | roadmap only |
+| Bridge targets beyond ChatGPT: Claude, Gemini, Grok, other chat sites | [plans/phase-send-lock-escalation.md](plans/phase-send-lock-escalation.md) (related items) | roadmap only |
 
 Default choices for the timing/status phase unless overridden in `Q and A.md`:
 
@@ -69,6 +74,19 @@ Success target:
 - Insert a managed `C_MEMORY_BROWSER_PACK` block into the prompt box without duplicating previous packs.
 - Store private extension settings in `chrome.storage.local`, not `chrome.storage.sync`.
 - Never log raw prompt text, clipboard text, selected text, tokens, or memory contents.
+
+## UI Direction
+
+The side panel is a flat stack of visually equal cards with one emerald accent — hard to scan. Direction (no rainbow, no framework, `styles.css` only):
+
+- Elevate the primary workflow: queue card visually distinct from secondary collapsible cards (Memory, Jobs, Monitoring, History).
+- 2-3 hues total: existing emerald primary, one secondary hue, semantic danger/warn tokens.
+- Button tiers: primary solid (Start), secondary outline (Pause/Resume/Stop), tertiary ghost (preset/utility pills).
+- Clearer collapsible affordance and a stronger status/progress area.
+
+## External Bridge Direction
+
+Prompt Queue is the browser arm of `mcp-model-bridge`: agents submit prompts as job files, the extension drives the chat site, the native host returns captured responses as result files. ChatGPT first ([plans/phase-bridge-chatgpt-roundtrip.md](plans/phase-bridge-chatgpt-roundtrip.md)); multi-account and Claude/Gemini/Grok targets are roadmap-only ([plans/phase-send-lock-escalation.md](plans/phase-send-lock-escalation.md)).
 
 ## Backend Contract
 
