@@ -40,7 +40,7 @@
   });
 })();
 
-importScripts('prompt-queue-constants.js', 'background-parallel-utils.js');
+importScripts('prompt-queue-constants.js', 'background-parallel-utils.js', 'background-prompt-jobs.js');
 const PQ_CONSTANTS = self.PromptQueueConstants || {};
 const MESSAGE_TYPES = PQ_CONSTANTS.MESSAGE_TYPES || {};
 const STORAGE_KEYS = PQ_CONSTANTS.STORAGE_KEYS || {};
@@ -1055,6 +1055,11 @@ function cloneTabSessionForStorage(session) {
     lastActivityTime: Number(session.lastActivityTime || Date.now()),
     processing: session.processing === true,
     currentPromptId: session.currentPromptId || null,
+    promptJobCorrelation: session.promptJobCorrelation
+      ? self.BackgroundPromptJobs.normalizePromptJobCorrelation(session.promptJobCorrelation, {
+        allowMissingPromptId: true,
+      })
+      : null,
     currentRetryCount: Number(session.currentRetryCount || 0),
     promptStartTime: Number(session.promptStartTime || 0),
     responseDurations: Array.isArray(session.responseDurations) ? session.responseDurations.slice(-20) : [],
@@ -1093,6 +1098,11 @@ async function loadTabSessions() {
         lastActivityTime: Number(rawSession.lastActivityTime || Date.now()),
         processing: rawSession.processing === true,
         currentPromptId: rawSession.currentPromptId || null,
+        promptJobCorrelation: rawSession.promptJobCorrelation
+          ? self.BackgroundPromptJobs.normalizePromptJobCorrelation(rawSession.promptJobCorrelation, {
+            allowMissingPromptId: true,
+          })
+          : null,
         currentRetryCount: Number(rawSession.currentRetryCount || 0),
         promptStartTime: Number(rawSession.promptStartTime || 0),
         responseDurations: Array.isArray(rawSession.responseDurations) ? rawSession.responseDurations.slice(-20) : [],
@@ -1198,6 +1208,9 @@ async function stopTabSession(tabId, { reason = 'stoppedByUser', emitComplete = 
   if (!session) return false;
   releaseSendLease(session.currentPromptId, 'stop-tab-session');
   clearTabSessionRetryTimer(tabId);
+  if (session.promptJobCorrelation?.wantResult) {
+    await finishPromptJobCorrelation(session, 'error', { error: reason });
+  }
   const completionStatus = {
     ...buildTabSessionStatus(session),
     running: false,
@@ -1209,6 +1222,37 @@ async function stopTabSession(tabId, { reason = 'stoppedByUser', emitComplete = 
     await emitTabSessionComplete(tabId, completionStatus, reason);
   }
   return true;
+}
+
+function buildPromptJobContentOptions(options, correlation, promptText) {
+  if (!correlation?.wantResult) {
+    return options;
+  }
+  return {
+    ...options,
+    promptJob: {
+      wantResult: true,
+      jobId: correlation.jobId || null,
+      promptId: correlation.promptId || null,
+      source: correlation.source || null,
+      expectedTextLength: String(promptText || '').length,
+    },
+  };
+}
+
+async function finishPromptJobCorrelation(session, status, details = {}) {
+  const correlation = session?.promptJobCorrelation;
+  if (!correlation?.wantResult || !correlation.claimedFile) return false;
+  const finished = await finishPromptJob(correlation.claimedFile, status, {
+    folder: correlation.folder || promptJobsWatchedFolder,
+    responseText: details.responseText,
+    error: details.error,
+  });
+  if (finished) {
+    session.promptJobCorrelation = null;
+    await saveTabSessions();
+  }
+  return finished;
 }
 
 async function scheduleTabSessionRetry(tabId, errorMessage, source) {
@@ -1289,6 +1333,15 @@ async function sendNextPromptForTabSession(tabId) {
   session.promptStartTime = Date.now();
   session.processing = true;
   session.currentPromptId = `tab_${tabId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  if (session.promptJobCorrelation?.wantResult) {
+    session.promptJobCorrelation = self.BackgroundPromptJobs.normalizePromptJobCorrelation(
+      {
+        ...session.promptJobCorrelation,
+        promptId: session.currentPromptId,
+      },
+      { allowMissingPromptId: false },
+    );
+  }
   await saveTabSessions();
   await emitTabSessionProgress(tabId);
 
@@ -1317,7 +1370,7 @@ async function sendNextPromptForTabSession(tabId) {
       text: promptText,
       index: session.currentIndex,
       total: session.prompts.length,
-      options: session.options,
+      options: buildPromptJobContentOptions(session.options, session.promptJobCorrelation, promptText),
       promptId: session.currentPromptId,
     });
   } catch (err) {
@@ -1330,6 +1383,11 @@ async function sendNextPromptForTabSession(tabId) {
       error: rawSendError,
       surfacedError: sendError,
     });
+    if (session.promptJobCorrelation?.wantResult) {
+      await finishPromptJobCorrelation(session, 'error', { error: sendError });
+      await stopTabSession(tabId, { reason: 'completedWithErrors', emitComplete: true });
+      return;
+    }
     const retried = await scheduleTabSessionRetry(tabId, sendError, 'sendNextPromptForTabSession');
     if (retried) {
       return;
@@ -1339,7 +1397,7 @@ async function sendNextPromptForTabSession(tabId) {
   }
 }
 
-async function startTabSession({ prompts, tabId, options }) {
+async function startTabSession({ prompts, tabId, options, promptJobCorrelation = null }) {
   if (!Number.isInteger(tabId)) {
     throw new Error('Missing tabId for tab session.');
   }
@@ -1363,6 +1421,11 @@ async function startTabSession({ prompts, tabId, options }) {
     stableCountdownMs: 0,
     recoveryAttempts: 0,
     stepStatus: null,
+    promptJobCorrelation: promptJobCorrelation
+      ? self.BackgroundPromptJobs.normalizePromptJobCorrelation(promptJobCorrelation, {
+        allowMissingPromptId: true,
+      })
+      : null,
   };
   tabSessions.set(tabId, session);
   await saveTabSessions();
@@ -1832,7 +1895,7 @@ async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
-      files: ["content-targets.js", "content-input.js", "content-status.js", "content-chat-state.js", "content.js"],
+      files: ["background-prompt-jobs.js", "content-targets.js", "content-input.js", "content-status.js", "content-chat-state.js", "content.js"],
     });
   } catch (err) {
     console.error("Failed to inject content script:", err);
@@ -3022,7 +3085,7 @@ async function startAutomation({ prompts, tabId, options, tabPromptGroups }) {
 // prompt-jobs pipeline, which starts automation for a claimed job without a
 // message round-trip. Returns the same { ok, error } shape sendResponse used
 // to receive directly, so external behavior of the message handler is unchanged.
-async function startAutomationForTab(tabId, promptsInput, options = {}, { tabPromptGroups = null } = {}) {
+async function startAutomationForTab(tabId, promptsInput, options = {}, { tabPromptGroups = null, promptJobCorrelation = null } = {}) {
   console.log('[StartAutomation] Received request', {
     running: state.running,
     processing: state.processing,
@@ -3069,7 +3132,7 @@ async function startAutomationForTab(tabId, promptsInput, options = {}, { tabPro
     }
     (async () => {
       try {
-        await startTabSession({ prompts, tabId, options: effectiveOptions });
+        await startTabSession({ prompts, tabId, options: effectiveOptions, promptJobCorrelation });
       } catch (e) {
         console.error('[StartAutomation][TabSession] Error:', e);
         await emitTabSessionError(tabId, e);
@@ -3551,7 +3614,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const completedAt = Date.now();
             const completedPromptIndex = Number(session.currentIndex || 0);
             const durationMs = pushPromptDuration(session, session.promptStartTime, completedAt);
-            if (!message.error && message.stoppedByStopWord !== true) {
+            const hasPromptJobResult = session.promptJobCorrelation?.wantResult === true;
+            const promptJobEmptyResponse = hasPromptJobResult
+              && !message.error
+              && message.stoppedByStopWord !== true
+              && self.BackgroundPromptJobs.isEmptyResponse(message.responseText);
+            if (!message.error && message.stoppedByStopWord !== true && !promptJobEmptyResponse) {
               await recordCapturedResponse({
                 promptId: session.currentPromptId,
                 promptIndex: completedPromptIndex,
@@ -3570,6 +3638,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             session.recoveryAttempts = 0;
 
             if (message.error) {
+              if (hasPromptJobResult) {
+                await finishPromptJobCorrelation(session, 'error', { error: message.error });
+                await stopTabSession(tabId, { reason: 'completedWithErrors', emitComplete: true });
+                return;
+              }
               const retried = await scheduleTabSessionRetry(tabId, String(message.error), 'RESPONSE_COMPLETE');
               if (retried) {
                 return;
@@ -3580,8 +3653,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             }
 
             if (message.stoppedByStopWord) {
+              if (hasPromptJobResult) {
+                await finishPromptJobCorrelation(session, 'error', { error: 'stopped_by_stop_word' });
+              }
               await stopTabSession(tabId, { reason: 'stoppedByStopWord', emitComplete: true });
               return;
+            }
+
+            if (promptJobEmptyResponse) {
+              await finishPromptJobCorrelation(session, 'error', { error: 'empty_response' });
+              await stopTabSession(tabId, { reason: 'completedWithErrors', emitComplete: true });
+              return;
+            }
+
+            if (hasPromptJobResult) {
+              await finishPromptJobCorrelation(session, 'done', { responseText: message.responseText || '' });
             }
 
             session.currentRetryCount = 0;
@@ -4647,12 +4733,28 @@ async function handleClaimResult(msg) {
   }
   const claimedFile = msg.claimedFile;
   const text = typeof msg.text === 'string' ? msg.text : '';
-  console.log('[PromptJobs] Claimed job', { jobFile, claimedFile, id: msg.id });
-  promptJobsActiveRuns.set(jobFile, { claimedFile });
+  const shouldDeferFinish = self.BackgroundPromptJobs.shouldDeferFinish(msg);
+  const correlation = shouldDeferFinish
+    ? self.BackgroundPromptJobs.normalizePromptJobCorrelation(msg, {
+      folder: promptJobsWatchedFolder,
+      allowMissingPromptId: true,
+    })
+    : null;
+  console.log('[PromptJobs] Claimed job', {
+    jobFile,
+    claimedFile,
+    id: msg.id,
+    wantResult: shouldDeferFinish,
+    textLength: text.length,
+  });
+  promptJobsActiveRuns.set(jobFile, { claimedFile, wantResult: shouldDeferFinish });
 
   if (!text.trim()) {
     console.error('[PromptJobs] Claimed job has empty text, reporting error', { jobFile, claimedFile });
-    await finishPromptJob(claimedFile, 'error');
+    await finishPromptJob(claimedFile, 'error', {
+      folder: correlation?.folder || promptJobsWatchedFolder,
+      error: 'empty_prompt',
+    });
     promptJobsActiveRuns.delete(jobFile);
     promptJobsNotify('Voice prompt job failed', 'Claimed job had no text to send.');
     return;
@@ -4660,32 +4762,56 @@ async function handleClaimResult(msg) {
 
   try {
     const tab = await findOrCreatePromptJobsTab();
-    const result = await startAutomationForTab(tab.id, [text], state.options || {});
+    const result = await startAutomationForTab(tab.id, [text], state.options || {}, {
+      promptJobCorrelation: correlation,
+    });
     if (!result?.ok) {
       throw new Error(result?.error || 'Automation refused to start.');
     }
-    await finishPromptJob(claimedFile, 'done');
-    promptJobsNotify('Voice prompt sent', 'Prompt job was sent to ChatGPT.');
+    if (shouldDeferFinish) {
+      promptJobsNotify('Prompt job sent', 'Waiting for ChatGPT response.');
+    } else {
+      await finishPromptJob(claimedFile, 'done');
+      promptJobsNotify('Voice prompt sent', 'Prompt job was sent to ChatGPT.');
+    }
   } catch (e) {
     console.error('[PromptJobs] Failed to send claimed job:', e);
-    await finishPromptJob(claimedFile, 'error');
+    await finishPromptJob(claimedFile, 'error', {
+      folder: correlation?.folder || promptJobsWatchedFolder,
+      error: e?.message || e,
+    });
     promptJobsNotify('Voice prompt job failed', e?.message || 'Could not send prompt to ChatGPT.');
   } finally {
     promptJobsActiveRuns.delete(jobFile);
   }
 }
 
-async function finishPromptJob(claimedFile, status) {
-  if (!promptJobsPort || !claimedFile) return;
+async function finishPromptJob(claimedFile, status, details = {}) {
+  if (!claimedFile) return false;
   try {
-    promptJobsPort.postMessage({
-      type: 'finish_job',
-      folder: promptJobsWatchedFolder,
+    if (!promptJobsPort && details.folder) {
+      await loadSettings();
+      connectPromptJobsPort(details.folder);
+    }
+    if (!promptJobsPort) return false;
+    promptJobsPort.postMessage(self.BackgroundPromptJobs.buildFinishMessage({
+      folder: details.folder || promptJobsWatchedFolder,
       claimedFile,
       status,
+      responseText: details.responseText,
+      error: details.error,
+    }));
+    console.log('[PromptJobs] finish_job posted', {
+      claimedFile,
+      status,
+      hasResponseText: typeof details.responseText === 'string',
+      responseLength: typeof details.responseText === 'string' ? details.responseText.length : 0,
+      hasError: details.error !== undefined && details.error !== null,
     });
+    return true;
   } catch (e) {
     console.error('[PromptJobs] Failed to post finish_job:', e);
+    return false;
   }
 }
 

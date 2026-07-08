@@ -585,8 +585,7 @@
     return ['main article', '[data-testid*="message"]', '.markdown'];
   }
 
-  function captureLatestAssistantResponse(promptText) {
-    const site = detectSite();
+  function collectResponseCandidates(site) {
     const seen = new Set();
     const candidates = [];
     for (const selector of responseCandidateSelectors(site)) {
@@ -609,6 +608,36 @@
       if (position & Node.DOCUMENT_POSITION_PRECEDING) return 1;
       return 0;
     });
+    return candidates;
+  }
+
+  function getResponseScope(candidate) {
+    return candidate?.closest?.('article[data-testid^="conversation-turn-"], article[data-turn-id], [data-message-author-role="assistant"]') || candidate || null;
+  }
+
+  function captureAssistantResponseBaseline() {
+    const site = detectSite();
+    const scopes = new Set();
+    for (const candidate of collectResponseCandidates(site)) {
+      const scope = getResponseScope(candidate);
+      if (scope) scopes.add(scope);
+    }
+    console.log('[PromptQueue] Assistant response baseline captured', { site, count: scopes.size });
+    return { site, scopes };
+  }
+
+  function promptJobComposerTextMatches(actual, expected) {
+    const helper = self.BackgroundPromptJobs?.composerTextMatches || window.BackgroundPromptJobs?.composerTextMatches;
+    if (typeof helper === 'function') {
+      return helper(actual, expected);
+    }
+    const normalize = (value) => String(value || '').replace(/\r\n/g, '\n').replace(/\s+/g, ' ').trim();
+    return normalize(actual) === normalize(expected);
+  }
+
+  function captureLatestAssistantResponse(promptText, opts = {}) {
+    const site = detectSite();
+    const candidates = collectResponseCandidates(site);
 
     const candidateTexts = candidates.map((candidate) => cleanCapturedResponseText(candidate.innerText || candidate.textContent || ''));
     let promptIndex = -1;
@@ -621,7 +650,8 @@
       const text = candidateTexts[i];
       if (!text) continue;
       if (fuzzyIncludes(text, promptText)) continue;
-      const responseScope = candidates[i].closest?.('article[data-testid^="conversation-turn-"], article[data-turn-id], [data-message-author-role="assistant"]') || candidates[i];
+      const responseScope = getResponseScope(candidates[i]);
+      if (opts.baselineScopes?.has(responseScope)) continue;
       return {
         ok: true,
         site,
@@ -1064,7 +1094,7 @@
     return !stop && !spinner;
   }
 
-  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, enableTimeout, stopWord, stopWordCaseSensitive, watchGate, promptText, inputEl }) {
+  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, enableTimeout, stopWord, stopWordCaseSensitive, watchGate, promptText, inputEl, assistantBaseline }) {
     const site = detectSite();
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
@@ -1160,7 +1190,9 @@
 
         let responseStableFor = 0;
         if (site === 'chatgpt' && promptText) {
-          responseSnapshot = captureLatestAssistantResponse(promptText);
+          responseSnapshot = captureLatestAssistantResponse(promptText, {
+            baselineScopes: assistantBaseline?.scopes,
+          });
           if (responseSnapshot.ok) {
             if (responseSnapshot.responseLength !== lastResponseLength) {
               lastResponseLength = responseSnapshot.responseLength;
@@ -1662,6 +1694,8 @@
       }
 
       const watchGate = buildWatchGate(options);
+      const promptJobWantsResult = options?.promptJob?.wantResult === true;
+      let assistantBaseline = null;
 
       // Wait for any active streaming/processing to complete before sending
       const streamWaitStartedAt = Date.now();
@@ -1684,6 +1718,9 @@
           promptId,
         }),
       });
+      if (promptJobWantsResult) {
+        assistantBaseline = captureAssistantResponseBaseline();
+      }
 
       const composerReadyMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 10000);
       emitStepUpdate({ step: 'waiting_for_tab', promptId, detail: 'Waiting for visible composer', durationMs: composerReadyMaxWaitMs, endAt: Date.now() + composerReadyMaxWaitMs, log: options?.perStepConsoleLogging === true });
@@ -1752,6 +1789,14 @@
           }),
         });
         throw new Error('Input field empty before sending');
+      }
+      if (promptJobWantsResult && !promptJobComposerTextMatches(finalCurrentText, text)) {
+        console.error('[PromptQueue] Composer text mismatch before send', {
+          promptId,
+          expectedLength: String(text || '').length,
+          actualLength: finalCurrentText?.length || 0,
+        });
+        throw new Error('insertion_mismatch');
       }
       console.log('[PromptQueue] Final input verified before send', { promptId, finalLength: finalNormalized.length });
       if (options?.dryRunPopulateOnly === true) {
@@ -1992,6 +2037,7 @@
           watchGate,
           promptText: text,
           inputEl,
+          assistantBaseline,
         });
 
         // Check if automation was stopped by stop word
@@ -2023,7 +2069,9 @@
         throw e;
       }
       
-      const capturedResponse = captureLatestAssistantResponse(text);
+      const capturedResponse = captureLatestAssistantResponse(text, {
+        baselineScopes: assistantBaseline?.scopes,
+      });
       console.log('[PromptQueue] Completion detected, sending RESPONSE_COMPLETE', {
         promptId,
         responseCaptured: capturedResponse.ok,
