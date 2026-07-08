@@ -6,6 +6,9 @@ body.theme-dark {
   --text: #e6edf3;
   --muted: #a3b1c2;
   --accent: #10b981;
+  --accent-2: #60a5fa;
+  --danger: #ef4444;
+  --warn: #eab308;
   --border: #1e293b;
   --input-bg: #0a1220;
   --btn1-from: #16a34a;
@@ -21,6 +24,9 @@ body.theme-light {
   --text: #0f172a;
   --muted: #475569;
   --accent: #10b981;
+  --accent-2: #3b82f6;
+  --danger: #dc2626;
+  --warn: #ca8a04;
   --border: #e2e8f0;
   --input-bg: #ffffff;
   --btn1-from: #22c55e;
@@ -84,6 +90,37 @@ h1 {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 10px;
+  margin-bottom: 12px;
+}
+
+/* Primary workflow card stands out; secondary cards stay quiet */
+.card-primary {
+  border-left: 3px solid var(--accent);
+  box-shadow: 0 1px 10px rgba(0, 0, 0, 0.18);
+}
+
+/* Section headers: scannable tier markers (emerald = primary, blue = secondary) */
+.collapsible-header .section-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+
+.collapsible-header .section-title::before {
+  content: "";
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--accent-2);
+  flex: 0 0 auto;
+}
+
+.card-primary .collapsible-header .section-title::before {
+  background: var(--accent);
 }
 
 /* Typography */
@@ -198,8 +235,27 @@ button.primary {
   color: #fff;
 }
 
+/* Tier 2: outline — pause/resume/stop, clearly lighter than Start */
 button.secondary {
-  background: linear-gradient(180deg, var(--btn2-from), var(--btn2-to));
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+}
+
+button.secondary:hover {
+  border-color: var(--accent-2);
+  color: var(--accent-2);
+}
+
+#stopBtn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+button:focus-visible,
+.preset-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.35);
 }
 
 /* Progress Bar */
@@ -223,6 +279,14 @@ button.secondary {
   font-size: 12px;
   color: var(--muted);
   white-space: pre-wrap;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+#status:empty {
+  display: none;
 }
 
 .status-badge {
@@ -407,13 +471,14 @@ button.secondary {
   margin-bottom: 12px;
 }
 
+/* Tier 3: ghost pills — presets and utility actions */
 .preset-btn {
   padding: 6px 8px;
   font-size: 11px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: var(--input-bg);
-  color: var(--text);
+  background: transparent;
+  color: var(--muted);
   cursor: pointer;
   transition: all 0.2s;
   flex: none;
@@ -440,7 +505,15 @@ button.secondary {
   padding: 6px 0;
 }
 
+.collapsible-header {
+  border-radius: 6px;
+}
+
 .collapsible-header:hover {
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.collapsible-header:hover .collapsible-toggle {
   color: var(--accent);
 }
 
@@ -564,7 +637,7 @@ button.secondary {
 
 /* Memory Pack */
 .memory-card {
-  margin-top: 12px;
+  margin-top: 0;
 }
 
 .memory-status {
