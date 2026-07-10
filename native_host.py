@@ -34,10 +34,10 @@ CLAIMED_JOB_FILE_RE = re.compile(
 RESULT_FILE_RE = re.compile(r"^result_([A-Za-z0-9_-]+)\.json$")
 CLAIMANT_SAFE_RE = re.compile(r"[^A-Za-z0-9_-]+")
 JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS = 300
-PROMPT_JOB_RESULT_TEXT_CHARS = 20000
-PROMPT_JOB_CLAIM_TTL_SECONDS = 300
-PROMPT_JOB_RESULT_MAX_AGE_SECONDS = JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
-PROMPT_JOB_UNCLAIMED_TTL_SECONDS = JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
+PROMPT_JOB_RESULT_TEXT_CHARS = 200000
+PROMPT_JOB_CLAIM_TTL_SECONDS = 3600
+PROMPT_JOB_RESULT_MAX_AGE_SECONDS = 86400
+PROMPT_JOB_UNCLAIMED_TTL_SECONDS = 1800
 
 class TranscriptionMonitor:
     def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
@@ -418,9 +418,12 @@ class TranscriptionMonitor:
                             continue
                     if name in self.job_watch_announced:
                         continue
-                    if age_seconds > JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS:
-                        continue
                     payload = self.read_job_payload(path)
+                    if (
+                        payload.get("want_result") is not True
+                        and age_seconds > JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
+                    ):
+                        continue
                     job_id = payload.get("id")
                     text = payload.get("text")
                     if not self.is_usable_job_payload(job_id, text):

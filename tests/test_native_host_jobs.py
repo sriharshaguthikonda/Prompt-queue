@@ -173,6 +173,35 @@ def test_finish_job_want_result_truncates_text(tmp_path):
     assert len(result["text"]) == native_host.PROMPT_JOB_RESULT_TEXT_CHARS
 
 
+def test_prompt_job_defaults_match_deep_research_ttls():
+    assert native_host.PROMPT_JOB_CLAIM_TTL_SECONDS == 3600
+    assert native_host.PROMPT_JOB_UNCLAIMED_TTL_SECONDS == 1800
+    assert native_host.PROMPT_JOB_RESULT_MAX_AGE_SECONDS == 86400
+    assert native_host.PROMPT_JOB_RESULT_TEXT_CHARS == 200000
+    assert native_host.JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS == 300
+
+
+def test_finish_job_want_result_truncates_after_200000_chars(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    claimed_file = tmp_path / "job_boundary.claimed.worker_1.json"
+    write_job(claimed_file, job_id="boundary", text="prompt text", want_result=True)
+    response_text = "x" * 200001
+
+    response = monitor.handle_message({
+        "type": "finish_job",
+        "folder": str(tmp_path),
+        "claimedFile": claimed_file.name,
+        "status": "done",
+        "responseText": response_text,
+    })
+
+    result = json.loads((tmp_path / "result_boundary.json").read_text(encoding="utf-8"))
+    assert response == {"type": "finish_result", "ok": True}
+    assert result["truncated"] is True
+    assert result["text_chars"] == 200001
+    assert len(result["text"]) == 200000
+
+
 def test_watch_jobs_claim_expired_writes_error_result(tmp_path):
     monitor = native_host.TranscriptionMonitor()
     monitor.send_message = lambda message: None
@@ -221,6 +250,31 @@ def test_watch_jobs_unclaimed_want_result_job_expires_to_error_result(tmp_path):
     assert result["error"] == "job_unclaimed_expired"
 
 
+def test_watch_jobs_announces_old_want_result_job_before_unclaimed_ttl(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    sent = []
+    monitor.send_message = sent.append
+    job_file = tmp_path / "job_old_bridge.json"
+    write_job(job_file, job_id="old_bridge", text="deep research", want_result=True)
+    old_time = time.time() - (native_host.JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS + 30)
+    os.utime(job_file, (old_time, old_time))
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+    })
+    wait_for(lambda: len(job_messages(sent)) == 1)
+    monitor.stop_job_watcher()
+
+    messages = job_messages(sent)
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert messages[0]["jobFile"] == "job_old_bridge.json"
+    assert messages[0]["wantResult"] is True
+    assert job_file.exists()
+    assert not (tmp_path / "result_old_bridge.json").exists()
+
+
 def test_watch_jobs_unclaimed_voice_job_does_not_write_result(tmp_path):
     monitor = native_host.TranscriptionMonitor()
     monitor.send_message = lambda message: None
@@ -241,6 +295,29 @@ def test_watch_jobs_unclaimed_voice_job_does_not_write_result(tmp_path):
     assert response == {"type": "watch_started", "folder": str(tmp_path)}
     assert job_file.exists()
     assert not (tmp_path / "result_voice_old.json").exists()
+
+
+def test_watch_jobs_does_not_announce_old_voice_job(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    sent = []
+    monitor.send_message = sent.append
+    job_file = tmp_path / "job_old_voice.json"
+    write_job(job_file, job_id="old_voice", text="voice prompt")
+    old_time = time.time() - (native_host.JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS + 30)
+    os.utime(job_file, (old_time, old_time))
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+    })
+    time.sleep(0.08)
+    monitor.stop_job_watcher()
+
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert job_messages(sent) == []
+    assert "job_old_voice.json" not in monitor.job_watch_announced
+    assert job_file.exists()
 
 
 def test_result_writer_uses_tmp_then_replace():
