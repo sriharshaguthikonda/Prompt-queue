@@ -23,12 +23,14 @@
           <span class="section-title" style="margin: 0;">Prompts</span> </div>
         <div class="prompts-container collapsible-content" id="promptsContent">
           <div class="prompts-left"> <label for="prompts"></label> <textarea id="prompts"
+
 placeholder="Paste prompts here, one per line...
 Prompts (one per line)"></textarea>
             <div class="prompt-counter-row">
               <div class="prompt-counter">0 prompts loaded</div>
               <button id="insertSeparatorBtn" class="preset-btn" type="button" title="Insert a multi-line separator">↵
                 Insert separator</button> <span class="info-wrap"> <button type="button"
+
                   class="info-trigger" aria-label="Prompt tips" aria-expanded="false">i</button>
                 <span class="info-popover"> • Use <code>---new tab---</code> on
                   its own line to split tab sets and auto-run in parallel.<br>
@@ -40,6 +42,7 @@ Prompts (one per line)"></textarea>
           </div>
           <div class="prompts-right">
             <div class="inline"> <input id="prependSystemPrompt" checked="checked"
+
                 type="checkbox"> <label for="prependSystemPrompt">Prepend to
                 each prompt</label> </div>
             <textarea id="systemPrompt" placeholder="Text to prepend (optional)..."></textarea>
@@ -59,6 +62,7 @@ Prompts (one per line)"></textarea>
             <div>
               <div class="label-row"> <label for="maxWaitSec">Max wait
                   (seconds)</label> <span class="info-wrap"> <button type="button"
+
                     class="info-trigger" aria-label="Max wait help" aria-expanded="false">i</button>
                   <span class="info-popover">Upper limit per prompt. After this
                     timeout, automation moves to the next prompt.</span> </span>
@@ -66,16 +70,25 @@ Prompts (one per line)"></textarea>
               <input id="maxWaitSec" min="5" step="5" placeholder="180" type="number">
             </div>
             <div> <label for="stableMinSec">Stable (seconds) min</label> <input
+
                 id="stableMinSec" min="0.2" step="0.1" placeholder="1.2" type="number">
             </div>
             <div>
-              <div class="label-row"> <label for="stableMaxSec">Stable
-                  (seconds) max</label> <span class="info-wrap"> <button type="button"
+             
+              
+              <div class="label-row">
+                <label for="stableMaxSec">Stable
+                  (seconds) max</label> 
+                <span class="info-wrap"> 
+                  <button type="button"
+
                     class="info-trigger" aria-label="Stable window help" aria-expanded="false">i</button>
                   <span class="info-popover">A random stable window is picked
                     between min and max for each prompt before advancing.</span>
-                </span> </div>
+                </span>
+              </div>
               <input id="stableMaxSec" min="0.2" step="0.1" placeholder="2.5" type="number">
+             
               <div id="stableCountdown" class="desc" style="color: var(--accent); font-weight: 600; margin-top: 4px; display: none;">Countdown:
                 <span id="countdownValue">0.0</span>s</div>
             </div>
@@ -84,61 +97,79 @@ Prompts (one per line)"></textarea>
             <div>
               <div class="label-row"> <label for="pollSec">Poll interval
                   (seconds)</label> <span class="info-wrap"> <button type="button"
+
                     class="info-trigger" aria-label="Poll interval help" aria-expanded="false">i</button>
-                  <span class="info-popover">How often the extension checks for
-                    page changes. Lower values respond faster but use more CPU.</span>
-                </span> </div>
+                  <span class="info-popover">How often checks page changes.
+                    Lower = faster = more CPU. </span> </span> </div>
               <input id="pollSec" min="0.1" step="0.05" placeholder="0.3" type="number">
             </div>
           </div>
           <div class="inline" style="margin-top: 8px;"> <input id="debugLoggingEnabled"
+
               type="checkbox"> <label for="debugLoggingEnabled">Enable debug
               console logging</label> <span class="info-wrap"> <button type="button"
+
                 class="info-trigger" aria-label="Debug logging help" aria-expanded="false">i</button>
               <span class="info-popover">Off by default. Keeps only errors in
                 console to reduce overhead and noise.</span> </span> </div>
           <div class="inline" style="margin-top: 10px;"> <input id="enableRetryOnFailure"
+
               checked="checked" type="checkbox"> <label for="enableRetryOnFailure">Retry
               failed prompts/tabs</label> <span class="info-wrap"> <button type="button"
+
                 class="info-trigger" aria-label="Retry help" aria-expanded="false">i</button>
               <span class="info-popover">Retries apply to send and completion
                 failures. Set Max retries to 0 to disable retries.</span> </span>
           </div>
           <div class="row">
             <div> <label for="maxRetriesPerPrompt">Max retries</label> <input
+
                 id="maxRetriesPerPrompt" min="0" max="10" step="1" placeholder="2"
+
                 type="number"> </div>
             <div> <label for="retryDelaySec">Retry delay (seconds)</label> <input
+
                 id="retryDelaySec" min="0" step="0.5" placeholder="2" type="number">
             </div>
           </div>
         </div>
         <div class="inline" style="margin-top: 12px;"> <input id="enableMaxWaitTimeout"
+
             checked="checked" type="checkbox"> <label for="enableMaxWaitTimeout">Wait
             indefinitely for response</label> <span class="info-wrap"> <button
+
               type="button" class="info-trigger" aria-label="Max wait timeout help"
+
               aria-expanded="false">i</button> <span class="info-popover">When
               checked, the extension monitors until the response completes. When
               unchecked, Max wait is the per-prompt response timeout.</span> </span>
         </div>
         <div class="inline" style="margin-top: 12px;"> <input id="autoConfirmDialogs"
+
             type="checkbox"> <label for="autoConfirmDialogs">Auto-confirm tool
             dialogs</label> <span class="info-wrap"> <button type="button" class="info-trigger"
+
               aria-label="Auto confirm help" aria-expanded="false">i</button> <span
+
               class="info-popover">Clicks visible “Confirm” buttons
               automatically, even when automation is idle.</span> </span> </div>
         <div class="inline" style="margin-top: 12px;"> <input id="enableWatchedElementGate"
+
             type="checkbox"> <label for="enableWatchedElementGate">Wait for new
             watched element before next prompt</label> <span class="info-wrap">
             <button type="button" class="info-trigger" aria-label="Watched element gate help"
+
               aria-expanded="false">i</button> <span class="info-popover">Advances
               only after a newly detected matching element appears in the
               response.</span> </span> </div>
         <div id="watchedElementContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
           <input id="watchedElementSelector" placeholder="CSS selector (e.g., button[data-testid='copy-turn-action-button'])"
+
             class="stop-word-input" style="width: 100%; padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+
             type="text">
           <div class="history-buttons" style="margin-bottom: 0;"> <button id="useChatgptActionSelector"
+
               class="preset-btn" type="button">Use ChatGPT action buttons</button>
           </div>
         </div>
@@ -161,6 +192,7 @@ Prompts (one per line)"></textarea>
       <div class="card memory-card">
         <div class="collapsible-header" id="memoryHeader"> <span class="collapsible-toggle">▼</span>
           <span class="section-title" style="margin: 0;">Memory Pack</span> <span
+
             id="memoryStatus" class="memory-status">Idle</span> </div>
         <div class="collapsible-content" id="memoryContent">
           <div class="row">
@@ -175,7 +207,9 @@ Prompts (one per line)"></textarea>
               </select>
             </div>
             <div> <label for="memoryProject">Project</label> <input id="memoryProject"
+
                 list="memoryProjects" placeholder="global" type="text"> <datalist
+
                 id="memoryProjects"></datalist> </div>
           </div>
           <textarea id="memoryManualQuery" class="memory-query" placeholder="Preview query appears here. Edit before fetching if needed."></textarea>
@@ -199,9 +233,11 @@ Prompts (one per line)"></textarea>
           </div>
           <div class="row">
             <div> <label for="memoryMaxTokens">Max tokens</label> <input id="memoryMaxTokens"
+
                 min="300" max="3000" step="100" placeholder="800" type="number">
             </div>
             <div> <label for="memoryTopK">Top-K</label> <input id="memoryTopK"
+
                 min="3" max="20" step="1" placeholder="8" type="number"> </div>
           </div>
           <div class="row">
@@ -219,26 +255,37 @@ Prompts (one per line)"></textarea>
             </div>
           </div>
           <div class="memory-class-grid"> <label><input data-memory-class="beliefs_preferences"
+
                 checked="checked" type="checkbox"> Prefs</label> <label><input
+
                 data-memory-class="world_facts" checked="checked" type="checkbox">
               Facts</label> <label><input data-memory-class="entity_observations"
+
                 checked="checked" type="checkbox"> Entities</label> <label><input
+
                 data-memory-class="agent_experiences" checked="checked" type="checkbox">
               Bugs</label> <label><input data-memory-class="reflections" checked="checked"
+
                 type="checkbox"> Reflections</label> </div>
           <div class="history-buttons"> <button id="memoryHealthBtn" class="preset-btn"
+
               type="button">Health</button> <button id="memoryPreviewBtn" class="preset-btn"
+
               type="button">Preview</button> <button id="memoryInsertBtn" class="preset-btn"
+
               type="button">Insert</button> <button id="memoryCopyBtn" class="preset-btn"
+
               type="button">Copy</button> </div>
           <div id="memoryPreview" class="memory-preview-list"></div>
           <textarea id="memoryPackMarkdown" class="memory-pack-markdown" placeholder="Preview markdown appears here and can be edited before insert."></textarea>
           <div class="collapsible-header memory-settings-header" id="memorySettingsHeader">
             <span class="collapsible-toggle">▼</span> <span class="section-title"
+
               style="margin: 0;">Memory Settings</span> </div>
           <div class="collapsible-content" id="memorySettingsContent">
             <div class="row">
               <div> <label for="memoryBridgeBaseUrl">Bridge URL</label> <input
+
                   id="memoryBridgeBaseUrl" placeholder="http://127.0.0.1:5599" type="text">
               </div>
               <div> <label for="memoryAuthMode">Auth</label>
@@ -250,22 +297,31 @@ Prompts (one per line)"></textarea>
             </div>
             <div class="row">
               <div> <label for="memoryNativeHostName">Native host</label> <input
+
                   id="memoryNativeHostName" placeholder="com.aipromptqueue.transcription"
+
                   type="text"> </div>
               <div> <label for="memoryDefaultProject">Default project</label> <input
+
                   id="memoryDefaultProject" placeholder="global" type="text"> </div>
             </div>
             <div> <label for="memoryStoredToken">Fallback token</label> <input
+
                 id="memoryStoredToken" placeholder="Only used when auth fallback is selected"
+
                 type="password">
               <div id="memoryTokenStatus" class="desc">No stored token</div>
             </div>
             <div class="inline memory-settings-inline"> <input id="memoryDebug"
+
                 type="checkbox"> <label for="memoryDebug">Memory debug metadata</label>
             </div>
             <div class="history-buttons"> <button id="memorySaveSettingsBtn" class="preset-btn"
+
                 type="button">Save settings</button> <button id="memoryClearTokenBtn"
+
                 class="preset-btn" type="button">Clear token</button> <button id="memoryResetDefaultsBtn"
+
                 class="preset-btn" type="button">Reset defaults</button> </div>
           </div>
         </div>
@@ -279,14 +335,18 @@ Prompts (one per line)"></textarea>
           <div class="row">
             <div>
               <div style="display: flex; gap: 8px; margin-bottom: 8px;"> <input
+
                   id="transcriptionFolder" placeholder="e.g., I:\Transcriptions - Folder to monitor for new JSON transcripts"
+
                   style="flex: 1;" type="text"> <button id="browseFolderBtn" class="preset-btn"
+
                   type="button">📁 Browse</button> </div>
             </div>
           </div>
           <div class="row">
             <div> <button id="startMonitoringBtn" class="preset-btn" style="background: #16a34a; color: white;">▶️
                 Start Monitoring</button> <button id="stopMonitoringBtn" class="preset-btn"
+
                 style="background: #dc2626; color: white; display: none;">⏹️
                 Stop Monitoring</button> </div>
             <div> <span id="monitoringStatus" class="status-badge status-idle">
@@ -305,17 +365,20 @@ Prompts (one per line)"></textarea>
         </div>
         <div class="collapsible-content" id="promptJobsContent">
           <div class="inline" style="padding: 0 12px;"> <input id="promptJobsEnabled"
-              type="checkbox"> <label for="promptJobsEnabled">Listen for voice prompt
-              jobs</label> </div>
+
+              type="checkbox"> <label for="promptJobsEnabled">Listen for voice
+              prompt jobs</label> </div>
           <div class="row" style="padding: 0 12px;">
-            <div> <label for="promptJobsFolder">Jobs folder</label> <input
-                id="promptJobsFolder" placeholder="C:\Windows_software\openai whisper\prompt_jobs"
-                type="text"> </div>
-            <div> <label for="promptJobsPriority">Priority</label> <input
-                id="promptJobsPriority" max="10" min="0" step="1" type="number"> </div>
+            <div> <label for="promptJobsFolder">Jobs folder</label> <input id="promptJobsFolder"
+
+                placeholder="C:\Windows_software\openai whisper\prompt_jobs" type="text">
+            </div>
+            <div> <label for="promptJobsPriority">Priority</label> <input id="promptJobsPriority"
+
+                max="10" min="0" step="1" type="number"> </div>
           </div>
-          <div class="desc" style="padding: 0 12px;">0 = designated sender; higher
-            waits longer before claiming</div>
+          <div class="desc" style="padding: 0 12px;">0 = designated sender;
+            higher waits longer before claiming</div>
         </div>
       </div>
       <div class="card">
@@ -329,6 +392,7 @@ Prompts (one per line)"></textarea>
             MD</button> <button id="importBtn" class="preset-btn">📤 Import</button>
           <input id="importFile" accept=".json" type="file"> </div>
         <input id="historySearch" class="history-search" placeholder="Search histories..."
+
           type="text">
         <div id="historyLoading" class="history-loading">
           <div class="skeleton"></div>
@@ -342,16 +406,20 @@ Prompts (one per line)"></textarea>
         <button id="clearHistoryBtn" class="preset-btn clear-history-btn">🗑️
           Clear all</button> </div>
       <div class="inline" style="margin-top: 12px; padding: 0 12px;"> <input id="disableButtonsDuringAutomation"
+
           checked="checked" type="checkbox"> <label for="disableButtonsDuringAutomation">Disable
           buttons during automation</label> </div>
       <div class="inline" style="margin-top: 12px; padding: 0 12px;"> <input id="refreshTabBeforeEachPrompt"
+
           type="checkbox"> <label for="refreshTabBeforeEachPrompt">Refresh page
           before each prompt (background-safe)</label> <span class="info-wrap">
           <button type="button" class="info-trigger" aria-label="Refresh before prompt help"
+
             aria-expanded="false">i</button> <span class="info-popover">Reloads
             the current chat tab before each send without switching to it.</span>
         </span> </div>
       <div class="parallel-walkthrough-controls" style="margin: 8px 12px 0;"> <button
+
           id="toggleParallelWalkthroughBtn" class="preset-btn" type="button">Hide
           guide</button> </div>
       <div id="parallelWalkthrough" class="parallel-walkthrough" style="margin: 8px 12px 0;">
@@ -374,21 +442,29 @@ Prompts (one per line)"></textarea>
           run.</div>
       </div>
       <div class="inline" style="margin-top: 12px; padding: 0 12px;"> <input id="openNewChatPerPrompt"
+
           type="checkbox"> <label for="openNewChatPerPrompt">Send each prompt
           in a new chat</label> </div>
       <div class="inline" style="margin-top: 8px; padding: 0 12px;"> <input id="openNewChatPerPromptUrl"
+
           placeholder="Custom new chat URL (optional, e.g., https://chatgpt.com/g/...)"
+
           style="width: 100%; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+
           type="text"> </div>
       <div class="inline" style="margin-top: 12px; padding: 0 12px;"> <input id="enableStopWord"
+
           type="checkbox"> <label for="enableStopWord">Stop on keyword/phrase</label>
       </div>
       <div id="stopWordContainer" class="stop-word-container hidden" style="margin-top: 12px; padding: 0 12px;">
         <input id="stopWord" placeholder="Enter stop word or phrase..." class="stop-word-input"
+
           style="width: 100%; padding: 8px; margin-bottom: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--input-bg); color: var(--text); font-size: 12px;"
+
           type="text"> <small style="color: var(--muted); display: block; margin-bottom: 6px;">
           Automation will stop if this text appears on the page </small>
         <div class="inline" style="gap: 6px;"> <input id="stopWordCaseSensitive"
+
             type="checkbox"> <label for="stopWordCaseSensitive" style="font-size: 12px;">Case
             sensitive</label> </div>
       </div>

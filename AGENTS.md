@@ -71,6 +71,7 @@ Live query: `gh issue list --repo sriharshaguthikonda/Prompt-queue --state open`
 - Never use destructive Git commands on shared work without explicit approval.
 - Keep changes scoped to the task; do not rewrite unrelated files.
 - Keep generic scripts and UI files modular. Avoid growing catch-all files; put new reusable behavior in focused modules and wire it through the existing owner.
+- Keep generated tool/cache state out of the browser-loading folder. Do not leave `__pycache__`, `.pyc`, `.pytest_cache`, `.pytest_tmp`, `.serena`, or similar runtime debris in this repo after running tests/tools.
 
 ## PR Readiness Checklist
 - Branch is rebased or merged with latest `main`.

@@ -197,6 +197,52 @@ def test_watch_jobs_claim_expired_writes_error_result(tmp_path):
     assert result["error"] == "claim_expired"
 
 
+def test_watch_jobs_unclaimed_want_result_job_expires_to_error_result(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.send_message = lambda message: None
+    job_file = tmp_path / "job_unclaimed.json"
+    write_job(job_file, job_id="unclaimed", text="prompt text", want_result=True)
+    old_time = time.time() - 10
+    os.utime(job_file, (old_time, old_time))
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+        "unclaimedTtlSeconds": 1,
+    })
+    wait_for(lambda: (tmp_path / "result_unclaimed.json").exists())
+    monitor.stop_job_watcher()
+
+    result = json.loads((tmp_path / "result_unclaimed.json").read_text(encoding="utf-8"))
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert not job_file.exists()
+    assert result["status"] == "error"
+    assert result["error"] == "job_unclaimed_expired"
+
+
+def test_watch_jobs_unclaimed_voice_job_does_not_write_result(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.send_message = lambda message: None
+    job_file = tmp_path / "job_voice_old.json"
+    write_job(job_file, job_id="voice_old", text="voice prompt")
+    old_time = time.time() - 10
+    os.utime(job_file, (old_time, old_time))
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+        "unclaimedTtlSeconds": 1,
+    })
+    time.sleep(0.08)
+    monitor.stop_job_watcher()
+
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert job_file.exists()
+    assert not (tmp_path / "result_voice_old.json").exists()
+
+
 def test_result_writer_uses_tmp_then_replace():
     source = inspect.getsource(native_host.TranscriptionMonitor.write_result_file)
     assert ".tmp" in source

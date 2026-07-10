@@ -1,6 +1,6 @@
 # Phase: Bridge → ChatGPT Round-Trip (result return path)
 
-Status: in progress (2026-07-08)
+Status: patched 2026-07-09 after live browser test exposed result-return abort. Automated verification now green: pytest `22 passed`, Jest `162 passed`, syntax checks clean.
 Counterpart: `C:\AI\mcp-model-bridge\docs\plans\browser-channel-chatgpt.md`
 
 ## Aim
@@ -18,7 +18,7 @@ External agents (via the `mcp-model-bridge` MCP server) can ask the user's ChatG
 Job file (producer → extension), unchanged for voice; bridge adds:
 
 ```json
-{ "id": "<id>", "text": "<prompt>", "ts": "<iso>", "source": "model_bridge", "want_result": true }
+{ "id": "<id>", "text": "<prompt>", "ts": "<iso>", "source": "model_bridge", "want_result": true, "conversation_key": "default" }
 ```
 
 Result file (native host → producer), written atomically (tmp + rename) as `result_<id>.json` — deliberately NOT `job_*.json` so `ask_ai_bridge.py`'s cleanup glob never matches it:
@@ -29,16 +29,17 @@ Result file (native host → producer), written atomically (tmp + rename) as `re
 
 ## Tasks
 
-- [ ] A1 Job schema: accept optional `want_result` + `source`; voice jobs unchanged (fire-and-forget).
-- [ ] A2 Deferred finish: for `want_result` jobs do NOT finish after `startAutomationForTab` returns; finish only from the matching `RESPONSE_COMPLETE`/error handler with `{id, status, responseText, error?}`.
-- [ ] A3 Durable correlation: persist `{jobId, wantResult, promptId, claimedFile}` to `chrome.storage.local` before send so MV3 service-worker restart/sleep recovery can still finish the job.
-- [ ] A4 Capture correctness: baseline assistant-turn set before send; accept only a new stable turn. Empty/missing response ⇒ `status:"error"`, never empty success.
-- [ ] A5 Insertion verification: composer text must match job text before submit; mismatch ⇒ error result, no partial send.
-- [ ] A6 Host result writer: `finish_job` writes `result_<id>.json` atomically when the claimed job had `want_result`, then removes the claimed marker. Voice jobs keep delete behavior.
-- [ ] A7 Orphan backstop: host writes `status:"error"` (`reason:"claim_expired"`) result for claimed-without-result jobs older than TTL (default: response timeout + slack) so callers never hang on a crashed browser.
-- [ ] A8 Truncation: cap `text` at 20k chars (existing capture cap), report `truncated`/`text_chars`. Age-based stale-result cleanup.
-- [ ] A9 Tests (`tests/test_native_host_jobs.py`): result written for want_result happy/error/claim-expired; absent for voice jobs; atomic (no partial JSON readable).
+- [x] A1 Job schema: accept optional `want_result` + `source`; voice jobs unchanged (fire-and-forget).
+- [x] A2 Deferred finish: for `want_result` jobs do NOT finish after `startAutomationForTab` returns; finish only from the matching `RESPONSE_COMPLETE`/error handler with `{id, status, responseText, error?}`.
+- [x] A3 Durable correlation: persist `{jobId, wantResult, promptId, claimedFile}` to `chrome.storage.local` before send so MV3 service-worker restart/sleep recovery can still finish the job.
+- [x] A4 Capture correctness: baseline assistant-turn set before send; accept only a new stable turn. Empty/missing response ⇒ `status:"error"`, never empty success.
+- [x] A5 Insertion verification: composer text must match job text before submit; mismatch ⇒ error result, no partial send.
+- [x] A6 Host result writer: `finish_job` writes `result_<id>.json` atomically when the claimed job had `want_result`, then removes the claimed marker. Voice jobs keep delete behavior.
+- [x] A7 Orphan backstop: host writes `status:"error"` (`reason:"claim_expired"`) result for claimed-without-result jobs older than TTL (default: response timeout + slack) so callers never hang on a crashed browser.
+- [x] A8 Truncation: cap `text` at 20k chars (existing capture cap), report `truncated`/`text_chars`. Age-based stale-result cleanup.
+- [x] A9 Tests (`tests/test_native_host_jobs.py`): result written for want_result happy/error/claim-expired; absent for voice jobs; atomic (no partial JSON readable).
+- [x] A10 2026-07-09 live-test fix: post-send prompt-bubble render miss is diagnostic for `want_result` jobs; same-tab `conversation_key` reuse; stale plain `want_result` jobs expire to `error:"job_unclaimed_expired"`.
 
 ## Done when
 
-Bridge test harness (fake claim + result) round-trips, pytest + jest + `node --check background.js` green, and a live prompt from the MCP `ask_chatgpt` tool returns ChatGPT's answer to the calling agent.
+Bridge test harness (fake claim + result) round-trips, pytest + jest + `node --check background.js` green. Live browser re-test still requires the extension/runtime to reload these patched files.

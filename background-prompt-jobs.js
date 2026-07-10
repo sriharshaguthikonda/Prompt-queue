@@ -13,6 +13,11 @@
     return value === true || value === 'true' || value === 1;
   }
 
+  function normalizeConversationKey(value) {
+    const key = stringOrNull(value);
+    return key || 'default';
+  }
+
   function normalizePromptJobCorrelation(job, opts = {}) {
     const source = job && typeof job === 'object' ? job : {};
     const promptId = stringOrNull(source.promptId || opts.promptId);
@@ -23,6 +28,7 @@
       claimedFile: stringOrNull(source.claimedFile),
       folder: stringOrNull(source.folder || opts.folder),
       source: stringOrNull(source.source),
+      conversationKey: normalizeConversationKey(source.conversationKey || source.conversation_key || opts.conversationKey),
     };
   }
 
@@ -76,6 +82,7 @@
 
   self.BackgroundPromptJobs = {
     normalizePromptJobCorrelation,
+    normalizeConversationKey,
     shouldDeferFinish,
     buildFinishMessage,
     isEmptyResponse,

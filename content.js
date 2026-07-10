@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-06-12.response-timeout-owner-v2';
+  const CONTENT_SCRIPT_VERSION = '2026-07-09.prompt-job-capture-v1';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -635,6 +635,10 @@
     return normalize(actual) === normalize(expected);
   }
 
+  function shouldBlockOnPromptRenderFailure(options = {}) {
+    return options?.promptJob?.wantResult !== true;
+  }
+
   function captureLatestAssistantResponse(promptText, opts = {}) {
     const site = detectSite();
     const candidates = collectResponseCandidates(site);
@@ -1094,7 +1098,7 @@
     return !stop && !spinner;
   }
 
-  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, enableTimeout, stopWord, stopWordCaseSensitive, watchGate, promptText, inputEl, assistantBaseline }) {
+  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, enableTimeout, stopWord, stopWordCaseSensitive, watchGate, promptText, inputEl, assistantBaseline, requireCapturedResponse = false }) {
     const site = detectSite();
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
@@ -1243,10 +1247,13 @@
           && !currentStopActive
           && !hardChatGptActivityPresent;
         const domComplete = domStableEnough && !activeGenerationPresent && canSend && watchGateSatisfied;
-        const completeEnough = site === 'chatgpt' ? (chatGptResponseComplete || domComplete) : domComplete;
+        const completeEnough = site === 'chatgpt'
+          ? (requireCapturedResponse ? chatGptResponseComplete : (chatGptResponseComplete || domComplete))
+          : domComplete;
         const finalDecisionReason = site === 'chatgpt'
           ? (
             chatGptResponseComplete ? 'chatgptResponseComplete'
+              : requireCapturedResponse && domComplete ? 'waiting:capturedResponseRequired'
               : domComplete ? 'domComplete'
                 : currentStopActive ? 'blocked:stopActive'
                   : hardChatGptActivityPresent ? `blocked:${activityBlockerReasons.join(',') || 'hardActivity'}`
@@ -1292,6 +1299,7 @@
             staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
             canSend,
             chatGptResponseComplete,
+            requireCapturedResponse,
             watchGateSatisfied,
             finalDecisionReason,
             activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
@@ -1313,6 +1321,7 @@
             staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
             canSend,
             chatGptResponseComplete,
+            requireCapturedResponse,
             watchGateSatisfied,
             finalDecisionReason,
             activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
@@ -1337,6 +1346,7 @@
             canSend,
             responseCaptured: responseSnapshot.ok,
             responseLength: responseSnapshot.responseLength || 0,
+            requireCapturedResponse,
             activityBlockerReasons,
             staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
             finalDecisionReason,
@@ -1998,8 +2008,14 @@
         await verifyPromptRendered({ text, promptId, attempts: 4, delayMs: 500 });
         console.log('[PromptQueue] Render verification succeeded', { promptId });
       } catch (e) {
-        console.error('[PromptQueue] Prompt render verification failed', { promptId, error: e?.message });
-        throw e;
+        if (shouldBlockOnPromptRenderFailure(options)) {
+          console.error('[PromptQueue] Prompt render verification failed', { promptId, error: e?.message });
+          throw e;
+        }
+        console.warn('[PromptQueue] Prompt render verification missed after send; continuing result capture', {
+          promptId,
+          error: e?.message,
+        });
       }
 
       const effectiveStopWord = options?.enableStopWord ? options?.stopWord : null;
@@ -2035,10 +2051,11 @@
           stopWord: effectiveStopWord,
           stopWordCaseSensitive: options?.stopWordCaseSensitive,
           watchGate,
-          promptText: text,
-          inputEl,
-          assistantBaseline,
-        });
+            promptText: text,
+            inputEl,
+            assistantBaseline,
+            requireCapturedResponse: promptJobWantsResult,
+          });
 
         // Check if automation was stopped by stop word
         if (result?.stoppedByStopWord) {
@@ -2129,6 +2146,7 @@
       resolveStopButtonSelector,
       selectorsForSite,
       setTextInInput,
+      shouldBlockOnPromptRenderFailure,
       waitForComposerReady,
       waitForCompletion,
       waitForChatGPTSendWindow,

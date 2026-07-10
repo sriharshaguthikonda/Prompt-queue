@@ -485,6 +485,48 @@ describe('Content Script Integration', () => {
       await expect(promise).resolves.toBeUndefined();
     });
 
+    it('should not complete prompt result jobs from DOM quiet before assistant capture', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt">Send</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+        </main>
+      `;
+      const sendBtn = document.querySelector('#composer-submit-button');
+      const messagesContainer = document.querySelector('main');
+
+      const promise = waitForCompletion({
+        sendButton: sendBtn,
+        messagesContainer,
+        stableMs: 500,
+        maxWaitMs: 2000,
+        pollIntervalMs: 100,
+        enableTimeout: true,
+        promptText: 'Queued prompt',
+        requireCapturedResponse: true,
+      });
+
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+
+      let resolved = false;
+      promise.then(() => {
+        resolved = true;
+      });
+      await Promise.resolve();
+
+      expect(resolved).toBe(false);
+      messagesContainer.insertAdjacentHTML('beforeend', `
+        <article data-testid="conversation-turn-2" data-message-author-role="assistant">Assistant answer</article>
+      `);
+      jest.advanceTimersByTime(1200);
+      await expect(promise).resolves.toBeUndefined();
+    });
+
     it('should complete from a stable ChatGPT response when the empty composer keeps send disabled', async () => {
       Object.defineProperty(window, 'location', {
         value: { href: 'https://chatgpt.com/c/test' },
@@ -822,6 +864,78 @@ describe('Content Script Integration', () => {
       }
     });
 
+    it('should continue want_result jobs after render verification miss and capture assistant response', async () => {
+      jest.useFakeTimers();
+      try {
+        Object.defineProperty(window, 'location', {
+          value: { href: 'https://chatgpt.com/c/result-render-miss-test' },
+          writable: true,
+        });
+        document.body.innerHTML = `
+          <textarea id="prompt-textarea" style="display:block"></textarea>
+          <button data-testid="send-button" type="button">Send</button>
+          <main></main>
+        `;
+
+        const input = document.getElementById('prompt-textarea');
+        const sendButton = document.querySelector('button[data-testid="send-button"]');
+        input.getBoundingClientRect = jest.fn(() => ({ width: 320, height: 48 }));
+        sendButton.getBoundingClientRect = jest.fn(() => ({ width: 96, height: 32 }));
+
+        sendButton.addEventListener('click', () => {
+          const stopButton = document.createElement('button');
+          stopButton.setAttribute('data-testid', 'stop-button');
+          stopButton.setAttribute('aria-label', 'Stop answering');
+          stopButton.textContent = 'Stop';
+          document.body.appendChild(stopButton);
+
+          setTimeout(() => {
+            stopButton.remove();
+            document.querySelector('main').insertAdjacentHTML('beforeend', `
+              <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+                <div class="markdown">Captured assistant answer after render miss</div>
+                <button data-testid="copy-turn-action-button" aria-label="Copy response">Copy response</button>
+              </article>
+            `);
+          }, 250);
+        });
+
+        await expect(
+          chrome.runtime.sendMessage({
+            type: 'SEND_PROMPT',
+            text: 'Prompt bubble intentionally absent',
+            promptId: 'render-miss-result-job',
+            options: {
+              stableMs: 50,
+              maxWaitMs: 5000,
+              pollIntervalMs: 50,
+              enableMaxWaitTimeout: true,
+              postPopulateDelayMinMs: 0,
+              postPopulateDelayMaxMs: 0,
+              preSendQuietWindowMs: 0,
+              promptJob: { wantResult: true },
+            },
+          }),
+        ).resolves.toMatchObject({ ok: true, accepted: true, promptId: 'render-miss-result-job' });
+
+        await jest.advanceTimersByTimeAsync(8000);
+
+        const runtimeMessages = chrome.runtime.sendMessage.mock.calls.map(([message]) => message);
+        expect(runtimeMessages).toContainEqual(expect.objectContaining({
+          type: 'RESPONSE_COMPLETE',
+          promptId: 'render-miss-result-job',
+          responseText: expect.stringContaining('Captured assistant answer after render miss'),
+        }));
+        expect(runtimeMessages).not.toContainEqual(expect.objectContaining({
+          type: 'RESPONSE_COMPLETE',
+          promptId: 'render-miss-result-job',
+          error: expect.stringContaining('Prompt text not found in chat after send'),
+        }));
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
     it('should not leave completion polling active after finite PromptQueue timeout', async () => {
       jest.useFakeTimers();
       const logSpy = jest.spyOn(console, 'log');
@@ -970,6 +1084,18 @@ describe('Content Script Integration', () => {
       document.body.removeChild(div);
     });
 
+    it('should preserve paragraph boundaries when reading ProseMirror composer text', () => {
+      const div = document.createElement('div');
+      div.id = 'prompt-textarea';
+      div.className = 'ProseMirror';
+      div.setAttribute('contenteditable', 'true');
+      div.innerHTML = '<p>line one</p><p>line two</p><p>line three</p>';
+      document.body.appendChild(div);
+
+      expect(window.PromptQueueInput.getInputCurrentTextQuiet(div)).toBe('line one\nline two\nline three');
+      document.body.removeChild(div);
+    });
+
     it('should wait for a stable visible composer before resolving readiness', async () => {
       document.body.innerHTML = '<div id="prompt-textarea" contenteditable="plaintext-only" role="textbox" style="display:none"></div>';
       const hiddenComposer = document.getElementById('prompt-textarea');
@@ -1114,6 +1240,12 @@ describe('ChatGPT selectors', () => {
       const match = findRenderedMessageMatch('Hello from queued prompt');
 
       expect(match).not.toBeNull();
+    });
+
+    it('should not block result jobs on prompt render verification failure', () => {
+      expect(shouldBlockOnPromptRenderFailure({ promptJob: { wantResult: true } })).toBe(false);
+      expect(shouldBlockOnPromptRenderFailure({ promptJob: { wantResult: false } })).toBe(true);
+      expect(shouldBlockOnPromptRenderFailure({})).toBe(true);
     });
 
     it('should prefer a custom prompt selector when it matches a visible element', () => {
@@ -1469,6 +1601,24 @@ describe('Background settings sanitization', () => {
 
     expect(helpers.releaseSendLease('prompt-a', 'prompt-submitted')).toBe(true);
     expect(helpers.getSendLeaseSnapshot()).toBeNull();
+  });
+
+  it('should reuse the stored prompt-job tab for the same conversation key', async () => {
+    const helpers = global.PromptQueueBackgroundTest;
+    const stored = {
+      promptJobsConversationTabs: {
+        p10: 42,
+      },
+    };
+    chrome.storage.local.get.mockImplementationOnce(async () => stored);
+    chrome.tabs.get.mockResolvedValueOnce({ id: 42, url: 'https://chatgpt.com/c/existing', status: 'complete' });
+
+    const tab = await helpers.findOrCreatePromptJobsTab('p10');
+
+    expect(tab).toMatchObject({ id: 42 });
+    expect(chrome.tabs.query).not.toHaveBeenCalled();
+    chrome.storage.local.get.mockReset();
+    chrome.tabs.get.mockReset();
   });
 
   it('should not allow in-flight recovery only because max wait elapsed in infinite mode', () => {

@@ -37,6 +37,7 @@ JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS = 300
 PROMPT_JOB_RESULT_TEXT_CHARS = 20000
 PROMPT_JOB_CLAIM_TTL_SECONDS = 300
 PROMPT_JOB_RESULT_MAX_AGE_SECONDS = JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
+PROMPT_JOB_UNCLAIMED_TTL_SECONDS = JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
 
 class TranscriptionMonitor:
     def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
@@ -53,6 +54,7 @@ class TranscriptionMonitor:
         self.job_watch_announced = set()
         self.prompt_job_claim_ttl_seconds = PROMPT_JOB_CLAIM_TTL_SECONDS
         self.prompt_job_result_max_age_seconds = PROMPT_JOB_RESULT_MAX_AGE_SECONDS
+        self.prompt_job_unclaimed_ttl_seconds = PROMPT_JOB_UNCLAIMED_TTL_SECONDS
         
     def send_message(self, message):
         """Send message to Chrome extension"""
@@ -307,6 +309,8 @@ class TranscriptionMonitor:
         }
         if payload.get("source"):
             result["source"] = payload.get("source")
+        if payload.get("conversation_key"):
+            result["conversationKey"] = payload.get("conversation_key")
         return result
 
     def finish_job(self, message):
@@ -359,6 +363,10 @@ class TranscriptionMonitor:
             message.get("resultMaxAgeSeconds"),
             PROMPT_JOB_RESULT_MAX_AGE_SECONDS,
         )
+        self.prompt_job_unclaimed_ttl_seconds = self.coerce_seconds(
+            message.get("unclaimedTtlSeconds"),
+            PROMPT_JOB_UNCLAIMED_TTL_SECONDS,
+        )
         try:
             poll_seconds = max(float(poll_ms) / 1000.0, 0.001)
         except (TypeError, ValueError):
@@ -401,12 +409,16 @@ class TranscriptionMonitor:
                     if not JOB_FILE_RE.fullmatch(name):
                         continue
                     current_files.add(name)
+                    try:
+                        age_seconds = time.time() - path.stat().st_mtime
+                    except OSError:
+                        continue
+                    if age_seconds > self.prompt_job_unclaimed_ttl_seconds:
+                        if self.write_unclaimed_job_expired_result(Path(folder), path):
+                            continue
                     if name in self.job_watch_announced:
                         continue
-                    try:
-                        if time.time() - path.stat().st_mtime > JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS:
-                            continue
-                    except OSError:
+                    if age_seconds > JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS:
                         continue
                     payload = self.read_job_payload(path)
                     job_id = payload.get("id")
@@ -423,6 +435,8 @@ class TranscriptionMonitor:
                     }
                     if payload.get("source"):
                         message["source"] = payload.get("source")
+                    if payload.get("conversation_key"):
+                        message["conversationKey"] = payload.get("conversation_key")
                     self.send_message(message)
                 self.job_watch_announced.intersection_update(current_files)
             except OSError:
@@ -434,11 +448,13 @@ class TranscriptionMonitor:
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             source = data.get("source")
+            conversation_key = data.get("conversation_key")
             return {
                 "id": data.get("id"),
                 "text": data.get("text"),
                 "want_result": data.get("want_result") is True,
                 "source": source if isinstance(source, str) else "",
+                "conversation_key": conversation_key.strip() if isinstance(conversation_key, str) else "",
             }
         except (OSError, json.JSONDecodeError, TypeError):
             return {
@@ -446,6 +462,7 @@ class TranscriptionMonitor:
                 "text": None,
                 "want_result": False,
                 "source": "",
+                "conversation_key": "",
             }
 
     def write_result_file(self, folder, job_id, status, text, error=None, reason=None):
@@ -477,6 +494,30 @@ class TranscriptionMonitor:
                     tmp_path.unlink()
             except OSError:
                 pass
+
+    def write_unclaimed_job_expired_result(self, folder, path):
+        match = JOB_FILE_RE.fullmatch(path.name)
+        if not match:
+            return False
+        payload = self.read_job_payload(path)
+        if payload.get("want_result") is not True:
+            return False
+        result_path = folder / f"result_{match.group(1)}.json"
+        if not result_path.exists():
+            self.write_result_file(
+                folder,
+                match.group(1),
+                "error",
+                "",
+                "job_unclaimed_expired",
+                reason="job_unclaimed_expired",
+            )
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        self.job_watch_announced.discard(path.name)
+        return True
 
     def write_expired_claim_results(self, folder):
         now = time.time()

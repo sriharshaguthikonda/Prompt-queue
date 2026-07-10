@@ -1,6 +1,26 @@
 <!-- codex-handoff session_id=019e844b-1563-7323-9d36-41140067cae2 -->
 # Handoff
 
+## 2026-07-09 +0530 — ChatGPT browser bridge result-return patch
+
+- Repo: `C:\Windows_software\Chrome_extensions\Prompt-queue`
+- Branch observed: `feature/bridge-chatgpt-roundtrip`
+- Task: fix `want_result` browser-bridge jobs returning `Prompt text not found in chat after send` even after ChatGPT responded.
+
+Implemented:
+- `content.js`: post-send prompt-bubble render miss is diagnostic only for `want_result` jobs; hard failures remain for insertion mismatch, empty prompt, no stream/response, stop-word stop, and empty captured response.
+- `background.js` / `background-prompt-jobs.js`: `conversationKey` correlation and stored ChatGPT tab reuse by conversation key.
+- `native_host.py`: stale unclaimed plain `want_result` `job_*.json` files expire to `result_<id>.json` with `error:"job_unclaimed_expired"`; voice jobs unchanged.
+- Tests updated for render-miss continuation, same-tab reuse, stale plain-job expiry, and unchanged voice behavior.
+
+Verification:
+- `node --check content.js; node --check background.js; node --check background-prompt-jobs.js`
+- `PYTHONPATH=. python -m pytest -q` → `22 passed`
+- `NODE_OPTIONS='--experimental-vm-modules' npx jest --runInBand` → `10 suites passed / 162 tests`
+
+Runtime note:
+- Reload the unpacked extension before live E2E; old service-worker/content-script copies still have the abort behavior.
+
 ## Status
 
 - Repo: `C:\Windows_software\Chrome_extensions\Prompt-queue`

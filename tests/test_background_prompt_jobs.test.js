@@ -24,6 +24,7 @@ describe('BackgroundPromptJobs', () => {
       claimedFile: 'job_1.claimed.json',
       folder: 'C:/jobs',
       source: 'model_bridge',
+      conversationKey: 'default',
     });
   });
 

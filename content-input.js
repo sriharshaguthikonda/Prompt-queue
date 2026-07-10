@@ -1,5 +1,5 @@
 (function () {
-  const INPUT_VERSION = '2026-06-02.input-v1';
+  const INPUT_VERSION = '2026-07-09.input-v2';
   if (window.PromptQueueInput?.version === INPUT_VERSION) return;
 
   function isContentEditableElement(el) {
@@ -158,9 +158,34 @@
     setNativeInputValue(el, text);
   }
 
+  function readContentEditableText(el) {
+    if (!el) return '';
+    if (typeof el.innerText === 'string') return el.innerText;
+
+    const blockTags = new Set(['ADDRESS', 'ARTICLE', 'ASIDE', 'BLOCKQUOTE', 'DIV', 'LI', 'MAIN', 'P', 'PRE', 'SECTION']);
+    const parts = [];
+    const visit = (node) => {
+      if (!node) return;
+      if (node.nodeType === Node.TEXT_NODE) {
+        parts.push(node.nodeValue || '');
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const tag = node.tagName;
+      if (tag === 'BR') {
+        parts.push('\n');
+        return;
+      }
+      Array.from(node.childNodes || []).forEach(visit);
+      if (blockTags.has(tag)) parts.push('\n');
+    };
+    visit(el);
+    return parts.join('').replace(/\n+$/g, '');
+  }
+
   function getInputCurrentTextQuiet(el) {
     if (!el) return '';
-    if (isContentEditableElement(el)) return el.textContent || '';
+    if (isContentEditableElement(el)) return readContentEditableText(el);
     if (typeof el.value === 'string') return el.value;
     return el.textContent || '';
   }
@@ -183,6 +208,7 @@
     getInputCurrentTextQuiet,
     getInputTextLengthQuiet,
     isContentEditableElement,
+    readContentEditableText,
     setTextInInput,
   });
 })();

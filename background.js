@@ -219,7 +219,7 @@ const DEFAULT_SETTINGS = {
   memory: DEFAULT_MEMORY_SETTINGS,
   promptJobs: DEFAULT_PROMPT_JOBS_SETTINGS,
 };
-const CONTENT_SCRIPT_VERSION = '2026-06-12.response-timeout-owner-v2';
+const CONTENT_SCRIPT_VERSION = '2026-07-09.prompt-job-capture-v1';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
@@ -1747,6 +1747,7 @@ if (self.__PROMPT_QUEUE_TEST__) {
     waitForTriggeredTabLoad,
     testContentScriptConnection,
     ensureContentScriptReady,
+    findOrCreatePromptJobsTab,
   };
 }
 
@@ -4518,6 +4519,7 @@ function startTranscriptionPolling() {
 // first (priority 0 claims instantly; higher priorities wait priority*1500ms
 // before attempting a claim, so a "designated" profile normally wins).
 const PROMPT_JOBS_CLAIMANT_STORAGE_KEY = 'promptJobsClaimantId';
+const PROMPT_JOBS_CONVERSATION_TABS_STORAGE_KEY = 'promptJobsConversationTabs';
 const PROMPT_JOBS_RECONNECT_BASE_MS = 1000;
 const PROMPT_JOBS_RECONNECT_MAX_MS = 30000;
 const PROMPT_JOBS_TAB_SETTLE_MS = 2000;
@@ -4527,6 +4529,7 @@ let promptJobsWatchedFolder = '';
 let promptJobsReconnectTimer = null;
 let promptJobsReconnectDelayMs = PROMPT_JOBS_RECONNECT_BASE_MS;
 let promptJobsClaimantIdCache = null;
+let promptJobsConversationTabCache = null;
 // jobFile -> { text, id, timer } for jobs currently waiting out their priority delay.
 const promptJobsPendingClaims = new Map();
 // jobFile -> { claimedFile } for jobs this profile is actively running, used to correlate finish_job.
@@ -4745,6 +4748,7 @@ async function handleClaimResult(msg) {
     claimedFile,
     id: msg.id,
     wantResult: shouldDeferFinish,
+    conversationKey: correlation?.conversationKey || null,
     textLength: text.length,
   });
   promptJobsActiveRuns.set(jobFile, { claimedFile, wantResult: shouldDeferFinish });
@@ -4761,7 +4765,7 @@ async function handleClaimResult(msg) {
   }
 
   try {
-    const tab = await findOrCreatePromptJobsTab();
+    const tab = await findOrCreatePromptJobsTab(correlation?.conversationKey || msg.conversationKey || msg.conversation_key);
     const result = await startAutomationForTab(tab.id, [text], state.options || {}, {
       promptJobCorrelation: correlation,
     });
@@ -4815,15 +4819,87 @@ async function finishPromptJob(claimedFile, status, details = {}) {
   }
 }
 
-async function findOrCreatePromptJobsTab() {
+function normalizePromptJobsConversationKey(value) {
+  const helper = self.BackgroundPromptJobs?.normalizeConversationKey;
+  if (typeof helper === 'function') return helper(value);
+  const key = typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
+  return key || 'default';
+}
+
+function isPromptJobsChatGptUrl(url) {
+  if (!url || typeof url !== 'string') return false;
+  try {
+    const parsed = new URL(url);
+    return /(^|\.)chatgpt\.com$/.test(parsed.hostname)
+      || /(^|\.)chat\.openai\.com$/.test(parsed.hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
+async function getPromptJobsConversationTabs() {
+  if (promptJobsConversationTabCache && typeof promptJobsConversationTabCache === 'object') {
+    return promptJobsConversationTabCache;
+  }
+  try {
+    const stored = await chrome.storage.local.get(PROMPT_JOBS_CONVERSATION_TABS_STORAGE_KEY);
+    const raw = stored?.[PROMPT_JOBS_CONVERSATION_TABS_STORAGE_KEY];
+    promptJobsConversationTabCache = raw && typeof raw === 'object' ? { ...raw } : {};
+  } catch (_) {
+    promptJobsConversationTabCache = {};
+  }
+  return promptJobsConversationTabCache;
+}
+
+async function savePromptJobsConversationTabs(map) {
+  promptJobsConversationTabCache = { ...(map || {}) };
+  try {
+    await chrome.storage.local.set({ [PROMPT_JOBS_CONVERSATION_TABS_STORAGE_KEY]: promptJobsConversationTabCache });
+  } catch (e) {
+    console.warn('[PromptJobs] Failed to persist conversation tab map', { error: e?.message || String(e) });
+  }
+}
+
+async function rememberPromptJobsConversationTab(conversationKey, tabId) {
+  if (!Number.isInteger(tabId)) return;
+  const key = normalizePromptJobsConversationKey(conversationKey);
+  const map = await getPromptJobsConversationTabs();
+  if (map[key] === tabId) return;
+  map[key] = tabId;
+  await savePromptJobsConversationTabs(map);
+}
+
+async function getStoredPromptJobsTab(conversationKey) {
+  const key = normalizePromptJobsConversationKey(conversationKey);
+  const map = await getPromptJobsConversationTabs();
+  const tabId = Number(map[key]);
+  if (!Number.isInteger(tabId)) return null;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    if (tab && !tab.discarded && isPromptJobsChatGptUrl(tab.url)) {
+      return tab;
+    }
+  } catch (_) {}
+  delete map[key];
+  await savePromptJobsConversationTabs(map);
+  return null;
+}
+
+async function findOrCreatePromptJobsTab(conversationKey = 'default') {
+  const key = normalizePromptJobsConversationKey(conversationKey);
+  const storedTab = await getStoredPromptJobsTab(key);
+  if (storedTab) return storedTab;
+
   const tabs = await chrome.tabs.query({ url: ['*://chatgpt.com/*', '*://chat.openai.com/*'] });
   if (tabs.length > 0) {
     const mostRecent = tabs.slice().sort((a, b) => (b.lastAccessed || 0) - (a.lastAccessed || 0))[0];
+    await rememberPromptJobsConversationTab(key, mostRecent.id);
     return mostRecent;
   }
   const created = await chrome.tabs.create({ url: 'https://chatgpt.com/', active: false });
   await waitForTabComplete(created.id);
   await new Promise((resolve) => setTimeout(resolve, PROMPT_JOBS_TAB_SETTLE_MS));
+  await rememberPromptJobsConversationTab(key, created.id);
   return created;
 }
 

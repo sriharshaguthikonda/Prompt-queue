@@ -4,11 +4,12 @@
     "id": "Prompt-queue",
     "root": ".",
     "remoteUrl": "https://github.com/sriharshaguthikonda/Prompt-queue.git",
-    "defaultBranch": "codex/memory-pack-sidepanel-native",
+    "defaultBranch": "feature/bridge-chatgpt-roundtrip",
     "localPaths": [
       ".agent-reports",
       ".gitignore",
       ".planning",
+      ".pytest_tmp",
       ".windsurf",
       "AGENTS.md",
       "Plab 2 Feedback v22 - Speculum Examination Teaching.html",
@@ -23,17 +24,21 @@
       "TRANSCRIPTION_MONITOR_SETUP.md",
       "USER_GUIDE.md",
       "background-parallel-utils.js",
+      "background-prompt-jobs.js",
       "background.js",
       "console.log",
+      "content-chat-state.js",
+      "content-input.js",
+      "content-status.js",
       "content-targets.js",
       "content.js",
+      "docs",
       "images",
       "install_native_host.bat",
       "install_native_host.ps1",
       "jest.config.js",
       "manifest.json",
       "native_host.example.json",
-      "native_host.json",
       "native_host.py",
       "offscreen.html",
       "offscreen.js",
@@ -47,7 +52,9 @@
       "popup-memory.js",
       "popup-prompt-plan.js",
       "popup-queue.js",
+      "popup-send-settings.js",
       "popup-settings.js",
+      "popup-tab-context.js",
       "popup-target-settings.js",
       "popup.html",
       "popup.html.bak",
@@ -59,14 +66,16 @@
       "styles.css",
       "tampermonkey-automation-core.user.js",
       "tests",
-      "tools"
+      "tools",
+      "try_popup.html.bak"
     ]
   },
   "sourceState": {
-    "commit": "2db449ce209a90a44d52e3b5cac4e1e2f7363f44",
-    "branch": "codex/memory-pack-sidepanel-native",
+    "commit": "995db5b40dd895e228252d077b7db0778eddbed4",
+    "branch": "feature/bridge-chatgpt-roundtrip",
     "dirty": true,
-    "generatedForCommit": "2db449ce209a90a44d52e3b5cac4e1e2f7363f44",
+    "generatedForCommit": "995db5b40dd895e228252d077b7db0778eddbed4",
+    "sourceFingerprint": "8de3c8da7adc48d7d0e4c55272caf4e9fe53302805aca769924372c956a15017",
     "dirtyReason": "uncommitted changes"
   },
   "policy": {
@@ -79,7 +88,7 @@
     "allowGraphPilots": false,
     "runOnPush": false
   },
-  "generatedAt": "2026-06-01T16:49:27.001453Z",
+  "generatedAt": "2026-07-09T05:55:30.678188Z",
   "toolRuns": [
     {
       "id": "repomix.basic",
@@ -110,12 +119,12 @@
       "id": "serena.basic",
       "tool": "serena",
       "mode": "basic",
-      "status": "skipped",
-      "outputRef": "artifacts/serena/symbols.json",
+      "status": "passed",
+      "outputRef": "artifacts/serena/capability.json",
       "warnings": [
-        "Serena records symbol-navigation guidance without auto-configuring global state.",
-        "Serena is unavailable on PATH and no command override is configured.",
-        "Symbol-navigation output lives in an artifact path and is not committed by default."
+        "Serena records ephemeral live-symbol capability without auto-configuring global state.",
+        "Suggested command: `serena start-mcp-server --project-from-cwd --context=codex`.",
+        "Serena query results are ephemeral; durable repo context stays in Repo_maps artifacts."
       ]
     }
   ],
@@ -135,7 +144,7 @@
       },
       {
         "name": "serena",
-        "path": "artifacts/serena/symbols.json",
+        "path": "artifacts/serena/capability.json",
         "kind": "native"
       },
       {
