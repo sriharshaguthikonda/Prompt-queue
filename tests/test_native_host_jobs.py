@@ -8,7 +8,7 @@ from logging.handlers import RotatingFileHandler
 import native_host
 
 
-def write_job(path, job_id="abc", text="hello", want_result=False, source=None, attempts=None):
+def write_job(path, job_id="abc", text="hello", want_result=False, source=None, attempts=None, **extra):
     payload = {"id": job_id, "text": text, "ts": 123}
     if want_result:
         payload["want_result"] = True
@@ -16,6 +16,7 @@ def write_job(path, job_id="abc", text="hello", want_result=False, source=None, 
         payload["source"] = source
     if attempts is not None:
         payload["attempts"] = attempts
+    payload.update(extra)
     path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -97,6 +98,7 @@ def test_finish_job_want_result_done_writes_result_and_removes_claim(tmp_path):
         "claimedFile": claimed_file.name,
         "status": "done",
         "responseText": "assistant answer",
+        "conversationUrl": "https://chatgpt.com/c/bridge",
     })
 
     result_file = tmp_path / "result_bridge.json"
@@ -109,7 +111,34 @@ def test_finish_job_want_result_done_writes_result_and_removes_claim(tmp_path):
     assert result["error"] is None
     assert result["truncated"] is False
     assert result["text_chars"] == len("assistant answer")
+    assert result["conversation_url"] == "https://chatgpt.com/c/bridge"
     assert "ts" in result
+
+
+def test_claim_job_passes_bridge_navigation_fields(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    job_file = tmp_path / "job_bridge_nav.json"
+    write_job(
+        job_file,
+        job_id="bridge_nav",
+        text="prompt text",
+        want_result=True,
+        source="model_bridge",
+        target_url="https://chatgpt.com/c/thread",
+        new_chat=True,
+    )
+
+    response = monitor.handle_message({
+        "type": "claim_job",
+        "folder": str(tmp_path),
+        "jobFile": job_file.name,
+        "claimantId": "worker_1",
+    })
+
+    assert response["type"] == "claim_result"
+    assert response["ok"] is True
+    assert response["targetUrl"] == "https://chatgpt.com/c/thread"
+    assert response["newChat"] is True
 
 
 def test_finish_job_want_result_error_writes_error_result(tmp_path):

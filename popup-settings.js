@@ -14,6 +14,8 @@ import {
   readSendTimingSettingsFromUI,
 } from './popup-send-settings.js';
 
+const DEFAULT_PROMPT_JOBS_FOLDER = 'C:\\AI\\bridge_jobs\\chatgpt_browser';
+
 function applyMaxWaitSemanticsText() {
   const checkbox = document.getElementById('enableMaxWaitTimeout');
   if (!checkbox) return;
@@ -67,7 +69,7 @@ export async function loadSettingsIntoUI() {
       const promptJobsEnabled = document.getElementById('promptJobsEnabled');
       if (promptJobsEnabled) promptJobsEnabled.checked = promptJobs.enabled === true;
       const promptJobsFolder = document.getElementById('promptJobsFolder');
-      if (promptJobsFolder) promptJobsFolder.value = promptJobs.folder || '';
+      if (promptJobsFolder) promptJobsFolder.value = promptJobs.folder || DEFAULT_PROMPT_JOBS_FOLDER;
       const promptJobsPriority = document.getElementById('promptJobsPriority');
       if (promptJobsPriority) promptJobsPriority.value = Number.isFinite(Number(promptJobs.priority)) ? Number(promptJobs.priority) : 0;
       loadSendTimingSettingsIntoUI(s);
@@ -135,7 +137,7 @@ export async function saveSettingsFromUI() {
       targetSelectors: targetValidation.targetSelectors,
       promptJobs: {
         enabled: document.getElementById('promptJobsEnabled')?.checked === true,
-        folder: (document.getElementById('promptJobsFolder')?.value || '').trim(),
+        folder: (document.getElementById('promptJobsFolder')?.value || DEFAULT_PROMPT_JOBS_FOLDER).trim(),
         priority: Number(document.getElementById('promptJobsPriority')?.value) || 0,
       },
       ...readSendTimingSettingsFromUI(),

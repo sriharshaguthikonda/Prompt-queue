@@ -333,6 +333,10 @@ class TranscriptionMonitor:
             result["source"] = payload.get("source")
         if payload.get("conversation_key"):
             result["conversationKey"] = payload.get("conversation_key")
+        if payload.get("target_url"):
+            result["targetUrl"] = payload.get("target_url")
+        if payload.get("new_chat") is True:
+            result["newChat"] = True
         return result
 
     def finish_job(self, message):
@@ -355,6 +359,7 @@ class TranscriptionMonitor:
                         status,
                         message.get("responseText", ""),
                         None,
+                        conversation_url=message.get("conversationUrl", ""),
                     )
                 claimed_path.unlink()
             else:
@@ -365,6 +370,7 @@ class TranscriptionMonitor:
                         status,
                         "",
                         message.get("error") or status,
+                        conversation_url=message.get("conversationUrl", ""),
                     )
                     claimed_path.unlink()
                 else:
@@ -499,6 +505,8 @@ class TranscriptionMonitor:
                 data = json.load(f)
             source = data.get("source")
             conversation_key = data.get("conversation_key")
+            target_url = data.get("target_url")
+            new_chat = data.get("new_chat")
             attempts = data.get("attempts", 0)
             return {
                 "id": data.get("id"),
@@ -506,6 +514,8 @@ class TranscriptionMonitor:
                 "want_result": data.get("want_result") is True,
                 "source": source if isinstance(source, str) else "",
                 "conversation_key": conversation_key.strip() if isinstance(conversation_key, str) else "",
+                "target_url": target_url.strip() if isinstance(target_url, str) else "",
+                "new_chat": new_chat is True,
                 "attempts": attempts if isinstance(attempts, int) and attempts >= 0 else 0,
             }
         except (OSError, json.JSONDecodeError, TypeError):
@@ -515,6 +525,8 @@ class TranscriptionMonitor:
                 "want_result": False,
                 "source": "",
                 "conversation_key": "",
+                "target_url": "",
+                "new_chat": False,
                 "attempts": 0,
             }
 
@@ -536,6 +548,7 @@ class TranscriptionMonitor:
         reason=None,
         claimed_by=None,
         attempts=None,
+        conversation_url="",
     ):
         response_text = text if isinstance(text, str) else ""
         text_chars = len(response_text)
@@ -557,6 +570,8 @@ class TranscriptionMonitor:
             payload["claimed_by"] = claimed_by
         if attempts is not None:
             payload["attempts"] = attempts
+        if isinstance(conversation_url, str) and conversation_url:
+            payload["conversation_url"] = conversation_url
         result_path = folder / f"result_{job_id}.json"
         tmp_path = folder / f".result_{job_id}.{os.getpid()}.{threading.get_ident()}.tmp"
         try:

@@ -170,7 +170,7 @@ const DEFAULT_MEMORY_SETTINGS = {
 
 const DEFAULT_PROMPT_JOBS_SETTINGS = {
   enabled: false,
-  folder: 'C:\\Windows_software\\openai whisper\\prompt_jobs',
+  folder: 'C:\\AI\\bridge_jobs\\chatgpt_browser',
   priority: 0,
 };
 
@@ -1247,10 +1247,12 @@ async function finishPromptJobCorrelation(session, status, details = {}) {
     folder: correlation.folder || promptJobsWatchedFolder,
     responseText: details.responseText,
     error: details.error,
+    conversationUrl: details.conversationUrl || '',
   });
   if (finished) {
     session.promptJobCorrelation = null;
     await saveTabSessions();
+    postPromptJobsHeartbeat(false);
   }
   return finished;
 }
@@ -3640,7 +3642,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             if (message.error) {
               if (hasPromptJobResult) {
-                await finishPromptJobCorrelation(session, 'error', { error: message.error });
+                await finishPromptJobCorrelation(session, 'error', { error: message.error, conversationUrl: message.url || '' });
                 await stopTabSession(tabId, { reason: 'completedWithErrors', emitComplete: true });
                 return;
               }
@@ -3655,20 +3657,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
             if (message.stoppedByStopWord) {
               if (hasPromptJobResult) {
-                await finishPromptJobCorrelation(session, 'error', { error: 'stopped_by_stop_word' });
+                await finishPromptJobCorrelation(session, 'error', { error: 'stopped_by_stop_word', conversationUrl: message.url || '' });
               }
               await stopTabSession(tabId, { reason: 'stoppedByStopWord', emitComplete: true });
               return;
             }
 
             if (promptJobEmptyResponse) {
-              await finishPromptJobCorrelation(session, 'error', { error: 'empty_response' });
+              await finishPromptJobCorrelation(session, 'error', { error: 'empty_response', conversationUrl: message.url || '' });
               await stopTabSession(tabId, { reason: 'completedWithErrors', emitComplete: true });
               return;
             }
 
             if (hasPromptJobResult) {
-              await finishPromptJobCorrelation(session, 'done', { responseText: message.responseText || '' });
+              await finishPromptJobCorrelation(session, 'done', {
+                responseText: message.responseText || '',
+                conversationUrl: message.url || '',
+              });
             }
 
             session.currentRetryCount = 0;
@@ -4516,10 +4521,10 @@ function startTranscriptionPolling() {
 // same job_found push, so claiming is a cross-profile race arbitrated by the
 // native host via an atomic file rename (claim_job -> claim_result). Exactly
 // one profile wins; losers do nothing. priority staggers which profile tries
-// first (priority 0 claims instantly; higher priorities wait priority*1500ms
-// before attempting a claim, so a "designated" profile normally wins).
+// first when it is idle. Priority is still used as a short tie-break delay.
 const PROMPT_JOBS_CLAIMANT_STORAGE_KEY = 'promptJobsClaimantId';
 const PROMPT_JOBS_CONVERSATION_TABS_STORAGE_KEY = 'promptJobsConversationTabs';
+const PROMPT_JOBS_BRIDGE_TABS_STORAGE_KEY = 'promptJobsBridgeTabs';
 const PROMPT_JOBS_RECONNECT_BASE_MS = 1000;
 const PROMPT_JOBS_RECONNECT_MAX_MS = 30000;
 const PROMPT_JOBS_TAB_SETTLE_MS = 2000;
@@ -4530,6 +4535,7 @@ let promptJobsReconnectTimer = null;
 let promptJobsReconnectDelayMs = PROMPT_JOBS_RECONNECT_BASE_MS;
 let promptJobsClaimantIdCache = null;
 let promptJobsConversationTabCache = null;
+let promptJobsBridgeTabCache = null;
 // jobFile -> { text, id, timer } for jobs currently waiting out their priority delay.
 const promptJobsPendingClaims = new Map();
 // jobFile -> { claimedFile } for jobs this profile is actively running, used to correlate finish_job.
@@ -4635,13 +4641,36 @@ function connectPromptJobsPort(folder) {
     }
   });
 
+  (async () => {
+    try {
+      const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
+      const claimantId = await getPromptJobsClaimantId();
+      promptJobsPort.postMessage({
+        type: 'watch_jobs',
+        folder,
+        claimant_id: claimantId,
+        priority: Math.max(0, Number(jobs.priority) || 0),
+      });
+      console.log('[PromptJobs] Sent watch_jobs', { folder, claimantId, priority: Math.max(0, Number(jobs.priority) || 0) });
+    } catch (e) {
+      console.error('[PromptJobs] Failed to post watch_jobs:', e);
+      schedulePromptJobsReconnect();
+    }
+  })();
+}
+
+function postPromptJobsLog(line) {
+  if (!promptJobsPort || typeof line !== 'string' || !line.trim()) return;
   try {
-    promptJobsPort.postMessage({ type: 'watch_jobs', folder });
-    console.log('[PromptJobs] Sent watch_jobs', { folder });
-  } catch (e) {
-    console.error('[PromptJobs] Failed to post watch_jobs:', e);
-    schedulePromptJobsReconnect();
-  }
+    promptJobsPort.postMessage({ type: 'log', line: line.trim() });
+  } catch (_) {}
+}
+
+function postPromptJobsHeartbeat(busy) {
+  if (!promptJobsPort) return;
+  try {
+    promptJobsPort.postMessage({ type: 'heartbeat', busy: busy === true });
+  } catch (_) {}
 }
 
 function schedulePromptJobsReconnect() {
@@ -4682,10 +4711,9 @@ async function handlePromptJobsPortMessage(msg) {
   }
 }
 
-// job_found arrives at every profile watching the folder. Ignore if this
-// profile is already busy; otherwise wait out this profile's priority delay
-// (0 = claim instantly) and re-check before attempting the claim, so a busy
-// profile that becomes free mid-wait still backs off correctly.
+// job_found arrives at every profile watching the folder. Ignore when a live,
+// lower-priority non-busy instance is available; otherwise use priority only
+// as a short tie-break stagger and re-check local busy state before claiming.
 async function handleJobFound(msg) {
   const jobFile = msg?.jobFile;
   if (!jobFile || promptJobsPendingClaims.has(jobFile) || promptJobsActiveRuns.has(jobFile)) {
@@ -4697,16 +4725,23 @@ async function handleJobFound(msg) {
   }
 
   const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
-  const delayMs = Math.max(0, Number(jobs.priority) || 0) * 1500;
+  const priority = Math.max(0, Number(jobs.priority) || 0);
+  const claimantId = await getPromptJobsClaimantId();
+  if (!self.BackgroundPromptJobs.shouldClaimPromptJob(msg.instances, claimantId, priority)) {
+    console.log('[PromptJobs] Skipping job_found, lower-priority idle instance is alive', { jobFile });
+    postPromptJobsLog(`skip job=${msg.id || jobFile} reason=lower_priority_idle`);
+    return;
+  }
+  const delayMs = priority * 250;
 
   const attemptClaim = async () => {
     promptJobsPendingClaims.delete(jobFile);
     if (isAutomationActiveInThisProfile()) {
       console.log('[PromptJobs] Skipping claim, automation became active during priority delay', { jobFile });
+      postPromptJobsLog(`skip job=${msg.id || jobFile} reason=local_busy`);
       return;
     }
     if (!promptJobsPort) return;
-    const claimantId = await getPromptJobsClaimantId();
     try {
       promptJobsPort.postMessage({
         type: 'claim_job',
@@ -4715,8 +4750,10 @@ async function handleJobFound(msg) {
         claimantId,
       });
       console.log('[PromptJobs] Sent claim_job', { jobFile });
+      postPromptJobsLog(`claim_sent job=${msg.id || jobFile}`);
     } catch (e) {
       console.error('[PromptJobs] Failed to post claim_job:', e);
+      postPromptJobsLog(`claim_error job=${msg.id || jobFile}`);
     }
   };
 
@@ -4732,6 +4769,7 @@ async function handleClaimResult(msg) {
   const jobFile = msg?.jobFile;
   if (!msg?.ok) {
     console.log('[PromptJobs] Lost claim race (or claim failed)', { jobFile });
+    postPromptJobsLog(`claim_lost job=${msg?.id || jobFile || 'unknown'}`);
     return;
   }
   const claimedFile = msg.claimedFile;
@@ -4751,21 +4789,36 @@ async function handleClaimResult(msg) {
     conversationKey: correlation?.conversationKey || null,
     textLength: text.length,
   });
+  postPromptJobsLog(`claim_ok job=${msg.id || jobFile}`);
   promptJobsActiveRuns.set(jobFile, { claimedFile, wantResult: shouldDeferFinish });
 
   if (!text.trim()) {
     console.error('[PromptJobs] Claimed job has empty text, reporting error', { jobFile, claimedFile });
+    postPromptJobsLog(`send_error job=${msg.id || jobFile} reason=empty_prompt`);
     await finishPromptJob(claimedFile, 'error', {
       folder: correlation?.folder || promptJobsWatchedFolder,
       error: 'empty_prompt',
     });
+    postPromptJobsHeartbeat(false);
     promptJobsActiveRuns.delete(jobFile);
     promptJobsNotify('Voice prompt job failed', 'Claimed job had no text to send.');
     return;
   }
 
   try {
-    const tab = await findOrCreatePromptJobsTab(correlation?.conversationKey || msg.conversationKey || msg.conversation_key);
+    if (correlation?.targetUrl && !self.BackgroundPromptJobs.isAllowedPromptJobTargetUrl(correlation.targetUrl)) {
+      await finishPromptJob(claimedFile, 'error', {
+        folder: correlation?.folder || promptJobsWatchedFolder,
+        error: 'invalid_target_url',
+      });
+      postPromptJobsLog(`send_error job=${msg.id || jobFile} reason=invalid_target_url`);
+      return;
+    }
+    const tab = correlation?.source === 'model_bridge'
+      ? await findOrCreateBridgeTab(correlation)
+      : await findOrCreatePromptJobsTab(correlation?.conversationKey || msg.conversationKey || msg.conversation_key);
+    postPromptJobsHeartbeat(true);
+    postPromptJobsLog(`send_start job=${msg.id || jobFile}`);
     const result = await startAutomationForTab(tab.id, [text], state.options || {}, {
       promptJobCorrelation: correlation,
     });
@@ -4776,14 +4829,18 @@ async function handleClaimResult(msg) {
       promptJobsNotify('Prompt job sent', 'Waiting for ChatGPT response.');
     } else {
       await finishPromptJob(claimedFile, 'done');
+      postPromptJobsHeartbeat(false);
+      postPromptJobsLog(`finish job=${msg.id || jobFile} status=done`);
       promptJobsNotify('Voice prompt sent', 'Prompt job was sent to ChatGPT.');
     }
   } catch (e) {
     console.error('[PromptJobs] Failed to send claimed job:', e);
+    postPromptJobsLog(`send_error job=${msg.id || jobFile}`);
     await finishPromptJob(claimedFile, 'error', {
       folder: correlation?.folder || promptJobsWatchedFolder,
       error: e?.message || e,
     });
+    postPromptJobsHeartbeat(false);
     promptJobsNotify('Voice prompt job failed', e?.message || 'Could not send prompt to ChatGPT.');
   } finally {
     promptJobsActiveRuns.delete(jobFile);
@@ -4804,6 +4861,7 @@ async function finishPromptJob(claimedFile, status, details = {}) {
       status,
       responseText: details.responseText,
       error: details.error,
+      conversationUrl: details.conversationUrl,
     }));
     console.log('[PromptJobs] finish_job posted', {
       claimedFile,
@@ -4812,6 +4870,7 @@ async function finishPromptJob(claimedFile, status, details = {}) {
       responseLength: typeof details.responseText === 'string' ? details.responseText.length : 0,
       hasError: details.error !== undefined && details.error !== null,
     });
+    postPromptJobsLog(`finish job=${claimedFile} status=${status}`);
     return true;
   } catch (e) {
     console.error('[PromptJobs] Failed to post finish_job:', e);
@@ -4883,6 +4942,111 @@ async function getStoredPromptJobsTab(conversationKey) {
   delete map[key];
   await savePromptJobsConversationTabs(map);
   return null;
+}
+
+async function getPromptJobsBridgeTabIds() {
+  if (Array.isArray(promptJobsBridgeTabCache)) {
+    return prunePromptJobsBridgeTabIds(promptJobsBridgeTabCache);
+  }
+  try {
+    const stored = await chrome.storage.local.get(PROMPT_JOBS_BRIDGE_TABS_STORAGE_KEY);
+    const raw = stored?.[PROMPT_JOBS_BRIDGE_TABS_STORAGE_KEY];
+    promptJobsBridgeTabCache = Array.isArray(raw) ? raw.map(Number).filter(Number.isInteger) : [];
+  } catch (_) {
+    promptJobsBridgeTabCache = [];
+  }
+  return prunePromptJobsBridgeTabIds(promptJobsBridgeTabCache);
+}
+
+async function savePromptJobsBridgeTabIds(tabIds) {
+  const unique = Array.from(new Set((Array.isArray(tabIds) ? tabIds : []).map(Number).filter(Number.isInteger)));
+  promptJobsBridgeTabCache = unique;
+  try {
+    await chrome.storage.local.set({ [PROMPT_JOBS_BRIDGE_TABS_STORAGE_KEY]: unique });
+  } catch (e) {
+    console.warn('[PromptJobs] Failed to persist bridge tab set', { error: e?.message || String(e) });
+  }
+}
+
+async function prunePromptJobsBridgeTabIds(tabIds) {
+  const kept = [];
+  for (const tabId of Array.from(new Set((Array.isArray(tabIds) ? tabIds : []).map(Number).filter(Number.isInteger)))) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab && !tab.discarded && isPromptJobsChatGptUrl(tab.url)) {
+        kept.push(tabId);
+      }
+    } catch (_) {}
+  }
+  if (!promptJobsBridgeTabCache || kept.length !== promptJobsBridgeTabCache.length || kept.some((id, idx) => id !== promptJobsBridgeTabCache[idx])) {
+    await savePromptJobsBridgeTabIds(kept);
+  } else {
+    promptJobsBridgeTabCache = kept;
+  }
+  return kept;
+}
+
+async function readPromptJobsBridgeCandidates(bridgeTabIds) {
+  const candidates = [];
+  for (const tabId of bridgeTabIds) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (!tab || tab.discarded || !isPromptJobsChatGptUrl(tab.url)) continue;
+      let windowFocused = false;
+      if (tab.active === true && Number.isInteger(tab.windowId)) {
+        try {
+          const win = await chrome.windows.get(tab.windowId);
+          windowFocused = win?.focused === true;
+        } catch (_) {}
+      }
+      candidates.push({ ...tab, windowFocused });
+    } catch (_) {}
+  }
+  return candidates;
+}
+
+async function rememberPromptJobsBridgeTab(tabId) {
+  if (!Number.isInteger(tabId)) return;
+  const current = await getPromptJobsBridgeTabIds();
+  if (current.includes(tabId)) return;
+  current.push(tabId);
+  await savePromptJobsBridgeTabIds(current);
+}
+
+async function preparePromptJobsBridgeTab(tab, correlation) {
+  const targetUrl = correlation?.targetUrl
+    || (correlation?.newChat === true ? 'https://chatgpt.com/' : '');
+  if (targetUrl) {
+    await waitForTriggeredTabLoad(tab.id, () => chrome.tabs.update(tab.id, { url: targetUrl, active: false }));
+  } else if (tab.status !== 'complete') {
+    await waitForTabComplete(tab.id);
+  }
+  await ensureContentScriptReady(tab.id);
+  return chrome.tabs.get(tab.id);
+}
+
+async function findOrCreateBridgeTab(correlation = {}) {
+  const key = normalizePromptJobsConversationKey(correlation.conversationKey);
+  const map = await getPromptJobsConversationTabs();
+  const bridgeTabIds = await getPromptJobsBridgeTabIds();
+  const preferredTabId = bridgeTabIds.includes(Number(map[key])) ? Number(map[key]) : null;
+  if (map[key] && preferredTabId === null) {
+    delete map[key];
+    await savePromptJobsConversationTabs(map);
+  }
+  const candidates = await readPromptJobsBridgeCandidates(bridgeTabIds);
+  const decision = self.BackgroundPromptJobs.chooseBridgeTab(candidates, bridgeTabIds, { preferredTabId });
+  let tab = null;
+  if (decision.action === 'reuse') {
+    tab = await chrome.tabs.get(decision.tabId);
+  } else {
+    tab = await chrome.tabs.create({ url: 'https://chatgpt.com/', active: false });
+    await waitForTabComplete(tab.id);
+    await rememberPromptJobsBridgeTab(tab.id);
+  }
+  await rememberPromptJobsBridgeTab(tab.id);
+  await rememberPromptJobsConversationTab(key, tab.id);
+  return preparePromptJobsBridgeTab(tab, correlation);
 }
 
 async function findOrCreatePromptJobsTab(conversationKey = 'default') {

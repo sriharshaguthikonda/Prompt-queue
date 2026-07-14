@@ -20,6 +20,7 @@
 
   function normalizePromptJobCorrelation(job, opts = {}) {
     const source = job && typeof job === 'object' ? job : {};
+    const rawPayload = source.payload && typeof source.payload === 'object' ? source.payload : {};
     const promptId = stringOrNull(source.promptId || opts.promptId);
     return {
       jobId: stringOrNull(source.jobId || source.id),
@@ -29,6 +30,8 @@
       folder: stringOrNull(source.folder || opts.folder),
       source: stringOrNull(source.source),
       conversationKey: normalizeConversationKey(source.conversationKey || source.conversation_key || opts.conversationKey),
+      targetUrl: stringOrNull(source.targetUrl || source.target_url || rawPayload.target_url || rawPayload.targetUrl),
+      newChat: source.newChat === true || source.new_chat === true || rawPayload.new_chat === true || rawPayload.newChat === true,
     };
   }
 
@@ -48,10 +51,60 @@
     if (status === 'done' && typeof input.responseText === 'string') {
       message.responseText = input.responseText;
     }
+    if (typeof input.conversationUrl === 'string') {
+      message.conversationUrl = input.conversationUrl;
+    }
     if (status === 'error' && input.error !== undefined && input.error !== null) {
       message.error = normalizePromptJobError(input.error);
     }
     return message;
+  }
+
+  function shouldClaimPromptJob(instances, ownClaimantId, ownPriority) {
+    const ownId = stringOrNull(ownClaimantId);
+    const priority = Number.isFinite(Number(ownPriority)) ? Number(ownPriority) : 0;
+    const aliveInstances = Array.isArray(instances) ? instances : [];
+    return !aliveInstances.some((instance) => {
+      if (!instance || typeof instance !== 'object') return false;
+      const claimantId = stringOrNull(instance.claimant_id || instance.claimantId);
+      if (ownId && claimantId === ownId) return false;
+      if (instance.busy === true) return false;
+      const instancePriority = Number(instance.priority);
+      return Number.isFinite(instancePriority) && instancePriority < priority;
+    });
+  }
+
+  function isAllowedPromptJobTargetUrl(value) {
+    if (typeof value !== 'string') return false;
+    const trimmed = value.trim();
+    if (!trimmed) return false;
+    try {
+      const parsed = new URL(trimmed);
+      return parsed.protocol === 'https:'
+        && (parsed.hostname === 'chatgpt.com' || parsed.hostname === 'chat.openai.com')
+        && (trimmed === parsed.origin || trimmed.startsWith(`${parsed.protocol}//${parsed.hostname}/`));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function chooseBridgeTab(candidates, bridgeTabIds, opts = {}) {
+    const bridgeIds = new Set(Array.isArray(bridgeTabIds) ? bridgeTabIds.map(Number).filter(Number.isInteger) : []);
+    const preferredId = Number(opts.preferredTabId);
+    const validCandidates = (Array.isArray(candidates) ? candidates : [])
+      .filter((tab) => tab && Number.isInteger(Number(tab.id)) && bridgeIds.has(Number(tab.id)))
+      .filter((tab) => !tab.discarded)
+      .filter((tab) => isAllowedPromptJobTargetUrl(tab.url || 'https://chatgpt.com/'))
+      .sort((a, b) => {
+        if (Number(a.id) === preferredId) return -1;
+        if (Number(b.id) === preferredId) return 1;
+        return (b.lastAccessed || 0) - (a.lastAccessed || 0);
+      });
+    const usable = validCandidates.find((tab) => !(tab.active === true && tab.windowFocused === true));
+    if (usable) {
+      return { action: 'reuse', tabId: Number(usable.id) };
+    }
+    return { action: 'create' };
   }
 
   function isEmptyResponse(value) {
@@ -85,6 +138,9 @@
     normalizeConversationKey,
     shouldDeferFinish,
     buildFinishMessage,
+    shouldClaimPromptJob,
+    isAllowedPromptJobTargetUrl,
+    chooseBridgeTab,
     isEmptyResponse,
     composerTextMatches,
     normalizePromptJobError,
