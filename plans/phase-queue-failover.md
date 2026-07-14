@@ -1,6 +1,6 @@
 # Phase: Queue Hardening + Priority Failover + Dedicated Bridge Tab
 
-Status: PLANNED 2026-07-14. Counterpart plan: `C:/AI/mcp-model-bridge/docs/plans/queue-failover-hardening.md` (bridge side). This file owns the shared file-protocol spec.
+Status: IMPLEMENTED 2026-07-14 — P1 `2dec636`, P2 `e251b78`, fixes (legacy-folder migration, requeue-skip-when-result-exists) `a4a16e2`; 170 jest + 34 pytest green. Live E2E pending. Counterpart plan: `C:/AI/mcp-model-bridge/docs/plans/queue-failover-hardening.md` (bridge side). This file owns the shared file-protocol spec.
 
 ## Why
 
