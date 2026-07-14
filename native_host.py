@@ -12,6 +12,8 @@ import re
 import threading
 import time
 import glob
+import logging
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -20,6 +22,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_MEMORY_BASE_URL = "http://127.0.0.1:5599"
 DEFAULT_TOKEN_PATH = r"C:\.memory\config\local_token"
+DEFAULT_JOBS_FOLDER = r"C:\AI\bridge_jobs\chatgpt_browser"
 MEMORY_TIMEOUT_SECONDS = 10
 ALLOWED_MEMORY_TYPES = {
     "memory_healthz",
@@ -38,6 +41,9 @@ PROMPT_JOB_RESULT_TEXT_CHARS = 200000
 PROMPT_JOB_CLAIM_TTL_SECONDS = 3600
 PROMPT_JOB_RESULT_MAX_AGE_SECONDS = 86400
 PROMPT_JOB_UNCLAIMED_TTL_SECONDS = 1800
+HEARTBEAT_INTERVAL_SECONDS = 15
+HEARTBEAT_ALIVE_SECONDS = 45
+NATIVE_HOST_LOG_MAX_BYTES = 1_000_000
 
 class TranscriptionMonitor:
     def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
@@ -55,6 +61,13 @@ class TranscriptionMonitor:
         self.prompt_job_claim_ttl_seconds = PROMPT_JOB_CLAIM_TTL_SECONDS
         self.prompt_job_result_max_age_seconds = PROMPT_JOB_RESULT_MAX_AGE_SECONDS
         self.prompt_job_unclaimed_ttl_seconds = PROMPT_JOB_UNCLAIMED_TTL_SECONDS
+        self.job_watch_claimant_id = ""
+        self.job_watch_priority = 0
+        self.job_watch_busy = False
+        self.job_watch_last_heartbeat = 0.0
+        self.job_watch_state_lock = threading.Lock()
+        self.logger = None
+        self.logger_key = None
         
     def send_message(self, message):
         """Send message to Chrome extension"""
@@ -151,6 +164,12 @@ class TranscriptionMonitor:
 
         elif msg_type == 'watch_jobs':
             return self.watch_jobs(message)
+
+        elif msg_type == 'heartbeat':
+            return self.update_heartbeat(message)
+
+        elif msg_type == 'log':
+            return self.append_extension_log(message)
 
         elif msg_type in ALLOWED_MEMORY_TYPES:
             return self.handle_memory_message(message)
@@ -291,12 +310,15 @@ class TranscriptionMonitor:
             try:
                 os.rename(source_path, claimed_path)
             except (FileNotFoundError, PermissionError):
+                self.log_info("claim lost job=%s claimant=%s", match.group(1), claimant_id)
                 return {"type": "claim_result", "ok": False, "jobFile": job_file}
             except OSError:
+                self.log_info("claim lost job=%s claimant=%s", match.group(1), claimant_id)
                 return {"type": "claim_result", "ok": False, "jobFile": job_file}
             payload = self.read_job_payload(claimed_path)
             job_id = payload.get("id")
             text = payload.get("text")
+        self.log_info("claim ok job=%s claimant=%s", job_id, claimant_id)
 
         result = {
             "type": "claim_result",
@@ -348,13 +370,19 @@ class TranscriptionMonitor:
                 else:
                     error_path = Path(folder) / f"job_{match.group(1)}.error.json"
                     os.replace(claimed_path, error_path)
+            self.log_info("finish job=%s status=%s", match.group(1), status)
             return {"type": "finish_result", "ok": True}
         except OSError:
             return {"type": "finish_result", "ok": False}
 
     def watch_jobs(self, message):
-        folder = message.get("folder", "")
+        folder = message.get("folder") or DEFAULT_JOBS_FOLDER
         poll_ms = message.get("pollMs", 1000)
+        raw_claimant_id = message.get("claimant_id")
+        if raw_claimant_id is None:
+            raw_claimant_id = message.get("claimantId")
+        claimant_id = self.sanitize_claimant_id(raw_claimant_id) if raw_claimant_id else ""
+        priority = self.coerce_priority(message.get("priority"))
         self.prompt_job_claim_ttl_seconds = self.coerce_seconds(
             message.get("claimTtlSeconds"),
             PROMPT_JOB_CLAIM_TTL_SECONDS,
@@ -372,6 +400,14 @@ class TranscriptionMonitor:
         except (TypeError, ValueError):
             poll_seconds = 1.0
 
+        Path(folder).mkdir(parents=True, exist_ok=True)
+        self.configure_logger(Path(folder), claimant_id)
+        with self.job_watch_state_lock:
+            self.job_watch_claimant_id = claimant_id
+            self.job_watch_priority = priority
+            self.job_watch_busy = bool(message.get("busy", False))
+            self.job_watch_last_heartbeat = 0.0
+
         if folder != self.job_watch_folder:
             self.stop_job_watcher()
             self.job_watch_announced = set()
@@ -386,6 +422,7 @@ class TranscriptionMonitor:
             daemon=True,
         )
         self.job_watch_thread.start()
+        self.log_info("watch start folder=%s claimant=%s priority=%s", folder, claimant_id or "none", priority)
         return {"type": "watch_started", "folder": folder}
 
     def stop_job_watcher(self):
@@ -393,6 +430,8 @@ class TranscriptionMonitor:
             self.job_watch_stop.set()
         if self.job_watch_thread and self.job_watch_thread.is_alive():
             self.job_watch_thread.join(timeout=1.0)
+        if self.job_watch_folder:
+            self.log_info("watch stop folder=%s", self.job_watch_folder)
         self.job_watch_thread = None
         self.job_watch_stop = None
 
@@ -400,9 +439,11 @@ class TranscriptionMonitor:
         while not stop_event.is_set():
             current_files = set()
             try:
-                self.write_expired_claim_results(Path(folder))
-                self.cleanup_stale_result_files(Path(folder))
-                for path in Path(folder).glob("job_*.json"):
+                folder_path = Path(folder)
+                self.maybe_write_heartbeat(folder_path, force=False)
+                self.write_expired_claim_results(folder_path)
+                self.cleanup_stale_result_files(folder_path)
+                for path in folder_path.glob("job_*.json"):
                     name = path.name
                     if ".claimed." in name or ".error." in name:
                         continue
@@ -414,13 +455,14 @@ class TranscriptionMonitor:
                     except OSError:
                         continue
                     if age_seconds > self.prompt_job_unclaimed_ttl_seconds:
-                        if self.write_unclaimed_job_expired_result(Path(folder), path):
+                        if self.write_unclaimed_job_expired_result(folder_path, path):
                             continue
-                    if name in self.job_watch_announced:
-                        continue
                     payload = self.read_job_payload(path)
+                    want_result = payload.get("want_result") is True
+                    if not want_result and name in self.job_watch_announced:
+                        continue
                     if (
-                        payload.get("want_result") is not True
+                        not want_result
                         and age_seconds > JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
                     ):
                         continue
@@ -434,16 +476,21 @@ class TranscriptionMonitor:
                         "jobFile": name,
                         "id": job_id,
                         "text": text,
-                        "wantResult": payload.get("want_result") is True,
+                        "wantResult": want_result,
+                        "instances": self.read_alive_heartbeats(folder_path),
                     }
                     if payload.get("source"):
                         message["source"] = payload.get("source")
                     if payload.get("conversation_key"):
                         message["conversationKey"] = payload.get("conversation_key")
                     self.send_message(message)
+                    self.log_info("announce job=%s want_result=%s instances=%s", job_id, want_result, len(message["instances"]))
                 self.job_watch_announced.intersection_update(current_files)
-            except OSError:
+            except OSError as e:
+                self.log_exception("watch loop os error: %s", e)
                 self.job_watch_announced = set()
+            except Exception as e:
+                self.log_exception("watch loop unhandled exception: %s", e)
             stop_event.wait(poll_seconds)
 
     def read_job_payload(self, path):
@@ -452,12 +499,14 @@ class TranscriptionMonitor:
                 data = json.load(f)
             source = data.get("source")
             conversation_key = data.get("conversation_key")
+            attempts = data.get("attempts", 0)
             return {
                 "id": data.get("id"),
                 "text": data.get("text"),
                 "want_result": data.get("want_result") is True,
                 "source": source if isinstance(source, str) else "",
                 "conversation_key": conversation_key.strip() if isinstance(conversation_key, str) else "",
+                "attempts": attempts if isinstance(attempts, int) and attempts >= 0 else 0,
             }
         except (OSError, json.JSONDecodeError, TypeError):
             return {
@@ -466,9 +515,28 @@ class TranscriptionMonitor:
                 "want_result": False,
                 "source": "",
                 "conversation_key": "",
+                "attempts": 0,
             }
 
-    def write_result_file(self, folder, job_id, status, text, error=None, reason=None):
+    def read_raw_job_payload(self, path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError, TypeError):
+            return {}
+
+    def write_result_file(
+        self,
+        folder,
+        job_id,
+        status,
+        text,
+        error=None,
+        reason=None,
+        claimed_by=None,
+        attempts=None,
+    ):
         response_text = text if isinstance(text, str) else ""
         text_chars = len(response_text)
         truncated = text_chars > PROMPT_JOB_RESULT_TEXT_CHARS
@@ -485,6 +553,10 @@ class TranscriptionMonitor:
         }
         if reason:
             payload["reason"] = reason
+        if claimed_by:
+            payload["claimed_by"] = claimed_by
+        if attempts is not None:
+            payload["attempts"] = attempts
         result_path = folder / f"result_{job_id}.json"
         tmp_path = folder / f".result_{job_id}.{os.getpid()}.{threading.get_ident()}.tmp"
         try:
@@ -524,6 +596,7 @@ class TranscriptionMonitor:
 
     def write_expired_claim_results(self, folder):
         now = time.time()
+        swept = 0
         for path in folder.glob("job_*.claimed.*.json"):
             match = CLAIMED_JOB_FILE_RE.fullmatch(path.name)
             if not match:
@@ -536,8 +609,40 @@ class TranscriptionMonitor:
                 continue
             payload = self.read_job_payload(path)
             if payload.get("want_result") is not True:
+                try:
+                    path.unlink()
+                    swept += 1
+                    self.log_info("sweep delete voice claim job=%s claimant=%s", match.group(1), match.group(2))
+                except OSError:
+                    pass
                 continue
-            if not result_path.exists():
+            attempts = payload.get("attempts", 0) + 1
+            if attempts >= 2:
+                if not result_path.exists():
+                    self.write_result_file(
+                        folder,
+                        match.group(1),
+                        "error",
+                        "",
+                        "claim_expired",
+                        reason="claim_expired",
+                        claimed_by=match.group(2),
+                        attempts=attempts,
+                    )
+                    self.log_info("sweep claim expired job=%s claimant=%s attempts=%s", match.group(1), match.group(2), attempts)
+                try:
+                    path.unlink()
+                    swept += 1
+                except OSError:
+                    pass
+                continue
+            raw_payload = self.read_raw_job_payload(path)
+            if raw_payload:
+                raw_payload["attempts"] = attempts
+                job_path = folder / f"job_{match.group(1)}.json"
+                self.write_json_atomic(job_path, raw_payload)
+                self.log_info("requeue job=%s claimant=%s attempts=%s", match.group(1), match.group(2), attempts)
+            else:
                 self.write_result_file(
                     folder,
                     match.group(1),
@@ -545,11 +650,16 @@ class TranscriptionMonitor:
                     "",
                     "claim_expired",
                     reason="claim_expired",
+                    claimed_by=match.group(2),
+                    attempts=attempts,
                 )
             try:
                 path.unlink()
+                swept += 1
             except OSError:
                 pass
+        if swept:
+            self.log_info("ttl sweep expired_claims=%s", swept)
 
     def cleanup_stale_result_files(self, folder):
         now = time.time()
@@ -571,6 +681,13 @@ class TranscriptionMonitor:
             return fallback
         return seconds
 
+    def coerce_priority(self, value):
+        try:
+            priority = int(value)
+        except (TypeError, ValueError):
+            return 0
+        return max(0, min(priority, 10))
+
     def is_usable_job_payload(self, job_id, text):
         return (
             isinstance(job_id, str)
@@ -582,6 +699,122 @@ class TranscriptionMonitor:
     def sanitize_claimant_id(self, claimant_id):
         sanitized = CLAIMANT_SAFE_RE.sub("", str(claimant_id or ""))
         return sanitized or "claimant"
+
+    def write_json_atomic(self, path, payload):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = path.parent / f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp_path, path)
+        finally:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except OSError:
+                pass
+
+    def maybe_write_heartbeat(self, folder, force=False):
+        with self.job_watch_state_lock:
+            claimant_id = self.job_watch_claimant_id
+            priority = self.job_watch_priority
+            busy = self.job_watch_busy
+            last_heartbeat = self.job_watch_last_heartbeat
+        if not claimant_id:
+            return
+        now = time.monotonic()
+        if not force and last_heartbeat and now - last_heartbeat < HEARTBEAT_INTERVAL_SECONDS:
+            return
+        payload = {
+            "claimant_id": claimant_id,
+            "priority": priority,
+            "busy": busy,
+            "ts": time.time(),
+        }
+        self.write_json_atomic(folder / "heartbeats" / f"{claimant_id}.json", payload)
+        with self.job_watch_state_lock:
+            self.job_watch_last_heartbeat = now
+
+    def read_alive_heartbeats(self, folder):
+        instances = []
+        now = time.time()
+        heartbeat_dir = folder / "heartbeats"
+        try:
+            paths = list(heartbeat_dir.glob("*.json"))
+        except OSError:
+            return instances
+        for path in paths:
+            try:
+                stat = path.stat()
+                age_seconds = now - stat.st_mtime
+                if age_seconds >= HEARTBEAT_ALIVE_SECONDS:
+                    continue
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except (OSError, json.JSONDecodeError, TypeError):
+                continue
+            claimant_id = data.get("claimant_id")
+            if not isinstance(claimant_id, str) or not claimant_id:
+                continue
+            instances.append({
+                "claimant_id": claimant_id,
+                "priority": self.coerce_priority(data.get("priority")),
+                "busy": data.get("busy") is True,
+                "age_seconds": age_seconds,
+            })
+        instances.sort(key=lambda item: item["claimant_id"])
+        return instances
+
+    def update_heartbeat(self, message):
+        with self.job_watch_state_lock:
+            self.job_watch_busy = message.get("busy") is True
+            folder = self.job_watch_folder
+        if folder:
+            try:
+                self.maybe_write_heartbeat(Path(folder), force=True)
+            except OSError as e:
+                self.log_exception("heartbeat write failed: %s", e)
+                return {"type": "heartbeat_result", "ok": False}
+        return {"type": "heartbeat_result", "ok": True}
+
+    def configure_logger(self, folder, claimant_id):
+        log_id = claimant_id or str(os.getpid())
+        key = (str(folder), log_id)
+        if self.logger and self.logger_key == key:
+            return
+        logger = logging.getLogger(f"native_host.{os.getpid()}.{log_id}")
+        logger.setLevel(logging.INFO)
+        logger.propagate = False
+        for handler in list(logger.handlers):
+            logger.removeHandler(handler)
+            handler.close()
+        log_path = folder / "logs" / f"native_host_{log_id}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handler = RotatingFileHandler(
+            log_path,
+            maxBytes=NATIVE_HOST_LOG_MAX_BYTES,
+            backupCount=1,
+            encoding="utf-8",
+        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        logger.addHandler(handler)
+        self.logger = logger
+        self.logger_key = key
+
+    def log_info(self, message, *args):
+        if self.logger:
+            self.logger.info(message, *args)
+
+    def log_exception(self, message, *args):
+        if self.logger:
+            self.logger.exception(message, *args)
+
+    def append_extension_log(self, message):
+        line = message.get("line", "")
+        if not isinstance(line, str):
+            line = str(line)
+        self.log_info("EXT %s", line[:2000])
+        return {"type": "log_result", "ok": True}
             
     def read_state_file(self, state_file):
         """Read the state file content"""

@@ -3,16 +3,19 @@ import json
 import os
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 
 import native_host
 
 
-def write_job(path, job_id="abc", text="hello", want_result=False, source=None):
+def write_job(path, job_id="abc", text="hello", want_result=False, source=None, attempts=None):
     payload = {"id": job_id, "text": text, "ts": 123}
     if want_result:
         payload["want_result"] = True
     if source:
         payload["source"] = source
+    if attempts is not None:
+        payload["attempts"] = attempts
     path.write_text(
         json.dumps(payload),
         encoding="utf-8",
@@ -202,7 +205,7 @@ def test_finish_job_want_result_truncates_after_200000_chars(tmp_path):
     assert len(result["text"]) == 200000
 
 
-def test_watch_jobs_claim_expired_writes_error_result(tmp_path):
+def test_watch_jobs_claim_expired_requeues_then_writes_error_result(tmp_path):
     monitor = native_host.TranscriptionMonitor()
     monitor.send_message = lambda message: None
     claimed_file = tmp_path / "job_expired.claimed.worker_1.json"
@@ -216,14 +219,40 @@ def test_watch_jobs_claim_expired_writes_error_result(tmp_path):
         "pollMs": 25,
         "claimTtlSeconds": 1,
     })
-    wait_for(lambda: (tmp_path / "result_expired.json").exists())
+    requeued_file = tmp_path / "job_expired.json"
+    wait_for(lambda: requeued_file.exists())
     monitor.stop_job_watcher()
 
-    result = json.loads((tmp_path / "result_expired.json").read_text(encoding="utf-8"))
+    requeued = json.loads(requeued_file.read_text(encoding="utf-8"))
     assert response == {"type": "watch_started", "folder": str(tmp_path)}
     assert not claimed_file.exists()
+    assert requeued["attempts"] == 1
+    assert not (tmp_path / "result_expired.json").exists()
+
+    second_monitor = native_host.TranscriptionMonitor()
+    second_monitor.send_message = lambda message: None
+    second_claim = tmp_path / "job_expired.claimed.worker_1.json"
+    os.replace(requeued_file, second_claim)
+    old_time = time.time() - 10
+    os.utime(second_claim, (old_time, old_time))
+
+    second_response = second_monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+        "claimTtlSeconds": 1,
+    })
+    wait_for(lambda: (tmp_path / "result_expired.json").exists())
+    second_monitor.stop_job_watcher()
+
+    result = json.loads((tmp_path / "result_expired.json").read_text(encoding="utf-8"))
+    assert second_response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert not second_claim.exists()
     assert result["status"] == "error"
     assert result["error"] == "claim_expired"
+    assert result["reason"] == "claim_expired"
+    assert result["claimed_by"] == "worker_1"
+    assert result["attempts"] == 2
 
 
 def test_watch_jobs_unclaimed_want_result_job_expires_to_error_result(tmp_path):
@@ -391,6 +420,161 @@ def test_watch_jobs_retries_unreadable_payload_without_announcing(tmp_path):
     assert messages[0]["jobFile"] == "job_retry.json"
     assert messages[0]["id"] == "retry"
     assert messages[0]["text"] == "ready"
+
+
+def test_watch_jobs_writes_heartbeat_min_interval_and_busy_update(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.send_message = lambda message: None
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+        "claimant_id": "worker../A",
+        "priority": 99,
+    })
+    heartbeat_file = tmp_path / "heartbeats" / "workerA.json"
+    wait_for(lambda: heartbeat_file.exists())
+    first_mtime = heartbeat_file.stat().st_mtime
+    first_payload = json.loads(heartbeat_file.read_text(encoding="utf-8"))
+    time.sleep(0.08)
+    second_mtime = heartbeat_file.stat().st_mtime
+
+    heartbeat_response = monitor.handle_message({"type": "heartbeat", "busy": True})
+    wait_for(lambda: json.loads(heartbeat_file.read_text(encoding="utf-8"))["busy"] is True)
+    monitor.stop_job_watcher()
+
+    busy_payload = json.loads(heartbeat_file.read_text(encoding="utf-8"))
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert first_payload["claimant_id"] == "workerA"
+    assert first_payload["priority"] == 10
+    assert first_payload["busy"] is False
+    assert second_mtime == first_mtime
+    assert heartbeat_response == {"type": "heartbeat_result", "ok": True}
+    assert busy_payload["busy"] is True
+
+
+def test_job_found_includes_alive_heartbeat_instances(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    sent = []
+    monitor.send_message = sent.append
+    heartbeat_dir = tmp_path / "heartbeats"
+    heartbeat_dir.mkdir()
+    fresh_file = heartbeat_dir / "fresh.json"
+    stale_file = heartbeat_dir / "stale.json"
+    fresh_file.write_text(
+        json.dumps({"claimant_id": "fresh", "priority": 2, "busy": True, "ts": time.time()}),
+        encoding="utf-8",
+    )
+    stale_file.write_text(
+        json.dumps({"claimant_id": "stale", "priority": 0, "busy": False, "ts": time.time()}),
+        encoding="utf-8",
+    )
+    stale_time = time.time() - (native_host.HEARTBEAT_ALIVE_SECONDS + 5)
+    os.utime(stale_file, (stale_time, stale_time))
+    write_job(tmp_path / "job_instances.json", job_id="instances", text="prompt", want_result=True)
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+    })
+    wait_for(lambda: len(job_messages(sent)) == 1)
+    monitor.stop_job_watcher()
+
+    message = job_messages(sent)[0]
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert message["instances"] == [{
+        "claimant_id": "fresh",
+        "priority": 2,
+        "busy": True,
+        "age_seconds": message["instances"][0]["age_seconds"],
+    }]
+    assert 0 <= message["instances"][0]["age_seconds"] < native_host.HEARTBEAT_ALIVE_SECONDS
+
+
+def test_watch_jobs_reannounces_want_result_every_poll(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    sent = []
+    sent_lock = threading.Lock()
+
+    def capture(message):
+        with sent_lock:
+            sent.append(message)
+
+    monitor.send_message = capture
+    write_job(tmp_path / "job_bridge.json", job_id="bridge", text="prompt", want_result=True)
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+    })
+    wait_for(lambda: len(job_messages(sent)) >= 2)
+    monitor.stop_job_watcher()
+
+    messages = job_messages(sent)
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert len(messages) >= 2
+    assert {message["jobFile"] for message in messages} == {"job_bridge.json"}
+    assert all(message["wantResult"] is True for message in messages)
+
+
+def test_watch_jobs_deletes_expired_voice_claim(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.send_message = lambda message: None
+    claimed_file = tmp_path / "job_voice.claimed.worker_1.json"
+    write_job(claimed_file, job_id="voice", text="voice prompt")
+    old_time = time.time() - 10
+    os.utime(claimed_file, (old_time, old_time))
+
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+        "claimTtlSeconds": 1,
+    })
+    wait_for(lambda: not claimed_file.exists())
+    monitor.stop_job_watcher()
+
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert not (tmp_path / "job_voice.error.json").exists()
+    assert not (tmp_path / "result_voice.json").exists()
+
+
+def test_native_host_rotating_log_and_log_message(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.send_message = lambda message: None
+    response = monitor.handle_message({
+        "type": "watch_jobs",
+        "folder": str(tmp_path),
+        "pollMs": 25,
+        "claimant_id": "worker../log",
+    })
+    log_response = monitor.handle_message({"type": "log", "line": "x" * 3000})
+    for handler in monitor.logger.handlers:
+        handler.flush()
+    log_file = tmp_path / "logs" / "native_host_workerlog.log"
+    extension_log_text = log_file.read_text(encoding="utf-8")
+    monitor.log_info("%s", "y" * (native_host.NATIVE_HOST_LOG_MAX_BYTES + 10))
+    monitor.log_info("after rollover")
+    for handler in monitor.logger.handlers:
+        handler.flush()
+    monitor.stop_job_watcher()
+
+    rotated_file = tmp_path / "logs" / "native_host_workerlog.log.1"
+    text = log_file.read_text(encoding="utf-8")
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert log_response == {"type": "log_result", "ok": True}
+    assert rotated_file.exists()
+    assert f"EXT {'x' * 2000}" in extension_log_text
+    assert f"EXT {'x' * 2001}" not in extension_log_text
+    assert "after rollover" in text
+    assert isinstance(monitor.logger.handlers[0], RotatingFileHandler)
+
+
+def test_default_jobs_folder_constant_is_bridge_jobs_root():
+    assert native_host.DEFAULT_JOBS_FOLDER == r"C:\AI\bridge_jobs\chatgpt_browser"
 
 
 def test_claim_job_rejects_path_traversal_and_nested_paths(tmp_path):
