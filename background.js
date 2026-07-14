@@ -410,9 +410,12 @@ function validateMemorySettings(input = {}) {
 
 function validatePromptJobsSettings(input = {}) {
   const jobsInput = input && typeof input === 'object' ? input : {};
+  const folder = typeof jobsInput.folder === 'string' ? jobsInput.folder.trim() : DEFAULT_PROMPT_JOBS_SETTINGS.folder;
+  // Helper is absent in test harnesses that load background.js standalone.
+  const migrateFolder = self.BackgroundPromptJobs?.migratePromptJobsFolder;
   return {
     enabled: jobsInput.enabled === true,
-    folder: typeof jobsInput.folder === 'string' ? jobsInput.folder.trim() : DEFAULT_PROMPT_JOBS_SETTINGS.folder,
+    folder: typeof migrateFolder === 'function' ? migrateFolder(folder) : folder,
     priority: coerceNumber(jobsInput.priority, 0, 10, DEFAULT_PROMPT_JOBS_SETTINGS.priority),
   };
 }

@@ -631,6 +631,16 @@ class TranscriptionMonitor:
                 except OSError:
                     pass
                 continue
+            if result_path.exists():
+                # Finish succeeded but the claim unlink failed earlier; do not
+                # re-run or overwrite the existing result.
+                try:
+                    path.unlink()
+                    swept += 1
+                    self.log_info("sweep drop claim with existing result job=%s claimant=%s", match.group(1), match.group(2))
+                except OSError:
+                    pass
+                continue
             attempts = payload.get("attempts", 0) + 1
             if attempts >= 2:
                 if not result_path.exists():

@@ -133,6 +133,20 @@
     return message.replace(/^Error:\s*/i, '') || 'prompt_job_failed';
   }
 
+  const LEGACY_PROMPT_JOBS_FOLDER = 'C:\\Windows_software\\openai whisper\\prompt_jobs';
+  const CURRENT_PROMPT_JOBS_FOLDER = 'C:\\AI\\bridge_jobs\\chatgpt_browser';
+
+  // One-time migration off the folder shared with whisper (its 10-min GC
+  // deletes long-running bridge jobs). Only the exact legacy path migrates;
+  // custom folders are the user's choice and stay untouched.
+  function migratePromptJobsFolder(folder) {
+    if (typeof folder !== 'string') return folder;
+    if (folder.trim().toLowerCase() === LEGACY_PROMPT_JOBS_FOLDER.toLowerCase()) {
+      return CURRENT_PROMPT_JOBS_FOLDER;
+    }
+    return folder;
+  }
+
   self.BackgroundPromptJobs = {
     normalizePromptJobCorrelation,
     normalizeConversationKey,
@@ -144,5 +158,6 @@
     isEmptyResponse,
     composerTextMatches,
     normalizePromptJobError,
+    migratePromptJobsFolder,
   };
 })();

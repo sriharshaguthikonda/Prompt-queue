@@ -642,3 +642,26 @@ def wait_for(predicate, timeout=1.0):
             return
         time.sleep(0.01)
     assert predicate()
+
+
+def test_expired_claim_with_existing_result_is_dropped_without_requeue(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.send_message = lambda message: None
+    monitor.prompt_job_claim_ttl_seconds = 1
+    claimed_file = tmp_path / "job_donejob.claimed.worker_1.json"
+    write_job(claimed_file, job_id="donejob", text="prompt text", want_result=True)
+    old_time = time.time() - 10
+    os.utime(claimed_file, (old_time, old_time))
+    result_file = tmp_path / "result_donejob.json"
+    result_file.write_text(
+        json.dumps({"id": "donejob", "status": "done", "text": "answer"}),
+        encoding="utf-8",
+    )
+
+    monitor.write_expired_claim_results(tmp_path)
+
+    assert not claimed_file.exists()
+    assert not (tmp_path / "job_donejob.json").exists()
+    result = json.loads(result_file.read_text(encoding="utf-8"))
+    assert result["status"] == "done"
+    assert result["text"] == "answer"

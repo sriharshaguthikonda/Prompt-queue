@@ -124,3 +124,32 @@ describe('BackgroundPromptJobs', () => {
     ], [10, 11], { preferredTabId: 10 })).toEqual({ action: 'reuse', tabId: 11 });
   });
 });
+
+describe('BackgroundPromptJobs.migratePromptJobsFolder', () => {
+  let helpers;
+
+  beforeAll(() => {
+    delete global.BackgroundPromptJobs;
+    jest.resetModules();
+    require('../background-prompt-jobs.js');
+    helpers = global.BackgroundPromptJobs;
+  });
+
+  test('migrates the exact legacy whisper folder to the bridge jobs root', () => {
+    expect(helpers.migratePromptJobsFolder('C:\\Windows_software\\openai whisper\\prompt_jobs'))
+      .toBe('C:\\AI\\bridge_jobs\\chatgpt_browser');
+  });
+
+  test('migrates case-insensitively and with surrounding whitespace', () => {
+    expect(helpers.migratePromptJobsFolder(' c:\\windows_software\\openai whisper\\prompt_jobs '))
+      .toBe('C:\\AI\\bridge_jobs\\chatgpt_browser');
+  });
+
+  test('leaves custom, empty, and new folders untouched', () => {
+    expect(helpers.migratePromptJobsFolder('D:\\my\\jobs')).toBe('D:\\my\\jobs');
+    expect(helpers.migratePromptJobsFolder('')).toBe('');
+    expect(helpers.migratePromptJobsFolder('C:\\AI\\bridge_jobs\\chatgpt_browser'))
+      .toBe('C:\\AI\\bridge_jobs\\chatgpt_browser');
+    expect(helpers.migratePromptJobsFolder(undefined)).toBe(undefined);
+  });
+});
