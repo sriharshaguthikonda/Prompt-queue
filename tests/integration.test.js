@@ -1666,3 +1666,54 @@ describe('Background settings sanitization', () => {
   });
 });
 });
+
+describe('Prompt jobs watchdog', () => {
+  beforeAll(() => {
+    require('../background.js');
+    global.__setRuntimeListenerBaseline?.();
+  });
+
+  it('arms a repeating alarm at load so the port survives worker eviction', () => {
+    // Re-execute the worker's top level inside the test: the shared setup calls
+    // jest.clearAllMocks() before every test, so the original load-time call is gone.
+    jest.resetModules();
+    require('../background.js');
+
+    expect(chrome.alarms.create).toHaveBeenCalledWith('promptJobsWatchdog', {
+      periodInMinutes: 1,
+    });
+    expect(chrome.alarms.onAlarm.addListener).toHaveBeenCalled();
+    expect(global.PromptQueueBackgroundTest.getPromptJobsWatchdogAlarmName())
+      .toBe('promptJobsWatchdog');
+  });
+
+  it('ignores alarms that are not the watchdog', () => {
+    jest.resetModules();
+    require('../background.js');
+    const handler = chrome.alarms.onAlarm.addListener.mock.calls.at(-1)[0];
+    chrome.storage.local.get.mockClear();
+
+    handler({ name: 'someOtherAlarm' });
+
+    expect(chrome.storage.local.get).not.toHaveBeenCalled();
+  });
+
+  it('reconnects the native port from stored settings when the alarm fires cold', async () => {
+    // A worker woken by the alarm has no settings in memory; if the watchdog
+    // reconciled against the defaults it would disconnect instead of connect.
+    const stored = {
+      aiTaskSequencerSettings: {
+        promptJobs: { enabled: true, folder: 'C:\AI\bridge_jobs\chatgpt_browser', priority: 0 },
+      },
+    };
+    chrome.storage.local.get.mockImplementation((keys, callback) => {
+      if (callback) callback(stored);
+      return Promise.resolve(stored);
+    });
+    chrome.runtime.connectNative.mockClear();
+
+    await global.PromptQueueBackgroundTest.runPromptJobsWatchdog();
+
+    expect(chrome.runtime.connectNative).toHaveBeenCalled();
+  });
+});

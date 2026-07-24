@@ -1753,6 +1753,8 @@ if (self.__PROMPT_QUEUE_TEST__) {
     testContentScriptConnection,
     ensureContentScriptReady,
     findOrCreatePromptJobsTab,
+    runPromptJobsWatchdog,
+    getPromptJobsWatchdogAlarmName: () => PROMPT_JOBS_WATCHDOG_ALARM,
   };
 }
 
@@ -4179,6 +4181,45 @@ chrome.runtime.onInstalled.addListener(async () => {
   await loadSettings();
   reconcilePromptJobsWatch();
 });
+
+// ============ PROMPT JOBS WATCHDOG ============
+
+// MV3 evicts an idle service worker after ~30s and takes every setTimeout with
+// it. A connectNative that fails during the post-boot race therefore schedules
+// a reconnect that can never fire, and the bridge stays dead — silently — until
+// someone reloads the extension by hand. chrome.alarms survives eviction and
+// wakes the worker, so it is the only durable place to re-check the port.
+const PROMPT_JOBS_WATCHDOG_ALARM = 'promptJobsWatchdog';
+const PROMPT_JOBS_WATCHDOG_PERIOD_MINUTES = 1;
+
+function armPromptJobsWatchdog() {
+  try {
+    chrome.alarms.create(PROMPT_JOBS_WATCHDOG_ALARM, {
+      periodInMinutes: PROMPT_JOBS_WATCHDOG_PERIOD_MINUTES,
+    });
+  } catch (e) {
+    console.error('[PromptJobs] Failed to arm watchdog alarm:', e);
+  }
+}
+
+async function runPromptJobsWatchdog() {
+  // A worker woken cold by the alarm has no settings in memory, and
+  // reconciling against the defaults (promptJobs.enabled === false) would tear
+  // the port down instead of building it. Load first, always.
+  await loadSettings();
+  reconcilePromptJobsWatch();
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm?.name !== PROMPT_JOBS_WATCHDOG_ALARM) return;
+  runPromptJobsWatchdog().catch((e) => {
+    console.error('[PromptJobs] Watchdog run failed:', e);
+  });
+});
+
+// Top level, so every worker wake re-arms it. create() with an existing name
+// replaces the alarm rather than stacking a second one.
+armPromptJobsWatchdog();
 
 // ============ NOTIFICATIONS ============
 

@@ -39,6 +39,12 @@ global.chrome = {
     },
     onStartup: { addListener: jest.fn() },
     onInstalled: { addListener: jest.fn() },
+    connectNative: jest.fn(() => ({
+      postMessage: jest.fn(),
+      disconnect: jest.fn(),
+      onMessage: { addListener: jest.fn() },
+      onDisconnect: { addListener: jest.fn() },
+    })),
     sendNativeMessage: jest.fn(async () => ({ ok: true })),
     getURL: jest.fn((value) => value),
   },
@@ -66,6 +72,11 @@ global.chrome = {
       }),
     },
     onChanged: { addListener: jest.fn() },
+  },
+  alarms: {
+    create: jest.fn(),
+    clear: jest.fn(),
+    onAlarm: { addListener: jest.fn() },
   },
   tabs: {
     query: jest.fn((query, callback) => {

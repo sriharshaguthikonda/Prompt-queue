@@ -5,6 +5,7 @@
   "description": "Let the AI Always Work, Then Check: Seamless Task Queuing for Busy Minds.",
   "permissions": [
     "activeTab",
+    "alarms",
     "scripting",
     "storage",
     "tabs",
