@@ -4569,6 +4569,7 @@ function startTranscriptionPolling() {
 const PROMPT_JOBS_CLAIMANT_STORAGE_KEY = 'promptJobsClaimantId';
 const PROMPT_JOBS_CONVERSATION_TABS_STORAGE_KEY = 'promptJobsConversationTabs';
 const PROMPT_JOBS_BRIDGE_TABS_STORAGE_KEY = 'promptJobsBridgeTabs';
+const PROMPT_JOBS_LOG_BUFFER_STORAGE_KEY = 'promptJobsLogBuffer';
 const PROMPT_JOBS_RECONNECT_BASE_MS = 1000;
 const PROMPT_JOBS_RECONNECT_MAX_MS = 30000;
 const PROMPT_JOBS_TAB_SETTLE_MS = 2000;
@@ -4577,6 +4578,7 @@ let promptJobsPort = null;
 let promptJobsWatchedFolder = '';
 let promptJobsReconnectTimer = null;
 let promptJobsReconnectDelayMs = PROMPT_JOBS_RECONNECT_BASE_MS;
+let promptJobsLogFlushInFlight = false;
 let promptJobsClaimantIdCache = null;
 let promptJobsConversationTabCache = null;
 let promptJobsBridgeTabCache = null;
@@ -4648,6 +4650,7 @@ function disconnectPromptJobsPort() {
   }
   promptJobsPort = null;
   promptJobsWatchedFolder = '';
+  postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'disconnected' });
   for (const pending of promptJobsPendingClaims.values()) {
     clearTimeout(pending.timer);
   }
@@ -4664,6 +4667,7 @@ function connectPromptJobsPort(folder) {
   } catch (e) {
     console.error('[PromptJobs] connectNative failed:', e);
     promptJobsPort = null;
+    postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'unavailable', reason_code: 'connect_failed' });
     schedulePromptJobsReconnect();
     return;
   }
@@ -4679,6 +4683,7 @@ function connectPromptJobsPort(folder) {
     console.log('[PromptJobs] Native port disconnected', { error: err?.message || null });
     promptJobsPort = null;
     promptJobsWatchedFolder = '';
+    postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'disconnected' });
     const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
     if (jobs.enabled && jobs.folder) {
       schedulePromptJobsReconnect();
@@ -4695,6 +4700,8 @@ function connectPromptJobsPort(folder) {
         claimant_id: claimantId,
         priority: Math.max(0, Number(jobs.priority) || 0),
       });
+      postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'connected', claimant_id: claimantId });
+      flushPromptJobsLogBuffer();
       console.log('[PromptJobs] Sent watch_jobs', { folder, claimantId, priority: Math.max(0, Number(jobs.priority) || 0) });
     } catch (e) {
       console.error('[PromptJobs] Failed to post watch_jobs:', e);
@@ -4703,11 +4710,44 @@ function connectPromptJobsPort(folder) {
   })();
 }
 
-function postPromptJobsLog(line) {
-  if (!promptJobsPort || typeof line !== 'string' || !line.trim()) return;
+async function bufferPromptJobsEvent(event) {
+  const helper = self.BackgroundPromptJobs;
+  if (!helper) return;
   try {
-    promptJobsPort.postMessage({ type: 'log', line: line.trim() });
+    const stored = await chrome.storage.local.get(PROMPT_JOBS_LOG_BUFFER_STORAGE_KEY);
+    const next = helper.appendPromptJobLogEvents(stored?.[PROMPT_JOBS_LOG_BUFFER_STORAGE_KEY], [event]);
+    await chrome.storage.local.set({ [PROMPT_JOBS_LOG_BUFFER_STORAGE_KEY]: next });
   } catch (_) {}
+}
+
+async function flushPromptJobsLogBuffer() {
+  if (!promptJobsPort || promptJobsLogFlushInFlight) return;
+  promptJobsLogFlushInFlight = true;
+  try {
+    const stored = await chrome.storage.local.get(PROMPT_JOBS_LOG_BUFFER_STORAGE_KEY);
+    const pending = self.BackgroundPromptJobs.takePromptJobLogEvents(stored?.[PROMPT_JOBS_LOG_BUFFER_STORAGE_KEY]);
+    for (const event of pending.events) promptJobsPort.postMessage({ type: 'log', event });
+    await chrome.storage.local.set({ [PROMPT_JOBS_LOG_BUFFER_STORAGE_KEY]: pending.remaining });
+  } catch (_) {
+    // The buffered events remain for the next native-port connection.
+  } finally {
+    promptJobsLogFlushInFlight = false;
+  }
+}
+
+function postPromptJobsEvent(event) {
+  const normalized = self.BackgroundPromptJobs.normalizePromptJobLogEvent({
+    timestamp: new Date().toISOString(), port_state: promptJobsPort ? 'connected' : 'unavailable', ...event,
+  });
+  if (!promptJobsPort) {
+    bufferPromptJobsEvent(normalized);
+    return;
+  }
+  try {
+    promptJobsPort.postMessage({ type: 'log', event: normalized });
+  } catch (_) {
+    bufferPromptJobsEvent(normalized);
+  }
 }
 
 function postPromptJobsHeartbeat(busy) {
@@ -4760,11 +4800,14 @@ async function handlePromptJobsPortMessage(msg) {
 // as a short tie-break stagger and re-check local busy state before claiming.
 async function handleJobFound(msg) {
   const jobFile = msg?.jobFile;
+  postPromptJobsEvent({ event: 'job_recv', job_id: msg?.id || jobFile });
   if (!jobFile || promptJobsPendingClaims.has(jobFile) || promptJobsActiveRuns.has(jobFile)) {
+    postPromptJobsEvent({ event: !jobFile ? 'malformed' : 'duplicate', job_id: msg?.id || jobFile });
     return;
   }
   if (isAutomationActiveInThisProfile()) {
     console.log('[PromptJobs] Ignoring job_found, automation already active', { jobFile });
+    postPromptJobsEvent({ event: 'active', job_id: msg?.id || jobFile, busy: true });
     return;
   }
 
@@ -4773,19 +4816,23 @@ async function handleJobFound(msg) {
   const claimantId = await getPromptJobsClaimantId();
   if (!self.BackgroundPromptJobs.shouldClaimPromptJob(msg.instances, claimantId, priority)) {
     console.log('[PromptJobs] Skipping job_found, lower-priority idle instance is alive', { jobFile });
-    postPromptJobsLog(`skip job=${msg.id || jobFile} reason=lower_priority_idle`);
+    postPromptJobsEvent({ event: 'lower-priority', job_id: msg?.id || jobFile, reason_code: 'lower_priority_idle' });
     return;
   }
   const delayMs = priority * 250;
 
   const attemptClaim = async () => {
-    promptJobsPendingClaims.delete(jobFile);
     if (isAutomationActiveInThisProfile()) {
       console.log('[PromptJobs] Skipping claim, automation became active during priority delay', { jobFile });
-      postPromptJobsLog(`skip job=${msg.id || jobFile} reason=local_busy`);
+      promptJobsPendingClaims.delete(jobFile);
+      postPromptJobsEvent({ event: 'active', job_id: msg?.id || jobFile, busy: true });
       return;
     }
-    if (!promptJobsPort) return;
+    if (!promptJobsPort) {
+      promptJobsPendingClaims.delete(jobFile);
+      postPromptJobsEvent({ event: 'port-unavailable', job_id: msg?.id || jobFile });
+      return;
+    }
     try {
       promptJobsPort.postMessage({
         type: 'claim_job',
@@ -4794,31 +4841,37 @@ async function handleJobFound(msg) {
         claimantId,
       });
       console.log('[PromptJobs] Sent claim_job', { jobFile });
-      postPromptJobsLog(`claim_sent job=${msg.id || jobFile}`);
     } catch (e) {
       console.error('[PromptJobs] Failed to post claim_job:', e);
-      postPromptJobsLog(`claim_error job=${msg.id || jobFile}`);
+      promptJobsPendingClaims.delete(jobFile);
+      postPromptJobsEvent({ event: 'error', job_id: msg?.id || jobFile, reason_code: 'claim_post_failed' });
     }
   };
 
+  const pending = { text: msg.text, id: msg.id, timer: null };
+  promptJobsPendingClaims.set(jobFile, pending);
   if (delayMs <= 0) {
     await attemptClaim();
     return;
   }
-  const timer = setTimeout(() => { attemptClaim(); }, delayMs);
-  promptJobsPendingClaims.set(jobFile, { text: msg.text, id: msg.id, timer });
+  pending.timer = setTimeout(() => { attemptClaim(); }, delayMs);
 }
 
 async function handleClaimResult(msg) {
   const jobFile = msg?.jobFile;
+  if (jobFile) promptJobsPendingClaims.delete(jobFile);
   if (!msg?.ok) {
     console.log('[PromptJobs] Lost claim race (or claim failed)', { jobFile });
-    postPromptJobsLog(`claim_lost job=${msg?.id || jobFile || 'unknown'}`);
+    postPromptJobsEvent({ event: 'duplicate', job_id: msg?.id || jobFile || 'unknown' });
     return;
   }
   const claimedFile = msg.claimedFile;
   const text = typeof msg.text === 'string' ? msg.text : '';
   const shouldDeferFinish = self.BackgroundPromptJobs.shouldDeferFinish(msg);
+  if (!jobFile || !claimedFile || typeof msg.text !== 'string') {
+    postPromptJobsEvent({ event: 'malformed', job_id: msg?.id || jobFile || 'unknown', reason_code: 'claim_result' });
+    return;
+  }
   const correlation = shouldDeferFinish
     ? self.BackgroundPromptJobs.normalizePromptJobCorrelation(msg, {
       folder: promptJobsWatchedFolder,
@@ -4833,12 +4886,12 @@ async function handleClaimResult(msg) {
     conversationKey: correlation?.conversationKey || null,
     textLength: text.length,
   });
-  postPromptJobsLog(`claim_ok job=${msg.id || jobFile}`);
+  postPromptJobsEvent({ event: 'claimed', job_id: msg.id || jobFile });
   promptJobsActiveRuns.set(jobFile, { claimedFile, wantResult: shouldDeferFinish });
 
   if (!text.trim()) {
     console.error('[PromptJobs] Claimed job has empty text, reporting error', { jobFile, claimedFile });
-    postPromptJobsLog(`send_error job=${msg.id || jobFile} reason=empty_prompt`);
+    postPromptJobsEvent({ event: 'claimed', stage: 'error', job_id: msg.id || jobFile, reason_code: 'empty_prompt' });
     await finishPromptJob(claimedFile, 'error', {
       folder: correlation?.folder || promptJobsWatchedFolder,
       error: 'empty_prompt',
@@ -4855,14 +4908,13 @@ async function handleClaimResult(msg) {
         folder: correlation?.folder || promptJobsWatchedFolder,
         error: 'invalid_target_url',
       });
-      postPromptJobsLog(`send_error job=${msg.id || jobFile} reason=invalid_target_url`);
+      postPromptJobsEvent({ event: 'claimed', stage: 'error', job_id: msg.id || jobFile, reason_code: 'invalid_target_url' });
       return;
     }
     const tab = correlation?.source === 'model_bridge'
       ? await findOrCreateBridgeTab(correlation)
       : await findOrCreatePromptJobsTab(correlation?.conversationKey || msg.conversationKey || msg.conversation_key);
     postPromptJobsHeartbeat(true);
-    postPromptJobsLog(`send_start job=${msg.id || jobFile}`);
     const result = await startAutomationForTab(tab.id, [text], state.options || {}, {
       promptJobCorrelation: correlation,
     });
@@ -4874,12 +4926,11 @@ async function handleClaimResult(msg) {
     } else {
       await finishPromptJob(claimedFile, 'done');
       postPromptJobsHeartbeat(false);
-      postPromptJobsLog(`finish job=${msg.id || jobFile} status=done`);
       promptJobsNotify('Voice prompt sent', 'Prompt job was sent to ChatGPT.');
     }
   } catch (e) {
     console.error('[PromptJobs] Failed to send claimed job:', e);
-    postPromptJobsLog(`send_error job=${msg.id || jobFile}`);
+    postPromptJobsEvent({ event: 'claimed', stage: 'error', job_id: msg.id || jobFile, reason_code: 'send_failed' });
     await finishPromptJob(claimedFile, 'error', {
       folder: correlation?.folder || promptJobsWatchedFolder,
       error: e?.message || e,
@@ -4914,10 +4965,10 @@ async function finishPromptJob(claimedFile, status, details = {}) {
       responseLength: typeof details.responseText === 'string' ? details.responseText.length : 0,
       hasError: details.error !== undefined && details.error !== null,
     });
-    postPromptJobsLog(`finish job=${claimedFile} status=${status}`);
     return true;
   } catch (e) {
     console.error('[PromptJobs] Failed to post finish_job:', e);
+    postPromptJobsEvent({ event: 'claimed', stage: 'error', status, reason_code: 'finish_post_failed' });
     return false;
   }
 }

@@ -1,6 +1,6 @@
 # Phase: Queue Hardening + Priority Failover + Dedicated Bridge Tab
 
-Status: IMPLEMENTED 2026-07-14 — P1 `2dec636`, P2 `e251b78`, fixes (legacy-folder migration, requeue-skip-when-result-exists) `a4a16e2`; 170 jest + 34 pytest green. Live E2E pending. Counterpart plan: `C:/AI/mcp-model-bridge/docs/plans/queue-failover-hardening.md` (bridge side). This file owns the shared file-protocol spec.
+Status: IMPLEMENTED 2026-07-14 — P1 `2dec636`, P2 `e251b78`, fixes (legacy-folder migration, requeue-skip-when-result-exists) `a4a16e2`; metadata-only event logging added locally (focused 13 Jest + 27 native-host pytest green). Live E2E pending. Counterpart plan: `C:/AI/mcp-model-bridge/docs/plans/queue-failover-hardening.md` (bridge side). This file owns the shared file-protocol spec.
 
 ## Why
 
@@ -28,6 +28,8 @@ Files (flat, rename-based — unchanged shape, new fields):
 - `result_<id>.json` — `{ id, status: done|error, text?, error?, truncated?, conversation_url?, claimed_by?, attempts?, ts }`
 - `heartbeats/<claimantId>.json` — `{ claimant_id, priority, busy, ts }`; written by native host every watch tick, min interval 15 s. Alive = file mtime < 45 s.
 - `logs/native_host_<claimantId>.log` — RotatingFileHandler, maxBytes=1_000_000, backupCount=1.
+
+Logging is always enabled and metadata-only. Extension events use a 250-entry `chrome.storage.local` ring buffer while the native port is down, coalesce consecutive identical events, and flush after reconnection. Native `announce` is sent initially, then no more than once per 60 seconds with `repeat_count`; extension/native logs whitelist timestamps, event/stage, IDs, status/reason, attempts, busy/port state, and repeat count.
 
 Claim rule (extension side, replaces blind stagger): on `job_found`, claim unless heartbeats show an alive, non-busy instance with a strictly lower priority number. Keep a small stagger (`priority*250ms`) as tiebreak. Busy instances no longer block others.
 

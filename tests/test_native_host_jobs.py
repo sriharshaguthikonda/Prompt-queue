@@ -522,7 +522,7 @@ def test_job_found_includes_alive_heartbeat_instances(tmp_path):
     assert 0 <= message["instances"][0]["age_seconds"] < native_host.HEARTBEAT_ALIVE_SECONDS
 
 
-def test_watch_jobs_reannounces_want_result_every_poll(tmp_path):
+def test_watch_jobs_throttles_want_result_announcements(tmp_path):
     monitor = native_host.TranscriptionMonitor()
     sent = []
     sent_lock = threading.Lock()
@@ -539,14 +539,16 @@ def test_watch_jobs_reannounces_want_result_every_poll(tmp_path):
         "folder": str(tmp_path),
         "pollMs": 25,
     })
-    wait_for(lambda: len(job_messages(sent)) >= 2)
+    wait_for(lambda: len(job_messages(sent)) == 1)
+    time.sleep(0.08)
     monitor.stop_job_watcher()
 
     messages = job_messages(sent)
     assert response == {"type": "watch_started", "folder": str(tmp_path)}
-    assert len(messages) >= 2
+    assert len(messages) == 1
     assert {message["jobFile"] for message in messages} == {"job_bridge.json"}
     assert all(message["wantResult"] is True for message in messages)
+    assert messages[0]["repeat_count"] == 1
 
 
 def test_watch_jobs_deletes_expired_voice_claim(tmp_path):
@@ -580,7 +582,7 @@ def test_native_host_rotating_log_and_log_message(tmp_path):
         "pollMs": 25,
         "claimant_id": "worker../log",
     })
-    log_response = monitor.handle_message({"type": "log", "line": "x" * 3000})
+    log_response = monitor.handle_message({"type": "log", "event": {"event": "job_recv", "job_id": "safe"}})
     for handler in monitor.logger.handlers:
         handler.flush()
     log_file = tmp_path / "logs" / "native_host_workerlog.log"
@@ -596,10 +598,32 @@ def test_native_host_rotating_log_and_log_message(tmp_path):
     assert response == {"type": "watch_started", "folder": str(tmp_path)}
     assert log_response == {"type": "log_result", "ok": True}
     assert rotated_file.exists()
-    assert f"EXT {'x' * 2000}" in extension_log_text
-    assert f"EXT {'x' * 2001}" not in extension_log_text
+    assert 'EXT {"event":"job_recv","job_id":"safe"}' in extension_log_text
     assert "after rollover" in text
     assert isinstance(monitor.logger.handlers[0], RotatingFileHandler)
+
+
+def test_extension_log_accepts_metadata_only(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.configure_logger(tmp_path, "worker")
+    response = monitor.append_extension_log({
+        "event": {"event": "job_recv", "job_id": "safe", "prompt": "secret prompt", "url": "https://secret"}
+    })
+    for handler in monitor.logger.handlers:
+        handler.flush()
+    text = (tmp_path / "logs" / "native_host_worker.log").read_text(encoding="utf-8")
+
+    assert response == {"type": "log_result", "ok": True}
+    assert "job_recv" in text
+    assert "secret prompt" not in text
+    assert "https://secret" not in text
+
+
+def test_native_announce_is_throttled_with_repeat_count():
+    monitor = native_host.TranscriptionMonitor()
+    assert monitor.should_announce_job("job_safe.json", now=100.0) == 1
+    assert monitor.should_announce_job("job_safe.json", now=101.0) is None
+    assert monitor.should_announce_job("job_safe.json", now=160.0) == 2
 
 
 def test_default_jobs_folder_constant_is_bridge_jobs_root():

@@ -133,6 +133,54 @@
     return message.replace(/^Error:\s*/i, '') || 'prompt_job_failed';
   }
 
+  const PROMPT_JOB_LOG_FIELDS = [
+    'timestamp', 'event', 'stage', 'job_id', 'claimant_id', 'status',
+    'reason_code', 'attempts', 'busy', 'port_state', 'repeat_count',
+  ];
+  const PROMPT_JOB_LOG_BUFFER_LIMIT = 250;
+
+  function normalizePromptJobLogEvent(value) {
+    const source = value && typeof value === 'object' ? value : {};
+    const event = {};
+    for (const field of PROMPT_JOB_LOG_FIELDS) {
+      if (source[field] !== undefined && source[field] !== null) event[field] = source[field];
+    }
+    return event;
+  }
+
+  function samePromptJobLogEvent(left, right) {
+    const a = normalizePromptJobLogEvent(left);
+    const b = normalizePromptJobLogEvent(right);
+    delete a.timestamp;
+    delete b.timestamp;
+    delete a.repeat_count;
+    delete b.repeat_count;
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+
+  function coalescePromptJobLogEvents(events) {
+    const result = [];
+    for (const raw of Array.isArray(events) ? events : []) {
+      const event = normalizePromptJobLogEvent(raw);
+      const previous = result[result.length - 1];
+      if (previous && samePromptJobLogEvent(previous, event)) {
+        previous.repeat_count = Number(previous.repeat_count || 1) + Number(event.repeat_count || 1);
+      } else {
+        result.push(event);
+      }
+    }
+    return result;
+  }
+
+  function appendPromptJobLogEvents(existing, incoming) {
+    return coalescePromptJobLogEvents([...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])])
+      .slice(-PROMPT_JOB_LOG_BUFFER_LIMIT);
+  }
+
+  function takePromptJobLogEvents(events) {
+    return { events: Array.isArray(events) ? events : [], remaining: [] };
+  }
+
   const LEGACY_PROMPT_JOBS_FOLDER = 'C:\\Windows_software\\openai whisper\\prompt_jobs';
   const CURRENT_PROMPT_JOBS_FOLDER = 'C:\\AI\\bridge_jobs\\chatgpt_browser';
 
@@ -158,6 +206,10 @@
     isEmptyResponse,
     composerTextMatches,
     normalizePromptJobError,
+    normalizePromptJobLogEvent,
+    coalescePromptJobLogEvents,
+    appendPromptJobLogEvents,
+    takePromptJobLogEvents,
     migratePromptJobsFolder,
   };
 })();

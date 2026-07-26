@@ -153,3 +153,41 @@ describe('BackgroundPromptJobs.migratePromptJobsFolder', () => {
     expect(helpers.migratePromptJobsFolder(undefined)).toBe(undefined);
   });
 });
+
+describe('BackgroundPromptJobs metadata logging', () => {
+  let helpers;
+
+  beforeAll(() => {
+    delete global.BackgroundPromptJobs;
+    jest.resetModules();
+    require('../background-prompt-jobs.js');
+    helpers = global.BackgroundPromptJobs;
+  });
+
+  test('whitelists metadata and coalesces consecutive identical events', () => {
+    const first = helpers.normalizePromptJobLogEvent({
+      timestamp: '2026-07-27T00:00:00Z', event: 'job_recv', job_id: 'job-1',
+      claimant_id: 'worker-1', status: 'pending', reason_code: 'ok', attempts: 0,
+      busy: false, port_state: 'connected', prompt: 'never persist this',
+      responseText: 'nor this', url: 'https://private.example/', credentials: 'nope',
+    });
+    const events = helpers.coalescePromptJobLogEvents([first, {
+      ...first, timestamp: '2026-07-27T00:00:01Z', prompt: 'also forbidden',
+    }]);
+
+    expect(first).toEqual({
+      timestamp: '2026-07-27T00:00:00Z', event: 'job_recv', job_id: 'job-1',
+      claimant_id: 'worker-1', status: 'pending', reason_code: 'ok', attempts: 0,
+      busy: false, port_state: 'connected',
+    });
+    expect(events).toEqual([{ ...first, repeat_count: 2 }]);
+  });
+
+  test('keeps a 250-event ring buffer and flushes it after reconnect', () => {
+    const events = Array.from({ length: 252 }, (_, index) => ({ event: 'job_recv', job_id: String(index) }));
+    const buffered = helpers.appendPromptJobLogEvents([], events);
+    expect(buffered).toHaveLength(250);
+    expect(buffered[0].job_id).toBe('2');
+    expect(helpers.takePromptJobLogEvents(buffered)).toEqual({ events: buffered, remaining: [] });
+  });
+});

@@ -58,6 +58,7 @@ class TranscriptionMonitor:
         self.job_watch_stop = None
         self.job_watch_folder = ""
         self.job_watch_announced = set()
+        self.job_watch_announce_state = {}
         self.prompt_job_claim_ttl_seconds = PROMPT_JOB_CLAIM_TTL_SECONDS
         self.prompt_job_result_max_age_seconds = PROMPT_JOB_RESULT_MAX_AGE_SECONDS
         self.prompt_job_unclaimed_ttl_seconds = PROMPT_JOB_UNCLAIMED_TTL_SECONDS
@@ -299,6 +300,7 @@ class TranscriptionMonitor:
         job_file = message.get("jobFile", "")
         match = JOB_FILE_RE.fullmatch(job_file)
         if not match:
+            self.log_info("claim malformed")
             return {"type": "claim_result", "ok": False, "jobFile": job_file}
 
         claimant_id = self.sanitize_claimant_id(message.get("claimantId", ""))
@@ -345,6 +347,7 @@ class TranscriptionMonitor:
         status = message.get("status", "")
         match = CLAIMED_JOB_FILE_RE.fullmatch(claimed_file)
         if not match or status not in {"done", "error"}:
+            self.log_info("finish malformed")
             return {"type": "finish_result", "ok": False}
 
         claimed_path = Path(folder) / claimed_file
@@ -417,6 +420,7 @@ class TranscriptionMonitor:
         if folder != self.job_watch_folder:
             self.stop_job_watcher()
             self.job_watch_announced = set()
+            self.job_watch_announce_state = {}
         elif self.job_watch_thread and self.job_watch_thread.is_alive():
             return {"type": "watch_started", "folder": folder}
 
@@ -465,8 +469,6 @@ class TranscriptionMonitor:
                             continue
                     payload = self.read_job_payload(path)
                     want_result = payload.get("want_result") is True
-                    if not want_result and name in self.job_watch_announced:
-                        continue
                     if (
                         not want_result
                         and age_seconds > JOB_WATCH_MAX_UNREADABLE_AGE_SECONDS
@@ -476,6 +478,9 @@ class TranscriptionMonitor:
                     text = payload.get("text")
                     if not self.is_usable_job_payload(job_id, text):
                         continue
+                    repeat_count = self.should_announce_job(name)
+                    if repeat_count is None:
+                        continue
                     self.job_watch_announced.add(name)
                     message = {
                         "type": "job_found",
@@ -484,20 +489,39 @@ class TranscriptionMonitor:
                         "text": text,
                         "wantResult": want_result,
                         "instances": self.read_alive_heartbeats(folder_path),
+                        "repeat_count": repeat_count,
                     }
                     if payload.get("source"):
                         message["source"] = payload.get("source")
                     if payload.get("conversation_key"):
                         message["conversationKey"] = payload.get("conversation_key")
                     self.send_message(message)
-                    self.log_info("announce job=%s want_result=%s instances=%s", job_id, want_result, len(message["instances"]))
+                    self.log_info("announce job=%s want_result=%s instances=%s repeat_count=%s", job_id, want_result, len(message["instances"]), repeat_count)
                 self.job_watch_announced.intersection_update(current_files)
+                self.job_watch_announce_state = {
+                    name: state for name, state in self.job_watch_announce_state.items() if name in current_files
+                }
             except OSError as e:
                 self.log_exception("watch loop os error: %s", e)
                 self.job_watch_announced = set()
+                self.job_watch_announce_state = {}
             except Exception as e:
                 self.log_exception("watch loop unhandled exception: %s", e)
             stop_event.wait(poll_seconds)
+
+    def should_announce_job(self, name, now=None):
+        now = time.time() if now is None else now
+        state = self.job_watch_announce_state.get(name)
+        if not state:
+            self.job_watch_announce_state[name] = {"last": now, "repeat_count": 0}
+            return 1
+        state["repeat_count"] += 1
+        if now - state["last"] < 60:
+            return None
+        state["last"] = now
+        repeat_count = state["repeat_count"]
+        state["repeat_count"] = 0
+        return repeat_count
 
     def read_job_payload(self, path):
         try:
@@ -835,10 +859,16 @@ class TranscriptionMonitor:
             self.logger.exception(message, *args)
 
     def append_extension_log(self, message):
-        line = message.get("line", "")
-        if not isinstance(line, str):
-            line = str(line)
-        self.log_info("EXT %s", line[:2000])
+        event = message.get("event", {})
+        if not isinstance(event, dict):
+            event = {}
+        allowed = {
+            key: event[key] for key in (
+                "timestamp", "event", "stage", "job_id", "claimant_id", "status",
+                "reason_code", "attempts", "busy", "port_state", "repeat_count",
+            ) if event.get(key) is not None
+        }
+        self.log_info("EXT %s", json.dumps(allowed, sort_keys=True, separators=(",", ":")))
         return {"type": "log_result", "ok": True}
             
     def read_state_file(self, state_file):
