@@ -1665,6 +1665,106 @@ describe('Background settings sanitization', () => {
     expect(helpers.hasHistorySignatureForTest(legacyStoredHistory, promptOnlySignature)).toBe(true);
   });
 });
+
+describe('Prompt-job runtime logging lifecycle', () => {
+  const logMessages = (port) => port.postMessage.mock.calls
+    .map(([message]) => message)
+    .filter((message) => message.type === 'log')
+    .map((message) => message.event);
+  let storage;
+
+  beforeAll(() => {
+    require('../background-prompt-jobs.js');
+  });
+
+  beforeEach(() => {
+    storage = {};
+    chrome.storage.local.get.mockImplementation(async (key) => ({ [key]: storage[key] }));
+    chrome.storage.local.set.mockImplementation(async (items) => Object.assign(storage, items));
+    global.PromptQueueBackgroundTest.resetPromptJobsForTest();
+  });
+
+  test('logs receipt and one duplicate disposition for a priority-0 claim race', async () => {
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port, folder: 'C:/jobs', claimantId: 'self' });
+
+    await global.PromptQueueBackgroundTest.handleJobFound({ jobFile: 'job_one.json', id: 'one', text: 'public', instances: [] });
+    await global.PromptQueueBackgroundTest.handleClaimResult({ ok: false, jobFile: 'job_one.json', id: 'one' });
+    await Promise.resolve();
+
+    expect(port.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'claim_job', jobFile: 'job_one.json' }));
+    expect(logMessages(port).filter((event) => event.job_id === 'one').map((event) => event.event))
+      .toEqual(['job_recv', 'duplicate']);
+  });
+
+  test('buffers port-loss events without overwrites and flushes them after reconnection', async () => {
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port: null });
+    global.PromptQueueBackgroundTest.postPromptJobsEvent({ event: 'job_recv', job_id: 'one' });
+    global.PromptQueueBackgroundTest.postPromptJobsEvent({ event: 'port-unavailable', job_id: 'one' });
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+    expect(storage.promptJobsLogBuffer.map((event) => event.event)).toEqual(['job_recv', 'port-unavailable']);
+
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port });
+    await global.PromptQueueBackgroundTest.flushPromptJobsLogBuffer();
+    expect(logMessages(port).map((event) => event.event)).toEqual(['job_recv', 'port-unavailable']);
+    expect(storage.promptJobsLogBuffer).toEqual([]);
+  });
+
+  test('coalesces consecutive identical events before posting to a connected port', async () => {
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port });
+    global.PromptQueueBackgroundTest.postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'connected' });
+    global.PromptQueueBackgroundTest.postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'connected' });
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+
+    expect(logMessages(port)).toEqual([expect.objectContaining({
+      event: 'port_lifecycle', port_state: 'connected', repeat_count: 2,
+    })]);
+  });
+
+  test('cleans pending state when asynchronous claim posting fails', async () => {
+    const port = { postMessage: jest.fn(() => { throw new Error('lost'); }), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port, folder: 'C:/jobs', claimantId: 'self' });
+
+    await global.PromptQueueBackgroundTest.handleJobFound({ jobFile: 'job_fail.json', id: 'fail', text: 'public', instances: [] });
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+
+    expect(global.PromptQueueBackgroundTest.pendingPromptJobsForTest()).toBe(0);
+    expect(storage.promptJobsLogBuffer).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: 'error', reason_code: 'claim_post_failed' }),
+    ]));
+  });
+
+  test('classifies malformed claim results before duplicate results', async () => {
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port });
+
+    await global.PromptQueueBackgroundTest.handleClaimResult({ ok: false, id: 'bad' });
+    await Promise.resolve();
+
+    expect(logMessages(port)).toEqual([expect.objectContaining({ event: 'malformed', job_id: 'bad', reason_code: 'claim_result' })]);
+  });
+
+  test('clears busy after invalid target and logs failed finish without a port', async () => {
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port, folder: 'C:/jobs', claimantId: 'self' });
+    await global.PromptQueueBackgroundTest.handleClaimResult({
+      ok: true, jobFile: 'job_target.json', claimedFile: 'job_target.claimed.self.json', id: 'target', text: 'public',
+      wantResult: true, source: 'model_bridge', targetUrl: 'http://invalid.example/',
+    });
+    await Promise.resolve();
+    expect(port.postMessage).toHaveBeenCalledWith({ type: 'heartbeat', busy: false });
+
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port: null, folder: 'C:/jobs' });
+    chrome.runtime.connectNative.mockImplementationOnce(() => { throw new Error('host down'); });
+    await expect(global.PromptQueueBackgroundTest.finishPromptJob('job_target.claimed.self.json', 'done', { folder: 'C:/jobs' })).resolves.toBe(false);
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+    expect(storage.promptJobsLogBuffer).toEqual(expect.arrayContaining([
+      expect.objectContaining({ event: 'finish_failed', job_id: 'target', status: 'done', reason_code: 'port_unavailable' }),
+    ]));
+  });
+});
 });
 
 describe('Prompt jobs watchdog', () => {
