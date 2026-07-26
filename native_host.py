@@ -311,6 +311,10 @@ class TranscriptionMonitor:
         with self.job_claim_lock:
             try:
                 os.rename(source_path, claimed_path)
+                try:
+                    os.utime(claimed_path, None)
+                except OSError as e:
+                    self.log_info("claim transition timestamp failed job=%s error=%s", match.group(1), e)
             except (FileNotFoundError, PermissionError):
                 self.log_info("claim lost job=%s claimant=%s", match.group(1), claimant_id)
                 return {"type": "claim_result", "ok": False, "jobFile": job_file}

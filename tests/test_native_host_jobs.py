@@ -60,6 +60,26 @@ def test_claim_job_allows_exactly_one_concurrent_claimant(tmp_path):
     assert winners[0]["text"] == "claim me"
 
 
+def test_claim_job_refreshes_claimed_file_transition_time(tmp_path):
+    job_file = tmp_path / "job_old.json"
+    write_job(job_file, job_id="old", text="claim me")
+    old_time = time.time() - 600
+    os.utime(job_file, (old_time, old_time))
+    before_claim = time.time()
+
+    response = native_host.TranscriptionMonitor().handle_message({
+        "type": "claim_job",
+        "folder": str(tmp_path),
+        "jobFile": job_file.name,
+        "claimantId": "worker",
+    })
+
+    claimed_file = tmp_path / response["claimedFile"]
+    assert response["ok"] is True
+    assert not job_file.exists()
+    assert claimed_file.stat().st_mtime >= before_claim
+
+
 def test_finish_job_done_deletes_and_error_renames(tmp_path):
     monitor = native_host.TranscriptionMonitor()
     done_file = tmp_path / "job_done.claimed.worker_1.json"

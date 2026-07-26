@@ -1684,6 +1684,24 @@ describe('Prompt-job runtime logging lifecycle', () => {
     global.PromptQueueBackgroundTest.resetPromptJobsForTest();
   });
 
+  async function connectRuntimePort() {
+    const listeners = {};
+    const port = {
+      postMessage: jest.fn(),
+      disconnect: jest.fn(),
+      onMessage: { addListener: jest.fn((listener) => { listeners.message = listener; }) },
+      onDisconnect: { addListener: jest.fn((listener) => { listeners.disconnect = listener; }) },
+    };
+    storage.aiTaskSequencerSettings = {
+      promptJobs: { enabled: true, folder: 'C:/jobs', priority: 0 },
+    };
+    storage.promptJobsClaimantId = 'self';
+    chrome.runtime.connectNative.mockReturnValueOnce(port);
+    await global.PromptQueueBackgroundTest.runPromptJobsWatchdog();
+    await Promise.resolve();
+    return { port, listeners };
+  }
+
   test('logs receipt and one duplicate disposition for a priority-0 claim race', async () => {
     const port = { postMessage: jest.fn(), disconnect: jest.fn() };
     global.PromptQueueBackgroundTest.setPromptJobsForTest({ port, folder: 'C:/jobs', claimantId: 'self' });
@@ -1763,6 +1781,54 @@ describe('Prompt-job runtime logging lifecycle', () => {
     expect(storage.promptJobsLogBuffer).toEqual(expect.arrayContaining([
       expect.objectContaining({ event: 'finish_failed', job_id: 'target', status: 'done', reason_code: 'port_unavailable' }),
     ]));
+  });
+
+  test('disconnect clears pending claims and allows a reannounced job to claim again', async () => {
+    const { port, listeners } = await connectRuntimePort();
+    await global.PromptQueueBackgroundTest.handleJobFound({
+      jobFile: 'job_reannounce.json', id: 'reannounce', text: 'public', instances: [],
+    });
+    expect(global.PromptQueueBackgroundTest.pendingPromptJobsForTest()).toBe(1);
+
+    listeners.disconnect();
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+    expect(global.PromptQueueBackgroundTest.pendingPromptJobsForTest()).toBe(0);
+    expect(port.postMessage).toHaveBeenCalledWith({ type: 'heartbeat', busy: false });
+    expect(storage.promptJobsLogBuffer).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: 'port_lifecycle', port_state: 'disconnected', reason_code: 'native_port_disconnected',
+      }),
+    ]));
+
+    const replacement = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port: replacement, folder: 'C:/jobs', claimantId: 'self' });
+    await global.PromptQueueBackgroundTest.handleJobFound({
+      jobFile: 'job_reannounce.json', id: 'reannounce', text: 'public', instances: [],
+    });
+    expect(replacement.postMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'claim_job', jobFile: 'job_reannounce.json',
+    }));
+  });
+
+  test('negative finish result logs the correlated failure once and clears tracking', async () => {
+    const { port, listeners } = await connectRuntimePort();
+    await global.PromptQueueBackgroundTest.finishPromptJob(
+      'job_finish.claimed.self.json', 'done', { folder: 'C:/jobs' },
+    );
+    listeners.message({ type: 'finish_result', ok: false });
+    await Promise.resolve();
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+    expect(logMessages(port)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: 'finish_failed', stage: 'finish', job_id: 'finish', status: 'done',
+        reason_code: 'finish_result_failed',
+      }),
+    ]));
+
+    listeners.message({ type: 'finish_result', ok: false });
+    await Promise.resolve();
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+    expect(logMessages(port).filter((event) => event.event === 'finish_failed' && event.job_id === 'finish')).toHaveLength(1);
   });
 });
 });

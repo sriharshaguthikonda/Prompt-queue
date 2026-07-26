@@ -1771,10 +1771,13 @@ if (self.__PROMPT_QUEUE_TEST__) {
       await promptJobsLogStorageQueue;
     },
     resetPromptJobsForTest: () => {
+      clearTimeout(promptJobsReconnectTimer);
+      promptJobsReconnectTimer = null;
       promptJobsPort = null;
       promptJobsWatchedFolder = '';
       promptJobsClaimantIdCache = null;
       promptJobsPendingClaims.clear();
+      promptJobsPendingFinishes.clear();
       promptJobsActiveRuns.clear();
       promptJobsConnectedEvents = [];
       promptJobsConnectedFlushScheduled = false;
@@ -4614,6 +4617,8 @@ let promptJobsConversationTabCache = null;
 let promptJobsBridgeTabCache = null;
 // jobFile -> { text, id, timer } for jobs currently waiting out their priority delay.
 const promptJobsPendingClaims = new Map();
+// claimedFile -> { jobId, status } for finish_job responses, which older native hosts do not identify.
+const promptJobsPendingFinishes = new Map();
 // jobFile -> { claimedFile } for jobs this profile is actively running, used to correlate finish_job.
 const promptJobsActiveRuns = new Map();
 
@@ -4681,9 +4686,11 @@ function disconnectPromptJobsPort() {
   promptJobsPort = null;
   promptJobsWatchedFolder = '';
   postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'disconnected' });
-  for (const pending of promptJobsPendingClaims.values()) {
-    clearTimeout(pending.timer);
-  }
+  clearPromptJobsPendingClaims();
+}
+
+function clearPromptJobsPendingClaims() {
+  for (const pending of promptJobsPendingClaims.values()) clearTimeout(pending.timer);
   promptJobsPendingClaims.clear();
 }
 
@@ -4711,9 +4718,13 @@ function connectPromptJobsPort(folder) {
   promptJobsPort.onDisconnect.addListener(() => {
     const err = chrome.runtime.lastError;
     console.log('[PromptJobs] Native port disconnected', { error: err?.message || null });
+    postPromptJobsHeartbeat(false);
+    clearPromptJobsPendingClaims();
     promptJobsPort = null;
     promptJobsWatchedFolder = '';
-    postPromptJobsEvent({ event: 'port_lifecycle', port_state: 'disconnected' });
+    postPromptJobsEvent({
+      event: 'port_lifecycle', port_state: 'disconnected', reason_code: 'native_port_disconnected', busy: false,
+    });
     const jobs = state.options?.promptJobs || DEFAULT_PROMPT_JOBS_SETTINGS;
     if (jobs.enabled && jobs.folder) {
       schedulePromptJobsReconnect();
@@ -4836,6 +4847,20 @@ async function handlePromptJobsPortMessage(msg) {
       return;
     }
     case 'finish_result': {
+      const claimedFile = typeof msg.claimedFile === 'string' && promptJobsPendingFinishes.has(msg.claimedFile)
+        ? msg.claimedFile
+        : promptJobsPendingFinishes.keys().next().value;
+      const pending = claimedFile ? promptJobsPendingFinishes.get(claimedFile) : null;
+      if (claimedFile) promptJobsPendingFinishes.delete(claimedFile);
+      if (msg.ok !== true) {
+        postPromptJobsEvent({
+          event: 'finish_failed',
+          stage: 'finish',
+          job_id: pending?.jobId || 'unknown',
+          status: pending?.status || 'error',
+          reason_code: pending ? 'finish_result_failed' : 'finish_result_unmatched',
+        });
+      }
       console.log('[PromptJobs] finish_result', msg);
       return;
     }
@@ -5018,6 +5043,7 @@ async function finishPromptJob(claimedFile, status, details = {}) {
       error: details.error,
       conversationUrl: details.conversationUrl,
     }));
+    promptJobsPendingFinishes.set(claimedFile, { jobId, status });
     console.log('[PromptJobs] finish_job posted', {
       claimedFile,
       status,
