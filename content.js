@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-07-09.prompt-job-capture-v1';
+  const CONTENT_SCRIPT_VERSION = '2026-07-27.completion-stop-v2';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -2161,6 +2161,7 @@
 
   if (window.__PROMPT_QUEUE_TEST__) {
     window.PromptQueueContentTest = {
+      CONTENT_SCRIPT_VERSION,
       clickSend,
       detectSite,
       findPromptInputForSite,

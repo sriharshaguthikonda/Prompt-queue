@@ -1645,6 +1645,9 @@ describe('Background settings sanitization', () => {
   });
 
   it('should reinject when an already-open tab has a stale content script version', async () => {
+    expect(global.PromptQueueContentTest.CONTENT_SCRIPT_VERSION)
+      .toBe(global.PromptQueueBackgroundTest.CONTENT_SCRIPT_VERSION);
+
     const sendResponses = [
       { ok: true, version: 'old-version' },
       { ok: true, version: '2026-06-04.completion-stop-role-v2' },
