@@ -645,7 +645,27 @@
   }
 
   function getResponseScope(candidate) {
-    return candidate?.closest?.('article[data-testid^="conversation-turn-"], article[data-turn-id], [data-message-author-role="assistant"]') || candidate || null;
+    // No tag qualifier on the turn selectors: chatgpt.com changed the turn element from
+    // <article data-testid="conversation-turn-N"> to <section data-turn-id=... data-turn="...">;
+    // the tag-agnostic form survives that and any future tag change, the qualified one doesn't.
+    return candidate?.closest?.('[data-testid^="conversation-turn-"], [data-turn-id], [data-message-author-role="assistant"]') || candidate || null;
+  }
+
+  // Structural author role for a chatgpt.com candidate node, via the turn container's
+  // data-turn or the message div's data-message-author-role — never by reading text.
+  function chatGptCandidateAuthorRole(node) {
+    if (!node) return null;
+    try {
+      const marked = node.closest?.('[data-turn], [data-message-author-role]');
+      if (!marked) return null;
+      const turn = marked.getAttribute('data-turn');
+      if (turn === 'user' || turn === 'assistant') return turn;
+      const role = marked.getAttribute('data-message-author-role');
+      if (role === 'user' || role === 'assistant') return role;
+      return null;
+    } catch (_) {
+      return null;
+    }
   }
 
   function captureAssistantResponseBaseline() {
@@ -677,8 +697,15 @@
     const candidates = collectResponseCandidates(site);
 
     const candidateTexts = candidates.map((candidate) => cleanCapturedResponseText(candidate.innerText || candidate.textContent || ''));
+    // On chatgpt.com structural author role is known for every candidate, so it is trusted
+    // over text overlap: an assistant-authored candidate can never be the user's own echoed
+    // prompt, no matter how much its text overlaps the prompt (e.g. a reply of "OK" to a
+    // prompt of "say OK" — fuzzyIncludes("OK", "say OK") is true by substring containment,
+    // which previously made this function treat every such short reply as an echo forever).
+    const candidateRoles = site === 'chatgpt' ? candidates.map(chatGptCandidateAuthorRole) : [];
     let promptIndex = -1;
     for (let i = 0; i < candidateTexts.length; i += 1) {
+      if (site === 'chatgpt' && candidateRoles[i] === 'assistant') continue;
       if (fuzzyIncludes(candidateTexts[i], promptText)) promptIndex = i;
     }
 
@@ -686,7 +713,8 @@
       if (site === 'chatgpt' && promptIndex >= 0 && i <= promptIndex) continue;
       const text = candidateTexts[i];
       if (!text) continue;
-      if (fuzzyIncludes(text, promptText)) continue;
+      const isKnownAssistant = site === 'chatgpt' && candidateRoles[i] === 'assistant';
+      if (!isKnownAssistant && fuzzyIncludes(text, promptText)) continue;
       const responseScope = getResponseScope(candidates[i]);
       if (opts.baselineScopes?.has(responseScope)) continue;
       return {
@@ -2220,6 +2248,7 @@
   if (window.__PROMPT_QUEUE_TEST__) {
     window.PromptQueueContentTest = {
       CONTENT_SCRIPT_VERSION,
+      captureLatestAssistantResponse,
       clickSend,
       detectSite,
       findPromptInputForSite,
