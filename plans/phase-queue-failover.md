@@ -1,12 +1,13 @@
 # Phase: Queue Hardening + Priority Failover + Dedicated Bridge Tab
 
-Status: CODE AND OFFLINE VERIFICATION COMPLETE 2026-07-27. Queue implementation: P1 `2dec636`, P2 `e251b78`, fixes `a4a16e2`; completion-wait logging and recovery: `9ebc79a`, `ebcccdd`, `1c3ab0c`, `3a82a2a`. Extension reload and a fresh heartbeat were detected. A post-reload user job and the live 60-second unclaimed gate remain pending. This file owns the shared file-protocol spec.
+Status: CODE AND OFFLINE VERIFICATION COMPLETE 2026-07-27. Queue implementation: P1 `2dec636`, P2 `e251b78`, fixes `a4a16e2`; completion-wait logging/recovery: `9ebc79a`, `ebcccdd`, `1c3ab0c`, `3a82a2a`; final live-path hardening: `d7fe81c`, `9f0a85e`, `372135e`, `ef7faeb`, `615c194`. The live runtime completion gate remains pending until the next natural extension reload. This file owns the shared file-protocol spec.
 
 Related control surfaces:
 
 - [Bridge queue-failover plan](C:/AI/mcp-model-bridge/docs/plans/queue-failover-hardening.md)
 - [Completion-wait and extension-logging closeout](C:/AI/mcp-model-bridge/docs/plans/completion-wait-extension-logging.md)
 - [Live Q&A](<../Q and A.qanda>)
+- [Prompt Queue handoff](../docs/handoff/HANDOFF.md)
 
 ## Why
 
@@ -46,22 +47,22 @@ Re-announce: unclaimed `want_result` jobs are re-announced on every poll while t
 ## Tasks
 
 ### P1 — native_host.py (pytest)
-- [ ] Heartbeats: accept `priority` in `watch_jobs` message; write `heartbeats/<claimantId>.json` each tick (≥15 s apart); accept `{type:"heartbeat", busy}` updates from extension; include alive-instances snapshot in `job_found` pushes so the extension needs no extra round trip.
-- [ ] Re-announce unclaimed want_result jobs every poll.
-- [ ] Requeue sweep per spec (attempts cap 2) replacing `claim_expired`-on-first-expiry; sweep voice claimed files.
-- [ ] Rotating log (`logging.handlers.RotatingFileHandler`) in `<jobs_root>/logs/`; log watch start/stop, announce, claim ok/lost, finish, requeue, sweeps, exceptions. New `{type:"log", line}` message appends extension lines.
-- [ ] Default folder → `C:\AI\bridge_jobs\chatgpt_browser` (extension still sends folder explicitly; default is fallback).
-- [ ] Tests: heartbeat freshness/interval, job_found carries alive list, re-announce, requeue cycle + attempts cap, voice sweep, log rotation at 1 MB, existing 17 protocol tests stay green.
+- [x] Heartbeats: accept `priority` in `watch_jobs` message; write `heartbeats/<claimantId>.json` each tick (≥15 s apart); accept `{type:"heartbeat", busy}` updates from extension; include alive-instances snapshot in `job_found` pushes so the extension needs no extra round trip.
+- [x] Re-announce unclaimed want_result jobs every poll.
+- [x] Requeue sweep per spec (attempts cap 2) replacing `claim_expired`-on-first-expiry; sweep voice claimed files.
+- [x] Rotating log (`logging.handlers.RotatingFileHandler`) in `<jobs_root>/logs/`; log watch start/stop, announce, claim ok/lost, finish, requeue, sweeps, exceptions. New `{type:"log", line}` message appends extension lines.
+- [x] Default folder → `C:\AI\bridge_jobs\chatgpt_browser` (extension still sends folder explicitly; default is fallback).
+- [x] Tests: heartbeat freshness/interval, job_found carries alive list, re-announce, requeue cycle + attempts cap, voice sweep, log rotation at 1 MB, existing 17 protocol tests stay green.
 
 ### P2 — extension (jest)
-- [ ] Claim rule vs heartbeat snapshot from `job_found` (no claim when lower-priority alive+non-busy exists).
-- [ ] Send `priority` with `watch_jobs`; send `{type:"heartbeat", busy}` on automation start/stop.
-- [ ] Dedicated bridge tabs: track extension-created job tabs in `chrome.storage.local` (`promptJobsBridgeTabs`); `findOrCreatePromptJobsTab` may only return members (conversation_key map entries validated against it); NEVER the most-recent-user-tab fallback — create a new inactive tab instead. If the chosen bridge tab is active in a focused window, use/create another bridge tab.
-- [ ] `target_url` / `new_chat` handling: navigate bridge tab to `target_url` (validate `https://chatgpt.com/...`) or to chatgpt.com root for `new_chat`, wait for load + content-script handshake, then type.
-- [ ] Conversation URL: thread captured `url` through `finishPromptJobCorrelation` → `buildFinishMessage` → native `finish_job` → result payload `conversation_url`.
-- [ ] Forward claim/send/capture/finish/error log points (`background.js:4717,4746,4757,4782,4808`) via `{type:"log", line}`.
-- [ ] Popup folder default → new jobs root.
-- [ ] Tests: tab-pick never returns non-bridge tab; claim rule matrix (alive/busy/priority); finish message carries url; target_url validation.
+- [x] Claim rule vs heartbeat snapshot from `job_found` (no claim when lower-priority alive+non-busy exists).
+- [x] Send `priority` with `watch_jobs`; send `{type:"heartbeat", busy}` on automation start/stop.
+- [x] Dedicated bridge tabs: track extension-created job tabs in `chrome.storage.local` (`promptJobsBridgeTabs`); `findOrCreatePromptJobsTab` may only return members (conversation_key map entries validated against it); NEVER the most-recent-user-tab fallback — create a new inactive tab instead. If the chosen bridge tab is active in a focused window, use/create another bridge tab.
+- [x] `target_url` / `new_chat` handling: navigate bridge tab to `target_url` (validate `https://chatgpt.com/...`) or to chatgpt.com root for `new_chat`, wait for load + content-script handshake, then type.
+- [x] Conversation URL: thread captured `url` through `finishPromptJobCorrelation` → `buildFinishMessage` → native `finish_job` → result payload `conversation_url`.
+- [x] Forward claim/send/capture/finish/error log points (`background.js:4717,4746,4757,4782,4808`) via `{type:"log", line}`.
+- [x] Popup folder default → new jobs root.
+- [x] Tests: tab-pick never returns non-bridge tab; claim rule matrix (alive/busy/priority); finish message carries url; target_url validation.
 
 ## Out of scope
 Whisper code changes, L2 desktop send-lease, multi-account, non-ChatGPT sites.
@@ -71,6 +72,9 @@ Whisper code changes, L2 desktop send-lease, multi-account, non-ChatGPT sites.
 ### Commits
 
 - Prompt Queue logging/recovery: `9ebc79a`, `ebcccdd`, `1c3ab0c`, `3a82a2a`.
+- Native-test cache prevention: `d7fe81c`.
+- Send lifecycle logging: `9f0a85e`.
+- ChatGPT completion transition: `372135e`; stale content-script handshake: `ef7faeb`; final accessible-name signal: `615c194` (supersedes the earlier completion-signal SHA).
 
 ### Command evidence
 
@@ -78,9 +82,9 @@ Whisper code changes, L2 desktop send-lease, multi-account, non-ChatGPT sites.
 npm test -- --runInBand tests/test_background_prompt_jobs.test.js
 # 13 passed
 npm test -- --runInBand tests/integration.test.js -t "Prompt-job runtime logging lifecycle"
-# 81 passed
+# final targeted integration: 89 passed
 npm test -- --runInBand
-# 183 passed
+# 194 passed
 .\tools\test-native-host.ps1 tests/test_native_host_jobs.py -q
 # 29 passed
 .\tools\test-native-host.ps1 tests -q
@@ -93,8 +97,10 @@ python -m py_compile native_host.py
 
 ### Runtime evidence
 
-- Extension reload was detected by a new native-host process and fresh heartbeat at `2026-07-27 05:48:31`.
+- The ChatGPT completion detector now uses `button#composer-submit-button`'s accessible name through `aria-labelledby`; its transition reasons are `stop_observed`, `stop_disappeared`, and `fallback_waiting`.
+- A live churn job reached `send`, then ended after about 12 minutes with `stoppedByUser` and no `completion_decision`. It is evidence that dispatch works, not completion success.
+- The runtime completion gate remains pending until the next natural reload; no further reload is requested now.
 - Every current claimant active-plus-backup log pair is under 2 MiB.
 - The forbidden metadata-key scan returned zero findings.
-- No post-reload user prompt job exists yet. The live `announce -> job_recv -> disposition -> claim -> send -> finish -> result` sequence remains pending.
-- The approximately 60-second unclaimed live gate remains pending. No new user prompt job was submitted during closeout.
+- The live `announce -> job_recv -> disposition -> claim -> send -> finish -> result` sequence remains pending; do not infer `finish` or `result` from the failed churn job.
+- The approximately 60-second unclaimed bridge gate remains separately pending.
