@@ -64,6 +64,51 @@ describe('content-chat-state', () => {
     expect(result.active).toBe(true);
   });
 
+  // Regression: chatgpt.com REMOVES button#composer-submit-button when generation ends, so the
+  // stop-button candidate list fell through to the loose `button[aria-label*="Stop"]` last
+  // resort and matched a sidebar conversation whose TITLE contains "Stop". That read as active
+  // generation forever, so every want_result job waited until its tab closed and was written
+  // out as error "stoppedByUser". Observed live: aria-label "Pin Ollama Stop Usage".
+  it('does not treat a sidebar conversation titled "Stop" as an active stop button', () => {
+    document.body.innerHTML = `
+      <nav aria-label="Chat history">
+        <ul><li>
+          <a aria-label="Ollama Stop Usage">
+            <button aria-label="Pin Ollama Stop Usage"></button>
+          </a>
+        </li></ul>
+      </nav>
+      <main>
+        <form data-type="unified-composer">
+          <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        </form>
+      </main>
+    `;
+    const sidebarButton = setVisible(document.querySelector('nav button'));
+
+    expect(chatState().isActiveStopButton(sidebarButton)).toBe(false);
+    expect(chatState().classifyChatGPTDomActivity({
+      stopButtonSelector: 'button[aria-label*="Stop"]',
+    }).active).toBe(false);
+  });
+
+  it('still detects a real stop control inside the composer', () => {
+    document.body.innerHTML = `
+      <nav aria-label="Chat history">
+        <button aria-label="Pin Ollama Stop Usage"></button>
+      </nav>
+      <main>
+        <form data-type="unified-composer">
+          <button data-testid="stop-button" aria-label="Stop streaming"></button>
+        </form>
+      </main>
+    `;
+    setVisible(document.querySelector('nav button'));
+    const composerStop = setVisible(document.querySelector('form button'));
+
+    expect(chatState().isActiveStopButton(composerStop)).toBe(true);
+  });
+
   it('treats a send-labeled composer with stale stop test id as send-ready, not stop-active', () => {
     document.body.innerHTML = `
       <button id="composer-submit-button" data-testid="stop-button" aria-label="Send prompt">Send</button>

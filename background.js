@@ -219,7 +219,7 @@ const DEFAULT_SETTINGS = {
   memory: DEFAULT_MEMORY_SETTINGS,
   promptJobs: DEFAULT_PROMPT_JOBS_SETTINGS,
 };
-const CONTENT_SCRIPT_VERSION = '2026-07-27.completion-stop-v3';
+const CONTENT_SCRIPT_VERSION = '2026-07-28.stop-scope-v4';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
@@ -1280,9 +1280,20 @@ function recordPromptJobCompletionDecision(session, completionReason) {
   return true;
 }
 
+// Keep in sync with COMPLETION_TRANSITIONS in content.js.
+const COMPLETION_TRANSITIONS = ['stop_observed', 'stop_disappeared', 'stop_gone_unstable', 'fallback_waiting'];
+// `decision:<reason>` carries the completion gate's own reason code — a fixed vocabulary
+// (blocked:*, waiting:*, chatgptStopDisappeared, ...), never page text.
+const DECISION_TRANSITION_PATTERN = /^decision:[a-zA-Z]+(:[a-zA-Z,]+)?$/;
+
+function isCompletionTransition(transition) {
+  return COMPLETION_TRANSITIONS.includes(transition)
+    || (typeof transition === 'string' && DECISION_TRANSITION_PATTERN.test(transition));
+}
+
 function recordPromptJobCompletionTransition(session, transition) {
   const correlation = session?.promptJobCorrelation;
-  if (correlation?.wantResult !== true || !['stop_observed', 'stop_disappeared', 'fallback_waiting'].includes(transition)) return false;
+  if (correlation?.wantResult !== true || !isCompletionTransition(transition)) return false;
   postPromptJobsEvent({
     event: 'completion_transition',
     stage: 'completion',

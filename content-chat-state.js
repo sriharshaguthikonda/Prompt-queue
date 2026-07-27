@@ -1,5 +1,5 @@
 (function () {
-  const CHAT_STATE_VERSION = '2026-07-27.chat-state-v4';
+  const CHAT_STATE_VERSION = '2026-07-28.chat-state-v5';
   if (window.PromptQueueChatState?.version === CHAT_STATE_VERSION) return;
 
   const RESPONSE_ACTION_SELECTORS = [
@@ -14,7 +14,34 @@
     const style = getComputedStyle(el);
     if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
     const rect = el.getBoundingClientRect();
+    // ponytail: `|| el.isConnected` makes every attached node "visible", which is wrong — but
+    // it is load-bearing for the jsdom fixtures (jsdom reports a 0x0 rect and a null
+    // offsetParent unless a test mocks them), and the stop-button false positive it could
+    // cause is already blocked by isInComposerRegion below. Tighten to the first three
+    // signals only alongside a fixture pass that mocks rects, not before.
     return rect.width > 0 || rect.height > 0 || el.offsetParent !== null || el.isConnected === true;
+  }
+
+  // A generation Stop control always lives in the composer. chatgpt.com REMOVES
+  // button#composer-submit-button from the DOM when generation ends (it is not hidden, it is
+  // gone), so the stop-button candidate list falls through to the loose
+  // `button[aria-label*="Stop"]` last resort — which matches a sidebar conversation whose
+  // TITLE contains "Stop" (observed live: aria-label "Pin Ollama Stop Usage", inside
+  // nav[aria-label="Chat history"]). That read as an active Stop forever and blocked every
+  // completion. Whitelist the composer region instead of blacklisting the sidebar: fail
+  // closed, the way a wrong "still generating" verdict costs an entire job.
+  function isInComposerRegion(el) {
+    if (!el) return false;
+    try {
+      if (el.closest('form') || el.closest('main')) return true;
+      // If the page has no composer region at all, containment cannot discriminate anything
+      // and must not veto — that is the shape of the non-ChatGPT hosts and of the bare
+      // single-button test DOMs. The sidebar false positive only exists on pages that do
+      // have a composer, where this check stays active.
+      return !document.querySelector('form, main');
+    } catch (_) {
+      return false;
+    }
   }
 
   function isButtonEnabled(btn) {
@@ -147,7 +174,12 @@
 
   function isActiveStopButton(button) {
     if (!button || !isButtonEnabled(button) || !isElementVisible(button)) return false;
+    // The composer button is identified by a unique id, so it needs no containment check.
     if (isComposerActionButton(button)) return getComposerActionRole(button).role === 'stop-active';
+    // Everything else arrives from a loose selector match and must prove it is part of the
+    // composer before it may claim generation is running. This is the branch the sidebar
+    // conversation title reached.
+    if (!isInComposerRegion(button)) return false;
     const label = normalizeText(button.getAttribute('aria-label') || button.getAttribute('title') || button.textContent);
     const testId = normalizeText(button.getAttribute('data-testid'));
     const combined = `${label} ${testId}`;

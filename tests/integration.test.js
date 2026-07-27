@@ -191,8 +191,10 @@ describe('Content Script Integration', () => {
         writable: true,
       });
       document.body.innerHTML = `
-        <button class="stop-btn btn-primary" data-testid="stop-button" aria-label="Stop generating">Stop</button>
-        <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop answering" class="composer-stop">Stop</button>
+        <form data-type="unified-composer">
+          <button class="stop-btn btn-primary" data-testid="stop-button" aria-label="Stop generating">Stop</button>
+          <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop answering" class="composer-stop">Stop</button>
+        </form>
         <main>
           <article data-testid="conversation-turn-1" data-message-author-role="assistant">
             <div class="loading-shimmer shimmer-live">Loading</div>
@@ -722,10 +724,18 @@ describe('Content Script Integration', () => {
       const transitions = chrome.runtime.sendMessage.mock.calls
         .map(([message]) => message)
         .filter((message) => message?.type === 'PROMPT_JOB_COMPLETION_TRANSITION');
-      expect(transitions).toEqual([
+      const stopTransitions = transitions.filter((message) => !message.transition.startsWith('decision:'));
+      expect(stopTransitions).toEqual([
         { type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId: 'transition-job', transition: 'stop_observed' },
         { type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId: 'transition-job', transition: 'stop_disappeared' },
       ]);
+      // The decision reason is the diagnostic that names which gate is open; the terminal one
+      // must agree with the resolved completionReason.
+      const decisions = transitions
+        .filter((message) => message.transition.startsWith('decision:'))
+        .map((message) => message.transition);
+      expect(decisions.length).toBeGreaterThan(0);
+      expect(decisions[decisions.length - 1]).toBe('decision:chatgptStopDisappeared');
     });
 
     it('records one bounded fallback transition when ChatGPT Stop was missed', async () => {
@@ -762,10 +772,15 @@ describe('Content Script Integration', () => {
       jest.advanceTimersByTime(500);
       await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_response_fallback' });
 
-      expect(chrome.runtime.sendMessage.mock.calls
+      const fallbackTransitions = chrome.runtime.sendMessage.mock.calls
         .map(([message]) => message)
-        .filter((message) => message?.type === 'PROMPT_JOB_COMPLETION_TRANSITION'))
+        .filter((message) => message?.type === 'PROMPT_JOB_COMPLETION_TRANSITION');
+      expect(fallbackTransitions.filter((message) => !message.transition.startsWith('decision:')))
         .toEqual([{ type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId: 'fallback-job', transition: 'fallback_waiting' }]);
+      const fallbackDecisions = fallbackTransitions
+        .filter((message) => message.transition.startsWith('decision:'))
+        .map((message) => message.transition);
+      expect(fallbackDecisions[fallbackDecisions.length - 1]).toBe('decision:chatgptResponseFallback');
     });
 
     it('uses the bounded response-action fallback when ChatGPT Stop was missed', async () => {
@@ -1041,8 +1056,10 @@ describe('Content Script Integration', () => {
       jest.useFakeTimers();
       try {
         document.body.innerHTML = `
-          <textarea id="prompt-textarea" style="display:block"></textarea>
-          <button data-testid="send-button" type="button">Send</button>
+          <form data-type="unified-composer">
+            <textarea id="prompt-textarea" style="display:block"></textarea>
+            <button data-testid="send-button" type="button">Send</button>
+          </form>
           <main></main>
         `;
 
@@ -1056,7 +1073,7 @@ describe('Content Script Integration', () => {
           const stopButton = document.createElement('button');
           stopButton.setAttribute('data-testid', 'stop-button');
           stopButton.textContent = 'Stop';
-          document.body.appendChild(stopButton);
+          document.querySelector('form[data-type="unified-composer"]').appendChild(stopButton);
 
           setTimeout(() => {
             document.querySelector('button[data-testid="stop-button"]')?.remove();
@@ -1106,9 +1123,15 @@ describe('Content Script Integration', () => {
           value: { href: 'https://chatgpt.com/c/result-render-miss-test' },
           writable: true,
         });
+        // The composer sits inside form[data-type="unified-composer"] on chatgpt.com, and the
+        // Stop control replaces Send inside that form. Keeping the fixture faithful matters:
+        // a Stop control outside the composer is a sidebar conversation whose title contains
+        // "Stop", which is exactly the false positive isInComposerRegion now rejects.
         document.body.innerHTML = `
-          <textarea id="prompt-textarea" style="display:block"></textarea>
-          <button data-testid="send-button" type="button">Send</button>
+          <form data-type="unified-composer">
+            <textarea id="prompt-textarea" style="display:block"></textarea>
+            <button data-testid="send-button" type="button">Send</button>
+          </form>
           <main></main>
         `;
 
@@ -1122,7 +1145,7 @@ describe('Content Script Integration', () => {
           stopButton.setAttribute('data-testid', 'stop-button');
           stopButton.setAttribute('aria-label', 'Stop answering');
           stopButton.textContent = 'Stop';
-          document.body.appendChild(stopButton);
+          document.querySelector('form[data-type="unified-composer"]').appendChild(stopButton);
 
           setTimeout(() => {
             stopButton.remove();
@@ -1181,8 +1204,10 @@ describe('Content Script Integration', () => {
           writable: true,
         });
         document.body.innerHTML = `
-          <textarea id="prompt-textarea" style="display:block"></textarea>
-          <button data-testid="send-button" type="button">Send</button>
+          <form data-type="unified-composer">
+            <textarea id="prompt-textarea" style="display:block"></textarea>
+            <button data-testid="send-button" type="button">Send</button>
+          </form>
           <main></main>
         `;
 
@@ -1202,7 +1227,7 @@ describe('Content Script Integration', () => {
           stopButton.setAttribute('data-testid', 'stop-button');
           stopButton.setAttribute('aria-label', 'Stop answering');
           stopButton.textContent = 'Stop';
-          document.body.appendChild(stopButton);
+          document.querySelector('form[data-type="unified-composer"]').appendChild(stopButton);
         });
 
         await expect(

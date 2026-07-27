@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-07-27.completion-stop-v3';
+  const CONTENT_SCRIPT_VERSION = '2026-07-28.stop-scope-v4';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -587,7 +587,9 @@
   function responseCandidateSelectors(site) {
     if (site === 'chatgpt') {
       return [
-        'article[data-testid^="conversation-turn-"]',
+        // No tag qualifier: chatgpt.com moved the turn from <article> to <section>, so the
+        // qualified form matches 0 (verified live). getResponseScope already learned this.
+        '[data-testid^="conversation-turn-"]',
         '[data-message-author-role="assistant"]',
         'main .markdown',
       ];
@@ -648,7 +650,15 @@
     // No tag qualifier on the turn selectors: chatgpt.com changed the turn element from
     // <article data-testid="conversation-turn-N"> to <section data-turn-id=... data-turn="...">;
     // the tag-agnostic form survives that and any future tag change, the qualified one doesn't.
-    return candidate?.closest?.('[data-testid^="conversation-turn-"], [data-turn-id], [data-message-author-role="assistant"]') || candidate || null;
+    // Resolve the turn FIRST. closest() matches the element itself, so folding
+    // [data-message-author-role="assistant"] into one selector list collapsed the scope onto
+    // the inner message div — and the copy/good/bad action bar lives outside that div, in the
+    // turn. Measured live: turn scope finds 4 completion markers, inner-div scope finds 0,
+    // which silently disabled the response-marker completion path.
+    if (!candidate?.closest) return candidate || null;
+    return candidate.closest('[data-testid^="conversation-turn-"], [data-turn-id]')
+      || candidate.closest('[data-message-author-role="assistant"]')
+      || candidate;
   }
 
   // Structural author role for a chatgpt.com candidate node, via the turn container's
@@ -829,8 +839,14 @@
     return [];
   }
 
+  // Keep in sync with recordPromptJobCompletionTransition in background.js.
+  const COMPLETION_TRANSITIONS = ['stop_observed', 'stop_disappeared', 'stop_gone_unstable', 'fallback_waiting'];
+  const isCompletionTransition = (transition) => COMPLETION_TRANSITIONS.includes(transition)
+    // `decision:<finalDecisionReason>` — a fixed reason-code vocabulary, never page text.
+    || (typeof transition === 'string' && transition.startsWith('decision:'));
+
   function emitPromptJobCompletionTransition(promptId, transition) {
-    if (!promptId || !['stop_observed', 'stop_disappeared', 'fallback_waiting'].includes(transition)) return;
+    if (!promptId || !isCompletionTransition(transition)) return;
     try {
       chrome.runtime.sendMessage({ type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId, transition });
     } catch (_) {}
@@ -1207,11 +1223,19 @@
       // Keep it for this job so the later disappearance remains meaningful.
       let chatGptStopObserved = false;
       let lastCompletionTransition = null;
+      let lastDecisionReason = null;
 
       const emitCompletionTransition = (transition) => {
         if (lastCompletionTransition === transition) return;
         lastCompletionTransition = transition;
         emitPromptJobCompletionTransition(promptId, transition);
+      };
+      // Tracked separately: a decision reason and a stop transition can both change on the
+      // same poll, and one dedupe slot would make them evict each other every tick.
+      const emitDecisionReason = (reason) => {
+        if (!reason || lastDecisionReason === reason) return;
+        lastDecisionReason = reason;
+        emitPromptJobCompletionTransition(promptId, `decision:${reason}`);
       };
 
       const container = messagesContainer || document.body;
@@ -1331,8 +1355,14 @@
         const chatGptStopDisappeared = chatGptStopObserved
           && !currentStopActive
           && responseStableEnough;
-        if (site === 'chatgpt' && chatGptStopObserved && !currentStopActive) {
+        // A logged transition must never be weaker than the decision it names. `stop_disappeared`
+        // used to omit responseStableEnough, so it could log while the gate below stayed false
+        // forever — which made the host-log sequence unfalsifiable and sent several debugging
+        // rounds after the wrong component.
+        if (site === 'chatgpt' && chatGptStopDisappeared) {
           emitCompletionTransition('stop_disappeared');
+        } else if (site === 'chatgpt' && chatGptStopObserved && !currentStopActive) {
+          emitCompletionTransition('stop_gone_unstable');
         } else if (site === 'chatgpt' && !chatGptStopObserved && responseSnapshot.ok && !currentStopActive) {
           emitCompletionTransition('fallback_waiting');
         }
@@ -1373,6 +1403,10 @@
                     : !watchGateSatisfied ? 'waiting:watchGate'
                       : 'waiting:unknown'
           );
+
+        // The single most useful line in the whole wait: it names exactly which gate is open.
+        // It used to exist only in the page console, where no post-mortem could reach it.
+        if (site === 'chatgpt') emitDecisionReason(finalDecisionReason);
 
         if (elapsed - lastStatusAt >= 5000) {
           lastStatusAt = elapsed;
