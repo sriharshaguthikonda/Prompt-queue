@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-07-27.completion-stop-v2';
+  const CONTENT_SCRIPT_VERSION = '2026-07-27.completion-stop-v3';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -768,6 +768,13 @@
     return [];
   }
 
+  function emitPromptJobCompletionTransition(promptId, transition) {
+    if (!promptId || !['stop_observed', 'stop_disappeared', 'fallback_waiting'].includes(transition)) return;
+    try {
+      chrome.runtime.sendMessage({ type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId, transition });
+    } catch (_) {}
+  }
+
   function getChatGPTActivityDiagnostics(options = {}) {
     const signals = getChatGPTThinkingSignals(options);
     const diagnostics = signals?.activityDiagnostics || {};
@@ -1098,7 +1105,7 @@
     return !stop && !spinner;
   }
 
-  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, enableTimeout, stopWord, stopWordCaseSensitive, watchGate, promptText, inputEl, assistantBaseline, requireCapturedResponse = false }) {
+  function waitForCompletion({ sendButton, stopButtonSelector, messagesContainer, stableMs, maxWaitMs, pollIntervalMs, enableMaxWaitTimeout, enableTimeout, stopWord, stopWordCaseSensitive, watchGate, promptId, promptText, inputEl, assistantBaseline, requireCapturedResponse = false }) {
     const site = detectSite();
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
@@ -1135,6 +1142,13 @@
       // A visible Stop control is the only reliable generation-start signal.
       // Keep it for this job so the later disappearance remains meaningful.
       let chatGptStopObserved = false;
+      let lastCompletionTransition = null;
+
+      const emitCompletionTransition = (transition) => {
+        if (lastCompletionTransition === transition) return;
+        lastCompletionTransition = transition;
+        emitPromptJobCompletionTransition(promptId, transition);
+      };
 
       const container = messagesContainer || document.body;
       const observer = new MutationObserver(() => {
@@ -1243,6 +1257,7 @@
         const composerStopActive = composerActionRole?.role === 'stop-active';
         const currentStopActive = !!(stopBtnPresent || composerStopActive || chatGptThinkingSignals?.stopPresent);
         if (site === 'chatgpt' && currentStopActive) {
+          emitCompletionTransition('stop_observed');
           chatGptStopObserved = true;
         }
         const stopOnlyChatGptActivity = site === 'chatgpt'
@@ -1251,6 +1266,11 @@
         const chatGptStopDisappeared = chatGptStopObserved
           && !currentStopActive
           && responseStableEnough;
+        if (site === 'chatgpt' && chatGptStopObserved && !currentStopActive) {
+          emitCompletionTransition('stop_disappeared');
+        } else if (site === 'chatgpt' && !chatGptStopObserved && responseSnapshot.ok && !currentStopActive) {
+          emitCompletionTransition('fallback_waiting');
+        }
         const chatGptResponseComplete = responseStableEnough
           && responseActionSatisfied
           && !currentStopActive
@@ -2075,6 +2095,7 @@
           stopWord: effectiveStopWord,
           stopWordCaseSensitive: options?.stopWordCaseSensitive,
           watchGate,
+            promptId,
             promptText: text,
             inputEl,
             assistantBaseline,

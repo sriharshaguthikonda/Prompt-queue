@@ -74,6 +74,34 @@ describe('content-chat-state', () => {
     expect(stopActive).toBe(false);
   });
 
+  it('recognizes an accessible Stop answering composer without a test id', () => {
+    document.body.innerHTML = `
+      <span id="stop-answering-label">Stop answering</span>
+      <button id="composer-submit-button" aria-labelledby="stop-answering-label"></button>
+    `;
+    const button = setVisible(document.getElementById('composer-submit-button'));
+
+    expect(chatState().getComposerActionRole(button)).toMatchObject({
+      role: 'stop-active',
+      reason: 'stop-accessible-name',
+    });
+    expect(chatState().isActiveStopButton(button)).toBe(true);
+  });
+
+  it('keeps an accessible Send composer out of the stop state', () => {
+    document.body.innerHTML = `
+      <span id="send-message-label">Send message</span>
+      <button id="composer-submit-button" aria-labelledby="send-message-label"></button>
+    `;
+    const button = setVisible(document.getElementById('composer-submit-button'));
+
+    expect(chatState().getComposerActionRole(button)).toMatchObject({
+      role: 'send-ready',
+      reason: 'send-accessible-name',
+    });
+    expect(chatState().isActiveStopButton(button)).toBe(false);
+  });
+
   it('does not treat a disabled empty send composer as active generation', () => {
     document.body.innerHTML = `
       <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>

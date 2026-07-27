@@ -219,7 +219,7 @@ const DEFAULT_SETTINGS = {
   memory: DEFAULT_MEMORY_SETTINGS,
   promptJobs: DEFAULT_PROMPT_JOBS_SETTINGS,
 };
-const CONTENT_SCRIPT_VERSION = '2026-07-27.completion-stop-v2';
+const CONTENT_SCRIPT_VERSION = '2026-07-27.completion-stop-v3';
 const CONTENT_SEND_PROMPT_MESSAGE = 'SEND_PROMPT_CURRENT';
 
 const SETTINGS_STORAGE_KEY = STORAGE_KEYS.SETTINGS || 'aiTaskSequencerSettings';
@@ -1275,6 +1275,19 @@ function recordPromptJobCompletionDecision(session, completionReason) {
   return true;
 }
 
+function recordPromptJobCompletionTransition(session, transition) {
+  const correlation = session?.promptJobCorrelation;
+  if (correlation?.wantResult !== true || !['stop_observed', 'stop_disappeared', 'fallback_waiting'].includes(transition)) return false;
+  postPromptJobsEvent({
+    event: 'completion_transition',
+    stage: 'completion',
+    job_id: correlation.jobId || 'unknown',
+    status: 'observed',
+    reason_code: transition,
+  });
+  return true;
+}
+
 async function scheduleTabSessionRetry(tabId, errorMessage, source) {
   const session = tabSessions.get(tabId);
   if (!session || !session.running) return false;
@@ -1774,6 +1787,7 @@ if (self.__PROMPT_QUEUE_TEST__) {
     handleClaimResult,
     finishPromptJob,
     recordPromptJobCompletionDecision,
+    recordPromptJobCompletionTransition,
     postPromptJobsEvent,
     flushPromptJobsLogBuffer,
     setPromptJobsForTest: ({ port, folder = '', claimantId = null } = {}) => {
@@ -4015,6 +4029,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           if (progress?.status) {
             emitProgressStatus(progress.tabId, progress.status);
+          }
+          sendResponse({ ok: true });
+          return;
+        }
+        case "PROMPT_JOB_COMPLETION_TRANSITION": {
+          const tabSessionRef = resolveTabSessionForMessage(message, sender);
+          if (tabSessionRef.session) {
+            recordPromptJobCompletionTransition(tabSessionRef.session, message.transition);
           }
           sendResponse({ ok: true });
           return;

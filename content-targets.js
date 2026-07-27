@@ -44,7 +44,9 @@
         'button[type="submit"]',
       ],
       stopButtonCandidates: [
-        'button#composer-submit-button[aria-label*="Stop"]',
+        // The composer keeps this id while its accessible action changes from Send to Stop.
+        // `isActiveStopButton` owns the role check so normal Send is never generation.
+        'button#composer-submit-button',
         'button[data-testid="stop-button"]',
         'button[aria-label="Stop streaming"]',
         'button[aria-label="Stop generating"]',

@@ -681,6 +681,93 @@ describe('Content Script Integration', () => {
       await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_stop_disappeared' });
     });
 
+    it('emits one metadata-only completion transition per ChatGPT state change', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <span id="stop-answering-label">Stop answering</span>
+        <button id="composer-submit-button" aria-labelledby="stop-answering-label"></button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+            Finished answer
+            <button data-testid="copy-turn-action-button" aria-label="Copy response">Copy response</button>
+          </article>
+        </main>
+      `;
+      chrome.runtime.sendMessage.mockClear();
+      const promise = waitForCompletion({
+        sendButton: document.querySelector('#composer-submit-button'),
+        stopButtonSelector: 'button#composer-submit-button',
+        messagesContainer: document.querySelector('main'),
+        stableMs: 100,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableTimeout: false,
+        promptId: 'transition-job',
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+        requireCapturedResponse: true,
+      });
+
+      jest.advanceTimersByTime(300);
+      document.querySelector('#composer-submit-button').setAttribute('aria-labelledby', 'send-message-label');
+      document.body.insertAdjacentHTML('afterbegin', '<span id="send-message-label">Send message</span>');
+      jest.advanceTimersByTime(400);
+      await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_stop_disappeared' });
+
+      const transitions = chrome.runtime.sendMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message?.type === 'PROMPT_JOB_COMPLETION_TRANSITION');
+      expect(transitions).toEqual([
+        { type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId: 'transition-job', transition: 'stop_observed' },
+        { type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId: 'transition-job', transition: 'stop_disappeared' },
+      ]);
+    });
+
+    it('records one bounded fallback transition when ChatGPT Stop was missed', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" aria-label="Send message" disabled>Send</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+            Finished answer
+            <button data-testid="copy-turn-action-button" aria-label="Copy response">Copy response</button>
+          </article>
+        </main>
+      `;
+      chrome.runtime.sendMessage.mockClear();
+      const promise = waitForCompletion({
+        sendButton: document.querySelector('#composer-submit-button'),
+        stopButtonSelector: 'button#composer-submit-button',
+        messagesContainer: document.querySelector('main'),
+        stableMs: 100,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableTimeout: false,
+        promptId: 'fallback-job',
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+        requireCapturedResponse: true,
+      });
+
+      jest.advanceTimersByTime(500);
+      await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_response_fallback' });
+
+      expect(chrome.runtime.sendMessage.mock.calls
+        .map(([message]) => message)
+        .filter((message) => message?.type === 'PROMPT_JOB_COMPLETION_TRANSITION'))
+        .toEqual([{ type: 'PROMPT_JOB_COMPLETION_TRANSITION', promptId: 'fallback-job', transition: 'fallback_waiting' }]);
+    });
+
     it('uses the bounded response-action fallback when ChatGPT Stop was missed', async () => {
       Object.defineProperty(window, 'location', {
         value: { href: 'https://chatgpt.com/c/test' },
@@ -1650,7 +1737,7 @@ describe('Background settings sanitization', () => {
 
     const sendResponses = [
       { ok: true, version: 'old-version' },
-      { ok: true, version: '2026-06-04.completion-stop-role-v2' },
+      { ok: true, version: '2026-07-27.completion-stop-v2' },
     ];
     chrome.tabs.sendMessage.mockImplementation((_tabId, _message, callback) => {
       callback(sendResponses.shift() || { ok: true, version: global.PromptQueueBackgroundTest.CONTENT_SCRIPT_VERSION });
@@ -1912,6 +1999,23 @@ describe('Prompt-job runtime logging lifecycle', () => {
       status: 'done',
       reason_code: 'chatgpt_stop_disappeared',
     })]);
+  });
+
+  test('logs coalesced metadata-only completion transitions', async () => {
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port });
+    const session = { promptJobCorrelation: { wantResult: true, jobId: 'job-transition' } };
+
+    expect(global.PromptQueueBackgroundTest.recordPromptJobCompletionTransition(session, 'stop_observed')).toBe(true);
+    expect(global.PromptQueueBackgroundTest.recordPromptJobCompletionTransition(session, 'stop_observed')).toBe(true);
+    expect(global.PromptQueueBackgroundTest.recordPromptJobCompletionTransition(session, 'stop_disappeared')).toBe(true);
+    expect(global.PromptQueueBackgroundTest.recordPromptJobCompletionTransition(session, 'not-private-text')).toBe(false);
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+
+    expect(logMessages(port)).toEqual([
+      expect.objectContaining({ event: 'completion_transition', stage: 'completion', job_id: 'job-transition', status: 'observed', reason_code: 'stop_observed', repeat_count: 2 }),
+      expect.objectContaining({ event: 'completion_transition', stage: 'completion', job_id: 'job-transition', status: 'observed', reason_code: 'stop_disappeared' }),
+    ]);
   });
 
   test('cleans pending state when asynchronous claim posting fails', async () => {

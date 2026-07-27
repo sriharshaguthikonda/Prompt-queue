@@ -1,5 +1,5 @@
 (function () {
-  const CHAT_STATE_VERSION = '2026-06-04.chat-state-v3';
+  const CHAT_STATE_VERSION = '2026-07-27.chat-state-v4';
   if (window.PromptQueueChatState?.version === CHAT_STATE_VERSION) return;
 
   const RESPONSE_ACTION_SELECTORS = [
@@ -88,6 +88,20 @@
     return document.querySelector('button#composer-submit-button');
   }
 
+  function getAccessibleButtonName(button) {
+    const direct = button?.getAttribute?.('aria-label') || button?.getAttribute?.('title');
+    if (direct) return { value: direct, source: 'label' };
+    const labelledBy = String(button?.getAttribute?.('aria-labelledby') || '').trim();
+    if (labelledBy) {
+      const value = labelledBy.split(/\s+/)
+        .map((id) => document.getElementById(id)?.textContent || '')
+        .join(' ')
+        .trim();
+      if (value) return { value, source: 'accessible-name' };
+    }
+    return { value: button?.textContent || '', source: 'text' };
+  }
+
   function queryOneSafe(selector) {
     if (!selector || typeof selector !== 'string') return null;
     try {
@@ -100,7 +114,8 @@
   function getComposerActionRole(button = getComposerActionButton()) {
     if (!button) return { role: 'missing', enabled: false, reason: 'missing' };
     const enabled = isButtonEnabled(button);
-    const label = normalizeText(button.getAttribute('aria-label') || button.getAttribute('title') || button.textContent);
+    const accessibleName = getAccessibleButtonName(button);
+    const label = normalizeText(accessibleName.value);
     const testId = normalizeText(button.getAttribute('data-testid'));
     const type = normalizeText(button.getAttribute('type'));
     const labelHasStop = /\bstop\b|stop answering|stop generating|stop streaming/.test(label);
@@ -109,8 +124,9 @@
     const testIdHasSend = /\bsend\b|send-button/.test(testId);
     const hasStop = labelHasStop || (testIdHasStop && !labelHasSend);
     const hasSend = labelHasSend || testIdHasSend;
-    if (hasSend && enabled) return { role: 'send-ready', enabled, reason: labelHasSend ? 'send-label' : 'send-testid' };
-    if (hasStop && enabled) return { role: 'stop-active', enabled, reason: labelHasStop ? 'stop-label' : 'stop-testid' };
+    const labelReason = accessibleName.source === 'accessible-name' ? 'accessible-name' : 'label';
+    if (hasSend && enabled) return { role: 'send-ready', enabled, reason: labelHasSend ? `send-${labelReason}` : 'send-testid' };
+    if (hasStop && enabled) return { role: 'stop-active', enabled, reason: labelHasStop ? `stop-${labelReason}` : 'stop-testid' };
     if (hasSend) return { role: 'send-disabled', enabled, reason: labelHasSend ? 'send-disabled-label' : 'send-disabled-testid' };
     if (hasStop) return { role: 'stop-disabled', enabled, reason: labelHasStop ? 'stop-disabled-label' : 'stop-disabled-testid' };
     return { role: enabled ? 'unknown-enabled' : 'idle-disabled', enabled, reason: 'unknown' };
