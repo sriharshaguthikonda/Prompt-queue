@@ -4,6 +4,7 @@ node_modules/
 coverage/
 __pycache__/
 tests/__pycache__/
+.pytest_cache/
 *.pyc
 
 # Local native host manifest (machine-specific path + extension IDs)

@@ -312,7 +312,7 @@ node --check background.js
 node --check content.js
 node --check popup.js
 node --check popup-memory.js
-python -m unittest tests.test_native_host_memory tests.test_memory_extension_static -v
+.\tools\test-native-host.ps1 tests/test_native_host_memory.py tests/test_memory_extension_static.py -v
 ```
 
 Live local bridge smoke:

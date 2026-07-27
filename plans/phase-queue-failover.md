@@ -81,9 +81,9 @@ npm test -- --runInBand tests/integration.test.js -t "Prompt-job runtime logging
 # 81 passed
 npm test -- --runInBand
 # 183 passed
-python -m pytest tests/test_native_host_jobs.py -q
+.\tools\test-native-host.ps1 tests/test_native_host_jobs.py -q
 # 29 passed
-python -m pytest tests -q
+.\tools\test-native-host.ps1 tests -q
 # 38 passed
 node --check background-prompt-jobs.js
 node --check background.js
