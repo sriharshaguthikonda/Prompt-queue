@@ -100,11 +100,36 @@ def test_finish_job_done_deletes_and_error_renames(tmp_path):
         "status": "error",
     })
 
-    assert done_response == {"type": "finish_result", "ok": True}
-    assert error_response == {"type": "finish_result", "ok": True}
+    assert done_response == {
+        "type": "finish_result",
+        "ok": True,
+        "claimedFile": done_file.name,
+    }
+    assert error_response == {
+        "type": "finish_result",
+        "ok": True,
+        "claimedFile": error_file.name,
+    }
     assert not done_file.exists()
     assert not error_file.exists()
     assert (tmp_path / "job_error.error.json").exists()
+
+
+def test_finish_job_result_identifies_the_exact_claimed_file(tmp_path):
+    claimed_file = "job_missing.claimed.worker.json"
+
+    response = native_host.TranscriptionMonitor().handle_message({
+        "type": "finish_job",
+        "folder": str(tmp_path),
+        "claimedFile": claimed_file,
+        "status": "done",
+    })
+
+    assert response == {
+        "type": "finish_result",
+        "ok": False,
+        "claimedFile": claimed_file,
+    }
 
 
 def test_finish_job_want_result_done_writes_result_and_removes_claim(tmp_path):
@@ -122,7 +147,11 @@ def test_finish_job_want_result_done_writes_result_and_removes_claim(tmp_path):
     })
 
     result_file = tmp_path / "result_bridge.json"
-    assert response == {"type": "finish_result", "ok": True}
+    assert response == {
+        "type": "finish_result",
+        "ok": True,
+        "claimedFile": claimed_file.name,
+    }
     assert not claimed_file.exists()
     result = json.loads(result_file.read_text(encoding="utf-8"))
     assert result["id"] == "bridge"
@@ -175,7 +204,11 @@ def test_finish_job_want_result_error_writes_error_result(tmp_path):
     })
 
     result = json.loads((tmp_path / "result_bridge_err.json").read_text(encoding="utf-8"))
-    assert response == {"type": "finish_result", "ok": True}
+    assert response == {
+        "type": "finish_result",
+        "ok": True,
+        "claimedFile": claimed_file.name,
+    }
     assert not claimed_file.exists()
     assert not (tmp_path / "job_bridge_err.error.json").exists()
     assert result["id"] == "bridge_err"
@@ -199,7 +232,11 @@ def test_finish_job_voice_job_writes_no_result(tmp_path):
         "responseText": "ignored",
     })
 
-    assert response == {"type": "finish_result", "ok": True}
+    assert response == {
+        "type": "finish_result",
+        "ok": True,
+        "claimedFile": claimed_file.name,
+    }
     assert not claimed_file.exists()
     assert not (tmp_path / "result_voice.json").exists()
 
@@ -219,7 +256,11 @@ def test_finish_job_want_result_truncates_text(tmp_path):
     })
 
     result = json.loads((tmp_path / "result_long.json").read_text(encoding="utf-8"))
-    assert response == {"type": "finish_result", "ok": True}
+    assert response == {
+        "type": "finish_result",
+        "ok": True,
+        "claimedFile": claimed_file.name,
+    }
     assert result["truncated"] is True
     assert result["text_chars"] == len(response_text)
     assert len(result["text"]) == native_host.PROMPT_JOB_RESULT_TEXT_CHARS
@@ -248,7 +289,11 @@ def test_finish_job_want_result_truncates_after_200000_chars(tmp_path):
     })
 
     result = json.loads((tmp_path / "result_boundary.json").read_text(encoding="utf-8"))
-    assert response == {"type": "finish_result", "ok": True}
+    assert response == {
+        "type": "finish_result",
+        "ok": True,
+        "claimedFile": claimed_file.name,
+    }
     assert result["truncated"] is True
     assert result["text_chars"] == 200001
     assert len(result["text"]) == 200000

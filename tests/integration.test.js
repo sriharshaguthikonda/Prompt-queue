@@ -1810,25 +1810,52 @@ describe('Prompt-job runtime logging lifecycle', () => {
     }));
   });
 
-  test('negative finish result logs the correlated failure once and clears tracking', async () => {
-    const { port, listeners } = await connectRuntimePort();
+  test('disconnect clears finish A before a negative acknowledgement for finish B', async () => {
+    const { listeners } = await connectRuntimePort();
     await global.PromptQueueBackgroundTest.finishPromptJob(
-      'job_finish.claimed.self.json', 'done', { folder: 'C:/jobs' },
+      'job_finish_a.claimed.self.json', 'done', { folder: 'C:/jobs' },
     );
-    listeners.message({ type: 'finish_result', ok: false });
-    await Promise.resolve();
+    listeners.disconnect();
     await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
-    expect(logMessages(port)).toEqual(expect.arrayContaining([
+    expect(storage.promptJobsLogBuffer).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        event: 'finish_failed', stage: 'finish', job_id: 'finish', status: 'done',
-        reason_code: 'finish_result_failed',
+        event: 'finish_failed', stage: 'finish', job_id: 'finish_a', status: 'done',
+        reason_code: 'port_disconnected',
       }),
     ]));
 
-    listeners.message({ type: 'finish_result', ok: false });
+    const { port: replacement, listeners: replacementListeners } = await connectRuntimePort();
+    await global.PromptQueueBackgroundTest.finishPromptJob(
+      'job_finish_b.claimed.self.json', 'error', { folder: 'C:/jobs', error: 'failed' },
+    );
+    replacementListeners.message({
+      type: 'finish_result', ok: false, claimedFile: 'job_finish_b.claimed.self.json',
+    });
     await Promise.resolve();
     await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
-    expect(logMessages(port).filter((event) => event.event === 'finish_failed' && event.job_id === 'finish')).toHaveLength(1);
+    expect(logMessages(replacement)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: 'finish_failed', stage: 'finish', job_id: 'finish_b', status: 'error',
+        reason_code: 'finish_result_failed',
+      }),
+    ]));
+    expect(logMessages(replacement)
+      .filter((event) => (
+        event.event === 'finish_failed'
+        && event.reason_code === 'finish_result_failed'
+      ))
+      .map((event) => event.job_id)).toEqual(['finish_b']);
+
+    replacementListeners.message({
+      type: 'finish_result', ok: false, claimedFile: 'job_finish_a.claimed.self.json',
+    });
+    await Promise.resolve();
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+    expect(logMessages(replacement)).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        event: 'malformed', stage: 'finish', job_id: 'unknown', reason_code: 'finish_result_unmatched',
+      }),
+    ]));
   });
 });
 });

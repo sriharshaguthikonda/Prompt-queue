@@ -352,7 +352,7 @@ class TranscriptionMonitor:
         match = CLAIMED_JOB_FILE_RE.fullmatch(claimed_file)
         if not match or status not in {"done", "error"}:
             self.log_info("finish malformed")
-            return {"type": "finish_result", "ok": False}
+            return {"type": "finish_result", "ok": False, "claimedFile": claimed_file}
 
         claimed_path = Path(folder) / claimed_file
         try:
@@ -384,9 +384,9 @@ class TranscriptionMonitor:
                     error_path = Path(folder) / f"job_{match.group(1)}.error.json"
                     os.replace(claimed_path, error_path)
             self.log_info("finish job=%s status=%s", match.group(1), status)
-            return {"type": "finish_result", "ok": True}
+            return {"type": "finish_result", "ok": True, "claimedFile": claimed_file}
         except OSError:
-            return {"type": "finish_result", "ok": False}
+            return {"type": "finish_result", "ok": False, "claimedFile": claimed_file}
 
     def watch_jobs(self, message):
         folder = message.get("folder") or DEFAULT_JOBS_FOLDER

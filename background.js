@@ -4720,6 +4720,13 @@ function connectPromptJobsPort(folder) {
     console.log('[PromptJobs] Native port disconnected', { error: err?.message || null });
     postPromptJobsHeartbeat(false);
     clearPromptJobsPendingClaims();
+    for (const pending of promptJobsPendingFinishes.values()) {
+      postPromptJobsEvent({
+        event: 'finish_failed', stage: 'finish', job_id: pending.jobId, status: pending.status,
+        reason_code: 'port_disconnected', port_state: 'unavailable',
+      });
+    }
+    promptJobsPendingFinishes.clear();
     promptJobsPort = null;
     promptJobsWatchedFolder = '';
     postPromptJobsEvent({
@@ -4847,18 +4854,22 @@ async function handlePromptJobsPortMessage(msg) {
       return;
     }
     case 'finish_result': {
-      const claimedFile = typeof msg.claimedFile === 'string' && promptJobsPendingFinishes.has(msg.claimedFile)
-        ? msg.claimedFile
-        : promptJobsPendingFinishes.keys().next().value;
+      const claimedFile = typeof msg.claimedFile === 'string' ? msg.claimedFile : '';
       const pending = claimedFile ? promptJobsPendingFinishes.get(claimedFile) : null;
-      if (claimedFile) promptJobsPendingFinishes.delete(claimedFile);
+      if (!pending) {
+        postPromptJobsEvent({
+          event: 'malformed', stage: 'finish', job_id: 'unknown', reason_code: 'finish_result_unmatched',
+        });
+        return;
+      }
+      promptJobsPendingFinishes.delete(claimedFile);
       if (msg.ok !== true) {
         postPromptJobsEvent({
           event: 'finish_failed',
           stage: 'finish',
-          job_id: pending?.jobId || 'unknown',
-          status: pending?.status || 'error',
-          reason_code: pending ? 'finish_result_failed' : 'finish_result_unmatched',
+          job_id: pending.jobId,
+          status: pending.status,
+          reason_code: 'finish_result_failed',
         });
       }
       console.log('[PromptJobs] finish_result', msg);
