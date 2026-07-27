@@ -1,6 +1,12 @@
 # Phase: Queue Hardening + Priority Failover + Dedicated Bridge Tab
 
-Status: IMPLEMENTED 2026-07-14 — P1 `2dec636`, P2 `e251b78`, fixes (legacy-folder migration, requeue-skip-when-result-exists) `a4a16e2`; metadata-only event logging added locally (focused 13 Jest + 27 native-host pytest green). Live E2E pending. Counterpart plan: `C:/AI/mcp-model-bridge/docs/plans/queue-failover-hardening.md` (bridge side). This file owns the shared file-protocol spec.
+Status: CODE AND OFFLINE VERIFICATION COMPLETE 2026-07-27. Queue implementation: P1 `2dec636`, P2 `e251b78`, fixes `a4a16e2`; completion-wait logging and recovery: `9ebc79a`, `ebcccdd`, `1c3ab0c`, `3a82a2a`. Extension reload and a fresh heartbeat were detected. A post-reload user job and the live 60-second unclaimed gate remain pending. This file owns the shared file-protocol spec.
+
+Related control surfaces:
+
+- [Bridge queue-failover plan](C:/AI/mcp-model-bridge/docs/plans/queue-failover-hardening.md)
+- [Completion-wait and extension-logging closeout](C:/AI/mcp-model-bridge/docs/plans/completion-wait-extension-logging.md)
+- [Live Q&A](<../Q and A.qanda>)
 
 ## Why
 
@@ -61,4 +67,34 @@ Re-announce: unclaimed `want_result` jobs are re-announced on every poll while t
 Whisper code changes, L2 desktop send-lease, multi-account, non-ChatGPT sites.
 
 ## Verification
-`pytest` + `npm test` green; simulated failover via fake heartbeat files; live E2E (2 browsers, priority 0/1, kill-browser-0 mid-job → requeue → browser 1 finishes; long 10+ min job; user-tab untouched; conversation_url round-trip) — coordinated in bridge repo `Q and A.md`.
+
+### Commits
+
+- Prompt Queue logging/recovery: `9ebc79a`, `ebcccdd`, `1c3ab0c`, `3a82a2a`.
+
+### Command evidence
+
+```powershell
+npm test -- --runInBand tests/test_background_prompt_jobs.test.js
+# 13 passed
+npm test -- --runInBand tests/integration.test.js -t "Prompt-job runtime logging lifecycle"
+# 81 passed
+npm test -- --runInBand
+# 183 passed
+python -m pytest tests/test_native_host_jobs.py -q
+# 29 passed
+python -m pytest tests -q
+# 38 passed
+node --check background-prompt-jobs.js
+node --check background.js
+python -m py_compile native_host.py
+# syntax checks passed
+```
+
+### Runtime evidence
+
+- Extension reload was detected by a new native-host process and fresh heartbeat at `2026-07-27 05:48:31`.
+- Every current claimant active-plus-backup log pair is under 2 MiB.
+- The forbidden metadata-key scan returned zero findings.
+- No post-reload user prompt job exists yet. The live `announce -> job_recv -> disposition -> claim -> send -> finish -> result` sequence remains pending.
+- The approximately 60-second unclaimed live gate remains pending. No new user prompt job was submitted during closeout.
