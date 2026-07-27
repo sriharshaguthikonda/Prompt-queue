@@ -191,3 +191,31 @@ describe('BackgroundPromptJobs metadata logging', () => {
     expect(helpers.takePromptJobLogEvents(buffered)).toEqual({ events: buffered, remaining: [] });
   });
 });
+
+describe('BackgroundPromptJobs send lifecycle logging', () => {
+  let helpers;
+
+  beforeAll(() => {
+    delete global.BackgroundPromptJobs;
+    jest.resetModules();
+    require('../background-prompt-jobs.js');
+    helpers = global.BackgroundPromptJobs;
+  });
+
+  test('builds one metadata-only send-click event for the matching result job', () => {
+    expect(helpers.buildPromptJobSendEvent({
+      promptJobCorrelation: { wantResult: true, jobId: 'job-1', promptId: 'prompt-1' },
+      currentPromptId: 'prompt-1',
+    }, 'prompt-1', 'send-click-dispatched')).toEqual({
+      event: 'send',
+      stage: 'send',
+      job_id: 'job-1',
+      status: 'accepted',
+      reason_code: 'send_click_dispatched',
+    });
+    expect(helpers.buildPromptJobSendEvent({
+      promptJobCorrelation: { wantResult: true, jobId: 'job-1', promptId: 'other' },
+      currentPromptId: 'other',
+    }, 'prompt-1', 'send-click-dispatched')).toBeNull();
+  });
+});

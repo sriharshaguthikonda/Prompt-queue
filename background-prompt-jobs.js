@@ -181,6 +181,25 @@
     return { events: Array.isArray(events) ? events : [], remaining: [] };
   }
 
+  // This confirms the content script dispatched the UI send click. It does not
+  // claim server-side acceptance; completion/response events remain that proof.
+  function buildPromptJobSendEvent(session, promptId, reason) {
+    const correlation = session?.promptJobCorrelation;
+    const expectedPromptId = stringOrNull(correlation?.promptId);
+    const actualPromptId = stringOrNull(promptId);
+    const jobId = stringOrNull(correlation?.jobId);
+    if (correlation?.wantResult !== true || !jobId || !expectedPromptId || expectedPromptId !== actualPromptId) {
+      return null;
+    }
+    return {
+      event: 'send',
+      stage: 'send',
+      job_id: jobId,
+      status: 'accepted',
+      reason_code: (stringOrNull(reason) || 'send_click_dispatched').replace(/-/g, '_'),
+    };
+  }
+
   const LEGACY_PROMPT_JOBS_FOLDER = 'C:\\Windows_software\\openai whisper\\prompt_jobs';
   const CURRENT_PROMPT_JOBS_FOLDER = 'C:\\AI\\bridge_jobs\\chatgpt_browser';
 
@@ -210,6 +229,7 @@
     coalescePromptJobLogEvents,
     appendPromptJobLogEvents,
     takePromptJobLogEvents,
+    buildPromptJobSendEvent,
     migratePromptJobsFolder,
   };
 })();

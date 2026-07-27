@@ -3531,6 +3531,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         case "PROMPT_SUBMITTED": {
           releaseSendLease(message.promptId, 'prompt-submitted');
+          const submittedTabId = sender?.tab?.id;
+          const submittedSession = Number.isInteger(submittedTabId)
+            ? tabSessions.get(submittedTabId)
+            : null;
+          const sendEvent = self.BackgroundPromptJobs?.buildPromptJobSendEvent(
+            submittedSession,
+            message.promptId,
+            message.reason,
+          );
+          if (sendEvent) postPromptJobsEvent(sendEvent);
           sendResponse({ ok: true });
           if (state.mode !== 'parallel' || !state.running || !state.parallel) {
             return;
