@@ -1260,6 +1260,21 @@ async function finishPromptJobCorrelation(session, status, details = {}) {
   return finished;
 }
 
+function recordPromptJobCompletionDecision(session, completionReason) {
+  const correlation = session?.promptJobCorrelation;
+  if (correlation?.wantResult !== true) return false;
+  const reasonCode = self.BackgroundPromptJobs.normalizePromptJobCompletionReason(completionReason);
+  if (!reasonCode) return false;
+  postPromptJobsEvent({
+    event: 'completion_decision',
+    stage: 'completion',
+    job_id: correlation.jobId || 'unknown',
+    status: 'done',
+    reason_code: reasonCode,
+  });
+  return true;
+}
+
 async function scheduleTabSessionRetry(tabId, errorMessage, source) {
   const session = tabSessions.get(tabId);
   if (!session || !session.running) return false;
@@ -1758,6 +1773,7 @@ if (self.__PROMPT_QUEUE_TEST__) {
     handleJobFound,
     handleClaimResult,
     finishPromptJob,
+    recordPromptJobCompletionDecision,
     postPromptJobsEvent,
     flushPromptJobsLogBuffer,
     setPromptJobsForTest: ({ port, folder = '', claimantId = null } = {}) => {
@@ -3662,6 +3678,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             const completedPromptIndex = Number(session.currentIndex || 0);
             const durationMs = pushPromptDuration(session, session.promptStartTime, completedAt);
             const hasPromptJobResult = session.promptJobCorrelation?.wantResult === true;
+            recordPromptJobCompletionDecision(session, message.completionReason);
             const promptJobEmptyResponse = hasPromptJobResult
               && !message.error
               && message.stoppedByStopWord !== true

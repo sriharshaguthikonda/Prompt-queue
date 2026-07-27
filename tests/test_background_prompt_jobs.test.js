@@ -218,4 +218,12 @@ describe('BackgroundPromptJobs send lifecycle logging', () => {
       currentPromptId: 'other',
     }, 'prompt-1', 'send-click-dispatched')).toBeNull();
   });
+
+  test('accepts only privacy-safe completion decision reason codes', () => {
+    expect(helpers.normalizePromptJobCompletionReason('chatgpt_stop_disappeared'))
+      .toBe('chatgpt_stop_disappeared');
+    expect(helpers.normalizePromptJobCompletionReason('chatgpt_response_fallback'))
+      .toBe('chatgpt_response_fallback');
+    expect(helpers.normalizePromptJobCompletionReason('answer text must never be logged')).toBeNull();
+  });
 });

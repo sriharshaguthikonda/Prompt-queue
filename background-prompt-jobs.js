@@ -133,6 +133,12 @@
     return message.replace(/^Error:\s*/i, '') || 'prompt_job_failed';
   }
 
+  function normalizePromptJobCompletionReason(value) {
+    return value === 'chatgpt_stop_disappeared' || value === 'chatgpt_response_fallback'
+      ? value
+      : null;
+  }
+
   const PROMPT_JOB_LOG_FIELDS = [
     'timestamp', 'event', 'stage', 'job_id', 'claimant_id', 'status',
     'reason_code', 'attempts', 'busy', 'port_state', 'repeat_count',
@@ -225,6 +231,7 @@
     isEmptyResponse,
     composerTextMatches,
     normalizePromptJobError,
+    normalizePromptJobCompletionReason,
     normalizePromptJobLogEvent,
     coalescePromptJobLogEvents,
     appendPromptJobLogEvents,

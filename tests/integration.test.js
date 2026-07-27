@@ -524,7 +524,7 @@ describe('Content Script Integration', () => {
         <article data-testid="conversation-turn-2" data-message-author-role="assistant">Assistant answer</article>
       `);
       jest.advanceTimersByTime(1200);
-      await expect(promise).resolves.toBeUndefined();
+      await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_response_fallback' });
     });
 
     it('should complete from a stable ChatGPT response when the empty composer keeps send disabled', async () => {
@@ -606,6 +606,154 @@ describe('Content Script Integration', () => {
       composerButton.setAttribute('aria-disabled', 'true');
       jest.advanceTimersByTime(700);
       await expect(promise).resolves.toBeUndefined();
+    });
+
+    it('keeps a long-running ChatGPT result job pending while its observed Stop control stays visible', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop answering">Stop</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">Still generating</article>
+        </main>
+      `;
+      const promise = waitForCompletion({
+        sendButton: document.querySelector('#composer-submit-button'),
+        stopButtonSelector: 'button[data-testid="stop-button"]',
+        messagesContainer: document.querySelector('main'),
+        stableMs: 500,
+        maxWaitMs: 1000,
+        pollIntervalMs: 60000,
+        enableTimeout: false,
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+        requireCapturedResponse: true,
+      });
+
+      let resolved = false;
+      promise.then(() => { resolved = true; });
+      jest.advanceTimersByTime(30 * 60 * 1000);
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      document.querySelector('#composer-submit-button').setAttribute('aria-label', 'Send prompt');
+      document.querySelector('#composer-submit-button').setAttribute('data-testid', 'send-button');
+      document.querySelector('article[data-message-author-role="assistant"]').textContent = 'Finished answer';
+      jest.advanceTimersByTime(120000);
+      await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_stop_disappeared' });
+    });
+
+    it('completes promptly after an observed ChatGPT Stop control disappears with a new answer', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop answering">Stop</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">Finished answer</article>
+        </main>
+      `;
+      const promise = waitForCompletion({
+        sendButton: document.querySelector('#composer-submit-button'),
+        stopButtonSelector: 'button[data-testid="stop-button"]',
+        messagesContainer: document.querySelector('main'),
+        stableMs: 500,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableTimeout: false,
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+        requireCapturedResponse: true,
+      });
+
+      jest.advanceTimersByTime(100);
+      document.querySelector('#composer-submit-button').setAttribute('aria-label', 'Send prompt');
+      document.querySelector('#composer-submit-button').setAttribute('data-testid', 'send-button');
+      jest.advanceTimersByTime(700);
+
+      await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_stop_disappeared' });
+    });
+
+    it('uses the bounded response-action fallback when ChatGPT Stop was missed', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" data-testid="send-button" aria-label="Send prompt" disabled>Send</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+          <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+            Short answer
+            <button data-testid="copy-turn-action-button" aria-label="Copy response">Copy response</button>
+          </article>
+        </main>
+      `;
+      const promise = waitForCompletion({
+        sendButton: document.querySelector('#composer-submit-button'),
+        stopButtonSelector: 'button[data-testid="stop-button"]',
+        messagesContainer: document.querySelector('main'),
+        stableMs: 500,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableTimeout: false,
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+        requireCapturedResponse: true,
+      });
+
+      jest.advanceTimersByTime(700);
+      await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_response_fallback' });
+    });
+
+    it('does not complete an observed Stop transition from a stale pre-job response', async () => {
+      Object.defineProperty(window, 'location', {
+        value: { href: 'https://chatgpt.com/c/test' },
+        writable: true,
+      });
+      document.body.innerHTML = `
+        <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+        <button id="composer-submit-button" data-testid="stop-button" aria-label="Stop answering">Stop</button>
+        <main>
+          <article data-testid="conversation-turn-1" data-message-author-role="assistant">Old answer</article>
+        </main>
+      `;
+      const baseline = new Set([document.querySelector('article[data-message-author-role="assistant"]')]);
+      const promise = waitForCompletion({
+        sendButton: document.querySelector('#composer-submit-button'),
+        stopButtonSelector: 'button[data-testid="stop-button"]',
+        messagesContainer: document.querySelector('main'),
+        stableMs: 500,
+        maxWaitMs: 5000,
+        pollIntervalMs: 100,
+        enableTimeout: false,
+        promptText: 'Queued prompt',
+        inputEl: document.getElementById('prompt-textarea'),
+        assistantBaseline: { scopes: baseline },
+        requireCapturedResponse: true,
+      });
+
+      jest.advanceTimersByTime(100);
+      document.querySelector('#composer-submit-button').setAttribute('aria-label', 'Send prompt');
+      document.querySelector('#composer-submit-button').setAttribute('data-testid', 'send-button');
+      jest.advanceTimersByTime(1000);
+      await Promise.resolve();
+      let resolved = false;
+      promise.then(() => { resolved = true; });
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      document.querySelector('main').insertAdjacentHTML('beforeend', '<article data-testid="conversation-turn-2" data-message-author-role="assistant">New answer</article>');
+      jest.advanceTimersByTime(700);
+      await expect(promise).resolves.toMatchObject({ completionReason: 'chatgpt_stop_disappeared' });
     });
 
     it('should complete from Good response or Bad response action markers', async () => {
@@ -753,7 +901,7 @@ describe('Content Script Integration', () => {
       expect(completionLog).toBeTruthy();
       expect(completionLog[1]).toMatchObject({
         staleActivityReasons: ['staleLoadingShimmer'],
-        finalDecisionReason: 'chatgptResponseComplete',
+        finalDecisionReason: 'chatgptResponseFallback',
       });
       expect(completionLog[1].responseCompletionMarkers).toEqual(expect.arrayContaining(['Copy response']));
       expect(completionLog[1].activityDiagnostics).toMatchObject({
@@ -925,6 +1073,7 @@ describe('Content Script Integration', () => {
           type: 'RESPONSE_COMPLETE',
           promptId: 'render-miss-result-job',
           responseText: expect.stringContaining('Captured assistant answer after render miss'),
+          completionReason: 'chatgpt_response_fallback',
         }));
         expect(runtimeMessages).not.toContainEqual(expect.objectContaining({
           type: 'RESPONSE_COMPLETE',
@@ -1738,6 +1887,27 @@ describe('Prompt-job runtime logging lifecycle', () => {
 
     expect(logMessages(port)).toEqual([expect.objectContaining({
       event: 'port_lifecycle', port_state: 'connected', repeat_count: 2,
+    })]);
+  });
+
+  test('logs a correlated metadata-only completion decision before finish', async () => {
+    const port = { postMessage: jest.fn(), disconnect: jest.fn() };
+    global.PromptQueueBackgroundTest.setPromptJobsForTest({ port });
+
+    expect(global.PromptQueueBackgroundTest.recordPromptJobCompletionDecision({
+      promptJobCorrelation: { wantResult: true, jobId: 'job-42' },
+    }, 'chatgpt_stop_disappeared')).toBe(true);
+    expect(global.PromptQueueBackgroundTest.recordPromptJobCompletionDecision({
+      promptJobCorrelation: { wantResult: true, jobId: 'job-42' },
+    }, 'answer text must not be logged')).toBe(false);
+    await global.PromptQueueBackgroundTest.drainPromptJobsLogsForTest();
+
+    expect(logMessages(port)).toEqual([expect.objectContaining({
+      event: 'completion_decision',
+      stage: 'completion',
+      job_id: 'job-42',
+      status: 'done',
+      reason_code: 'chatgpt_stop_disappeared',
     })]);
   });
 

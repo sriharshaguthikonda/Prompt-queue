@@ -1132,6 +1132,9 @@
       let lastResponseLength = 0;
       let responseStableSince = null;
       let responseSnapshot = { ok: false, responseLength: 0 };
+      // A visible Stop control is the only reliable generation-start signal.
+      // Keep it for this job so the later disappearance remains meaningful.
+      let chatGptStopObserved = false;
 
       const container = messagesContainer || document.body;
       const observer = new MutationObserver(() => {
@@ -1239,20 +1242,34 @@
         const activityBlockerReasons = chatGptThinkingSignals?.hardBlockingReasons || chatGptThinkingSignals?.blockingReasons || [];
         const composerStopActive = composerActionRole?.role === 'stop-active';
         const currentStopActive = !!(stopBtnPresent || composerStopActive || chatGptThinkingSignals?.stopPresent);
+        if (site === 'chatgpt' && currentStopActive) {
+          chatGptStopObserved = true;
+        }
         const stopOnlyChatGptActivity = site === 'chatgpt'
           && activeGenerationPresent
           && !hardChatGptActivityPresent;
+        const chatGptStopDisappeared = chatGptStopObserved
+          && !currentStopActive
+          && responseStableEnough;
         const chatGptResponseComplete = responseStableEnough
           && responseActionSatisfied
           && !currentStopActive
           && !hardChatGptActivityPresent;
+        const chatGptCompletionReason = chatGptStopDisappeared
+          ? 'chatgpt_stop_disappeared'
+          : chatGptResponseComplete
+            ? 'chatgpt_response_fallback'
+            : null;
         const domComplete = domStableEnough && !activeGenerationPresent && canSend && watchGateSatisfied;
         const completeEnough = site === 'chatgpt'
-          ? (requireCapturedResponse ? chatGptResponseComplete : (chatGptResponseComplete || domComplete))
+          ? (requireCapturedResponse
+            ? !!chatGptCompletionReason
+            : (!!chatGptCompletionReason || domComplete))
           : domComplete;
         const finalDecisionReason = site === 'chatgpt'
           ? (
-            chatGptResponseComplete ? 'chatgptResponseComplete'
+            chatGptStopDisappeared ? 'chatgptStopDisappeared'
+              : chatGptResponseComplete ? 'chatgptResponseFallback'
               : requireCapturedResponse && domComplete ? 'waiting:capturedResponseRequired'
               : domComplete ? 'domComplete'
                 : currentStopActive ? 'blocked:stopActive'
@@ -1297,8 +1314,10 @@
             responseCompletionMarkers: responseCompletionMarkerNames,
             activityBlockerReasons,
             staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+            chatGptStopObserved,
             canSend,
             chatGptResponseComplete,
+            chatGptStopDisappeared,
             requireCapturedResponse,
             watchGateSatisfied,
             finalDecisionReason,
@@ -1319,15 +1338,19 @@
             responseCompletionMarkers: responseCompletionMarkerNames,
             activityBlockerReasons,
             staleActivityReasons: chatGptThinkingSignals?.staleActivityReasons || [],
+            chatGptStopObserved,
             canSend,
             chatGptResponseComplete,
+            chatGptStopDisappeared,
             requireCapturedResponse,
             watchGateSatisfied,
             finalDecisionReason,
             activityDiagnostics: site === 'chatgpt' ? chatGptActivityDiagnostics : null,
           });
           cleanup();
-          resolve();
+          resolve(requireCapturedResponse && chatGptCompletionReason
+            ? { completionReason: chatGptCompletionReason }
+            : undefined);
           return;
         }
         if (finiteResponseTimeoutEnabled && elapsed > effectiveMaxWaitMs) {
@@ -2039,8 +2062,9 @@
         stopWord: effectiveStopWord,
         watchGate,
       });
+      let completionResult;
       try {
-        const result = await waitForCompletion({
+        completionResult = await waitForCompletion({
           sendButton: sendBtn,
           stopButtonSelector: stopBtnSel,
           messagesContainer,
@@ -2058,7 +2082,7 @@
           });
 
         // Check if automation was stopped by stop word
-        if (result?.stoppedByStopWord) {
+        if (completionResult?.stoppedByStopWord) {
           blockAutoConfirmForStopWord('PromptQueueResult');
           console.log('[PromptQueue] Automation stopped by stop word', { promptId });
           automationAborted = true; // Signal queued prompts to abort
@@ -2067,8 +2091,8 @@
           } catch (_) {}
           return;
         }
-        if (result?.timedOut) {
-          throw new Error(result.error || 'waitForCompletion timeout');
+        if (completionResult?.timedOut) {
+          throw new Error(completionResult.error || 'waitForCompletion timeout');
         }
         console.log('[PromptQueue] Completion wait finished (no stop word)', { promptId });
       } catch (e) {
@@ -2101,6 +2125,7 @@
           responseText: capturedResponse.responseText,
           site: capturedResponse.site,
           url: capturedResponse.url,
+          completionReason: completionResult?.completionReason || null,
         });
         console.log('[PromptQueue] RESPONSE_COMPLETE sent, got response', { promptId, resp });
       } catch (e) {
