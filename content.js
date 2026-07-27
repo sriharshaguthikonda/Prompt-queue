@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-07-28.stop-scope-v4';
+  const CONTENT_SCRIPT_VERSION = '2026-07-28.turn-scope-v5';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -549,8 +549,10 @@
     const selectors = [
       'div.whitespace-pre-wrap',
       '[data-message-author-role="user"]',
-      'article[data-testid^="conversation-turn-"]',
-      'article[data-turn-id]',
+      // No tag qualifier: chatgpt.com moved the turn from <article> to <section>, so the
+      // qualified form matches 0 (verified live, see getResponseScope/responseCandidateSelectors).
+      '[data-testid^="conversation-turn-"]',
+      '[data-turn-id]',
       'main [data-testid*="message"]',
     ];
     const seen = new Set();
@@ -1099,7 +1101,14 @@
     // Check if send button is enabled or if we're in a state where we can send
     const sendBtn = findSendButtonForSite('chatgpt', inputEl);
     if (sendBtn && isButtonEnabled(sendBtn)) return true;
-    const regenPresent = document.querySelector('button:has([data-testid="regenerate-response-button"]) , button[aria-label*="Regenerate"]');
+    // Document-wide + substring aria-label match with no containment gate previously let a
+    // sidebar entry or a conversation titled "Regenerate..." satisfy this and prematurely
+    // report send-ready (same bug class as the unscoped Stop-button match in
+    // content-chat-state.js, just in the "ready too early" direction). Reuse isInComposerRegion
+    // (form or main) rather than inventing a second containment check.
+    const regenNodes = getElementsBySelector('button:has([data-testid="regenerate-response-button"]), button[aria-label*="Regenerate"]') || [];
+    const regenPresent = typeof chatStateTools.isInComposerRegion === 'function'
+      && regenNodes.some((node) => chatStateTools.isInComposerRegion(node));
     const isThinking = isChatGPTThinking();
     const hasDraft = getInputTextLengthQuiet(inputEl || findPromptInput()) > 0;
     return (!!sendBtn || !!regenPresent || hasDraft) && !isThinking;

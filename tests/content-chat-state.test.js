@@ -339,5 +339,40 @@ describe('content-chat-state', () => {
       expect(scope).not.toBeNull();
       expect(scope.getAttribute('data-testid')).toBe('conversation-turn-2');
     });
+
+    // Regression: the legacy fallback (reached when driftwatch itself can't resolve the
+    // conversationTurn anchor) used to query tag-qualified `article[...]` selectors AND fold
+    // the inner [data-message-author-role="assistant"] div into the same candidate list, then
+    // return whichever candidate it found last WITHOUT resolving up to the turn container.
+    // On the current <section> shape that meant: the tag-qualified selectors matched zero,
+    // so the only surviving candidate was the inner div — returned as-is, outside the action
+    // bar's subtree. findResponseCompletionMarkers on that scope always found nothing.
+    it('legacy fallback (driftwatch unavailable) resolves the <section> turn container, not the inner div', () => {
+      const pack = window.driftwatch.packs['chatgpt.com'];
+      delete window.driftwatch.packs['chatgpt.com'];
+      try {
+        document.body.innerHTML = `
+          <main>
+            <section data-turn-id="turn-1" data-testid="conversation-turn-1" data-turn="user">
+              <div data-message-author-role="user"><p>hi</p></div>
+            </section>
+            <section data-turn-id="turn-2" data-testid="conversation-turn-2" data-turn="assistant">
+              <div data-message-author-role="assistant"><p>answer text</p></div>
+              <div><button data-testid="copy-turn-action-button" aria-label="Copy"></button></div>
+            </section>
+          </main>
+        `;
+        setVisible(document.querySelector('button[data-testid="copy-turn-action-button"]'));
+
+        const scope = chatState().getLatestAssistantTurn();
+
+        expect(scope).not.toBeNull();
+        expect(scope.tagName).toBe('SECTION');
+        expect(scope.getAttribute('data-testid')).toBe('conversation-turn-2');
+        expect(chatState().findResponseCompletionMarkers(scope).length).toBeGreaterThan(0);
+      } finally {
+        window.driftwatch.packs['chatgpt.com'] = pack;
+      }
+    });
   });
 });

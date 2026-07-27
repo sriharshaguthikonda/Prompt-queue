@@ -1495,6 +1495,40 @@ describe('ChatGPT selectors', () => {
       expect(isChatGPTReadyToSend(document.getElementById('prompt-textarea'))).toBe(true);
     });
 
+    // Regression: a document-wide, substring-matched `button[aria-label*="Regenerate"]` lookup
+    // with no containment gate could be satisfied by an element outside the conversation/composer
+    // region (a sidebar entry, a modal, a conversation titled "Regenerate..."), reporting
+    // send-ready prematurely. Same bug class as the unscoped Stop-button match that hung every
+    // job on a sidebar conversation titled "Stop" (content-chat-state.js isInComposerRegion),
+    // just in the opposite ("ready too early") direction.
+    it('does not treat a Regenerate button outside the composer/main region as send-ready', () => {
+      document.body.innerHTML = `
+        <nav aria-label="Chat history">
+          <button aria-label="Regenerate response"></button>
+        </nav>
+        <main>
+          <form data-type="unified-composer">
+            <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+          </form>
+        </main>
+      `;
+
+      expect(isChatGPTReadyToSend(document.getElementById('prompt-textarea'))).toBe(false);
+    });
+
+    it('still treats a Regenerate button inside the composer/main region as send-ready', () => {
+      document.body.innerHTML = `
+        <main>
+          <form data-type="unified-composer">
+            <div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>
+            <button aria-label="Regenerate response"></button>
+          </form>
+        </main>
+      `;
+
+      expect(isChatGPTReadyToSend(document.getElementById('prompt-textarea'))).toBe(true);
+    });
+
     it('should verify rendered user messages without whitespace-pre-wrap', () => {
       document.body.innerHTML = '<article data-testid="conversation-turn-1"><div data-message-author-role="user">Hello from queued prompt</div></article>';
 

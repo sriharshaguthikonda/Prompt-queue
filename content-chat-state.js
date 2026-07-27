@@ -1,5 +1,5 @@
 (function () {
-  const CHAT_STATE_VERSION = '2026-07-28.chat-state-v5';
+  const CHAT_STATE_VERSION = '2026-07-28.chat-state-v6';
   if (window.PromptQueueChatState?.version === CHAT_STATE_VERSION) return;
 
   const RESPONSE_ACTION_SELECTORS = [
@@ -215,7 +215,9 @@
       }
     }
     if (turns.length === 0) {
-      turns = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id]'));
+      // No tag qualifier: chatgpt.com moved the turn from <article> to <section>, so the
+      // qualified form matches 0 (verified live).
+      turns = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"], [data-turn-id]'));
     }
     if (turns.length === 0) return [];
     return turns.slice(Math.max(0, turns.length - maxTurns));
@@ -483,15 +485,18 @@
     }
     // Legacy fallback: only reached when the conversationTurn anchor cannot resolve at all
     // (driftwatch missing/older cached content script, or the anchor is fully broken).
-    // This path returns the inner assistant-role div, NOT the turn container, so it cannot
-    // see the action bar (copy/feedback buttons) outside that div — findResponseCompletionMarkers
-    // will find nothing while this fallback is in effect.
-    const candidates = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id], [data-message-author-role="assistant"]'));
+    // No tag qualifier on the turn selectors, same reason as above. Resolve each candidate
+    // to its TURN container first (closest turn selector), the way the driftwatch branch
+    // above does, so the action bar outside the inner assistant-role div stays visible to
+    // findResponseCompletionMarkers. Only the bare inner div is returned when no turn
+    // container wraps it at all.
+    const candidates = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"], [data-turn-id], [data-message-author-role="assistant"]'));
     for (let i = candidates.length - 1; i >= 0; i -= 1) {
       const node = candidates[i];
       const role = node.getAttribute?.('data-message-author-role') || '';
-      const text = normalizeText(node.textContent || '');
-      if (role === 'assistant' || !/\bqueued prompt\b/.test(text)) return node;
+      const resolved = node.closest?.('[data-testid^="conversation-turn-"], [data-turn-id]') || node;
+      const text = normalizeText(resolved.textContent || '');
+      if (role === 'assistant' || !/\bqueued prompt\b/.test(text)) return resolved;
     }
     return null;
   }
@@ -526,6 +531,7 @@
     isActiveStopButton,
     isButtonEnabled,
     isElementVisible,
+    isInComposerRegion,
     responseActionSelectors: RESPONSE_ACTION_SELECTORS.slice(),
   });
 })();
