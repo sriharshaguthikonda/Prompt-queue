@@ -54,6 +54,7 @@
   let stopWordGuardArmed = false;
   let stopWordBlockedAutoConfirm = false;
   let currentTargetSettings = {};
+  let driftwatchAuditLoggedForPage = false;
 
   function setDebugLoggingEnabled(enabled) {
     const next = enabled === true;
@@ -81,12 +82,18 @@
     watchedElementSelector: 'button[data-testid="copy-turn-action-button"]',
   };
 
-  function isInfiniteResponseWaitEnabled(options = {}) {
+  // NOTE: the persisted setting is named "enableMaxWaitTimeout" but true means DISABLE
+  // the timeout (wait unbounded). That's inverted from what the name suggests, so these
+  // helpers are named for the actual behaviour, not the setting key. Default
+  // (enableMaxWaitTimeout: true) is an UNBOUNDED wait: real thinking-model responses have
+  // measured 4+ minutes, longer than DEFAULTS.maxWaitMs (180000ms), so a bounded default
+  // would truncate legitimate answers. Do not flip this default.
+  function isUnboundedResponseWaitEnabled(options = {}) {
     return options?.enableMaxWaitTimeout !== false;
   }
 
-  function isFiniteResponseTimeoutEnabled(options = {}) {
-    return !isInfiniteResponseWaitEnabled(options);
+  function isBoundedResponseTimeoutEnabled(options = {}) {
+    return !isUnboundedResponseWaitEnabled(options);
   }
 
   function getConfiguredMaxWaitMs(options = {}) {
@@ -247,6 +254,32 @@
     try {
       chrome.runtime.sendMessage({ type: 'SELECTOR_HEALTH', site, health });
     } catch (_) {}
+  }
+
+  // Makes driftwatch anchor drift loud instead of silently returning []. Runs at most
+  // once per page load (own flag, no new timer) from within the existing chatgpt
+  // completion poll, once conversation turns are expected to exist.
+  function auditDriftwatchOnce() {
+    if (driftwatchAuditLoggedForPage) return;
+    const dw = window.driftwatch;
+    const pack = dw?.packs?.['chatgpt.com'];
+    if (!dw || !pack || typeof dw.use !== 'function') return;
+    driftwatchAuditLoggedForPage = true;
+    let report;
+    try {
+      report = dw.use(pack).audit(document);
+    } catch (_) {
+      return;
+    }
+    const drifted = Object.keys(report.anchors || {})
+      .map((name) => ({ anchor: name, ...report.anchors[name] }))
+      .filter((a) => a.status === 'degraded' || a.status === 'broken' || a.status === 'ambiguous');
+    if (drifted.length === 0) return;
+    console.warn('[DriftWatch] Anchor drift detected', drifted.map((a) => ({
+      anchor: a.anchor,
+      status: a.status,
+      strategyId: a.strategyId,
+    })));
   }
 
   function isButtonEnabled(btn) {
@@ -1110,9 +1143,12 @@
     const effectiveStableMs = typeof stableMs === 'number' ? stableMs : DEFAULTS.stableMs;
     const effectiveMaxWaitMs = typeof maxWaitMs === 'number' ? maxWaitMs : DEFAULTS.maxWaitMs;
     const effectivePollMs = typeof pollIntervalMs === 'number' ? pollIntervalMs : DEFAULTS.pollIntervalMs;
+    // enableTimeout, when explicitly passed, overrides the enableMaxWaitTimeout setting;
+    // otherwise defer to the shared (honestly-named) helper instead of re-inverting
+    // enableMaxWaitTimeout ad hoc here.
     const finiteResponseTimeoutEnabled = typeof enableTimeout === 'boolean'
       ? enableTimeout
-      : enableMaxWaitTimeout === false;
+      : isBoundedResponseTimeoutEnabled({ enableMaxWaitTimeout });
     const completionId = Math.random();
 
     console.log('[WaitForCompletion] Starting', {
@@ -1228,6 +1264,7 @@
         }
 
         if (site === 'chatgpt') {
+          auditDriftwatchOnce();
           chatGptThinkingSignals = getChatGPTThinkingSignals({
             responseScope: responseSnapshot.responseScope,
             responseText: responseSnapshot.responseText,
@@ -1601,7 +1638,7 @@
       };
       console.warn('[PromptQueue] QUEUED: Waiting for current prompt to complete', queueMeta, JSON.stringify(queueMeta));
       
-      const finiteResponseTimeoutEnabled = isFiniteResponseTimeoutEnabled(options);
+      const finiteResponseTimeoutEnabled = isBoundedResponseTimeoutEnabled(options);
       // Finite max-wait mode waits up to 30 seconds for current prompt to finish.
       // Infinite mode waits until currentPromptId is cleared by the previous prompt.
       let waitTime = 0;
@@ -1680,7 +1717,7 @@
     console.log('[PromptQueue] Starting processing', { promptId, timestamp: Date.now(), options });
     
     const isParallelDispatch = options?.parallelDispatchMode === true;
-    const finiteResponseTimeoutEnabled = isFiniteResponseTimeoutEnabled(options);
+    const finiteResponseTimeoutEnabled = isBoundedResponseTimeoutEnabled(options);
     const responseTimeoutMs = getConfiguredMaxWaitMs(options);
     console.log('[PromptQueue] Prompt timeout configuration', {
       promptId,

@@ -1,3 +1,6 @@
+const path = require('path');
+require(path.join(__dirname, '..', 'vendor', 'driftwatch.js'));
+
 describe('content-chat-state', () => {
   const chatState = () => window.PromptQueueChatState;
 
@@ -170,5 +173,126 @@ describe('content-chat-state', () => {
       classSnippet: 'response-action',
     });
     expect(result.activityDiagnostics.finalDecisionReason).toBe('inactive:stableResponseMarkers');
+  });
+
+  describe('chatgpt.com <section> turn shape (2026-07 markup change)', () => {
+    it('getLatestAssistantTurn returns the <section> turn container, not the inner assistant div', () => {
+      document.body.innerHTML = `
+        <main>
+          <section dir="auto" data-turn-id="turn-1" data-testid="conversation-turn-1" data-turn="user">
+            <div data-message-author-role="user"><p>hi</p></div>
+          </section>
+          <section dir="auto" data-turn-id="turn-2" data-testid="conversation-turn-2" data-turn="assistant">
+            <div data-message-author-role="assistant"><p>answer text</p></div>
+            <div><button data-testid="copy-turn-action-button" aria-label="Copy"></button></div>
+          </section>
+        </main>
+      `;
+
+      const scope = chatState().getLatestAssistantTurn();
+
+      expect(scope).not.toBeNull();
+      expect(scope.tagName).toBe('SECTION');
+      expect(scope.getAttribute('data-testid')).toBe('conversation-turn-2');
+    });
+
+    it('findResponseCompletionMarkers finds the copy button that is a sibling of the assistant div, not a child', () => {
+      document.body.innerHTML = `
+        <main>
+          <section dir="auto" data-turn-id="turn-1" data-testid="conversation-turn-1" data-turn="user">
+            <div data-message-author-role="user"><p>hi</p></div>
+          </section>
+          <section dir="auto" data-turn-id="turn-2" data-testid="conversation-turn-2" data-turn="assistant">
+            <div data-message-author-role="assistant"><p>answer text</p></div>
+            <div><button data-testid="copy-turn-action-button" aria-label="Copy"></button></div>
+          </section>
+        </main>
+      `;
+      setVisible(document.querySelector('button[data-testid="copy-turn-action-button"]'));
+
+      const scope = chatState().getLatestAssistantTurn();
+      const markers = chatState().findResponseCompletionMarkers(scope);
+
+      // Before the fix: getLatestAssistantTurn() returns the inner
+      // [data-message-author-role="assistant"] div (the copy button's parent <section> is
+      // never reached), so this searches the wrong subtree and markers is always [].
+      expect(markers.length).toBeGreaterThan(0);
+    });
+
+    it('still resolves the legacy <article data-testid="conversation-turn-N"> shape', () => {
+      document.body.innerHTML = `
+        <article data-testid="conversation-turn-1" data-message-author-role="user">Queued prompt</article>
+        <article data-testid="conversation-turn-2" data-message-author-role="assistant">
+          Assistant answer
+          <button data-testid="copy-turn-action-button" aria-label="Copy response">Copy response</button>
+        </article>
+      `;
+      setVisible(document.querySelector('button[data-testid="copy-turn-action-button"]'));
+
+      const scope = chatState().getLatestAssistantTurn();
+
+      expect(scope).not.toBeNull();
+      expect(scope.getAttribute('data-testid')).toBe('conversation-turn-2');
+      expect(chatState().findResponseCompletionMarkers(scope).length).toBeGreaterThan(0);
+    });
+
+    it('getTailConversationTurns returns the <section>-based turns', () => {
+      document.body.innerHTML = `
+        <main>
+          <section data-testid="conversation-turn-1" data-turn="user"><div data-message-author-role="user">hi</div></section>
+          <section data-testid="conversation-turn-2" data-turn="assistant"><div data-message-author-role="assistant">answer</div></section>
+        </main>
+      `;
+
+      const result = chatState().classifyChatGPTDomActivity();
+
+      // classifyChatGPTDomActivity has no direct getter for tail turns, but it only sees
+      // active tool-status/shimmer signals inside them, so a non-throwing, non-active
+      // result proves getTailConversationTurns() found the <section> turns instead of [].
+      expect(result.active).toBe(false);
+      expect(result.activityDiagnostics.finalDecisionReason).toBe('inactive:noActivitySignals');
+    });
+
+    it('ignores the user turn while the assistant has not answered yet', () => {
+      // State immediately after sending: the user turn is rendered, the assistant turn is not.
+      // On live chatgpt.com a USER turn carries its own copy-turn-action-button (a 2-turn
+      // conversation shows 2 of them). If getLatestAssistantTurn() returned the newest turn of
+      // any kind, findResponseCompletionMarkers would find the user's own copy button and the
+      // caller would declare the response complete before the answer exists — capturing the
+      // wrong text instead of waiting. That is a worse failure than hanging.
+      document.body.innerHTML = `
+        <main>
+          <section data-testid="conversation-turn-1" data-turn="user">
+            <div data-message-author-role="user">say OK</div>
+            <div><button data-testid="copy-turn-action-button" aria-label="Copy"></button></div>
+          </section>
+        </main>
+      `;
+      setVisible(document.querySelector('button[data-testid="copy-turn-action-button"]'));
+
+      expect(chatState().getLatestAssistantTurn()).toBeNull();
+    });
+
+    it('picks the assistant turn even when a user turn is rendered after it', () => {
+      document.body.innerHTML = `
+        <main>
+          <section data-testid="conversation-turn-1" data-turn="user"><div data-message-author-role="user">first</div></section>
+          <section data-testid="conversation-turn-2" data-turn="assistant">
+            <div data-message-author-role="assistant">answer</div>
+            <div><button data-testid="copy-turn-action-button" aria-label="Copy"></button></div>
+          </section>
+          <section data-testid="conversation-turn-3" data-turn="user">
+            <div data-message-author-role="user">follow-up</div>
+            <div><button data-testid="copy-turn-action-button" aria-label="Copy"></button></div>
+          </section>
+        </main>
+      `;
+      document.querySelectorAll('button[data-testid="copy-turn-action-button"]').forEach(setVisible);
+
+      const scope = chatState().getLatestAssistantTurn();
+
+      expect(scope).not.toBeNull();
+      expect(scope.getAttribute('data-testid')).toBe('conversation-turn-2');
+    });
   });
 });

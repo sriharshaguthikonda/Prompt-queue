@@ -569,12 +569,17 @@ function buildTimingStatus({ running, processing, promptStartTime, currentIndex,
   return { averageResponseMs, elapsedPromptMs, etaMs };
 }
 
-function isInfiniteResponseWaitEnabled(options = {}) {
+// NOTE: the persisted setting is named "enableMaxWaitTimeout" but true means DISABLE the
+// timeout (wait unbounded). Named for the actual behaviour, not the setting key — see the
+// matching comment on the content.js duplicate. Default is unbounded because real
+// thinking-model responses have measured 4+ minutes, longer than DEFAULT_SETTINGS.maxWaitMs;
+// do not flip this default.
+function isUnboundedResponseWaitEnabled(options = {}) {
   return options?.enableMaxWaitTimeout !== false;
 }
 
 function shouldAllowInFlightRecovery({ options = {}, processingElapsed = 0 } = {}) {
-  if (isInfiniteResponseWaitEnabled(options)) return false;
+  if (isUnboundedResponseWaitEnabled(options)) return false;
   const maxPerPrompt = options?.maxWaitMs || DEFAULT_SETTINGS.maxWaitMs;
   return Number(processingElapsed) >= maxPerPrompt;
 }
@@ -1679,7 +1684,7 @@ async function healthCheck() {
       console.log('[Health] Processing in-flight prompt; refreshing activity and skipping recovery', {
         processingElapsed,
         maxPerPrompt,
-        infiniteResponseWait: isInfiniteResponseWaitEnabled(state.options),
+        infiniteResponseWait: isUnboundedResponseWaitEnabled(state.options),
       });
       state.lastActivityTime = now;
       saveState(); // fire-and-forget; best effort to keep state fresh
@@ -1962,7 +1967,7 @@ async function injectContentScript(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId, allFrames: false },
-      files: ["background-prompt-jobs.js", "content-targets.js", "content-input.js", "content-status.js", "content-chat-state.js", "content.js"],
+      files: ["vendor/driftwatch.js", "background-prompt-jobs.js", "content-targets.js", "content-input.js", "content-status.js", "content-chat-state.js", "content.js"],
     });
   } catch (err) {
     console.error("Failed to inject content script:", err);

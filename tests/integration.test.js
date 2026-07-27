@@ -1750,7 +1750,7 @@ describe('Background settings sanitization', () => {
 
       expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
         target: { tabId: 7, allFrames: false },
-        files: ['background-prompt-jobs.js', 'content-targets.js', 'content-input.js', 'content-status.js', 'content-chat-state.js', 'content.js'],
+        files: ['vendor/driftwatch.js', 'background-prompt-jobs.js', 'content-targets.js', 'content-input.js', 'content-status.js', 'content-chat-state.js', 'content.js'],
       });
       expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(
         7,

@@ -156,8 +156,35 @@
     return hasStop && !hasSend;
   }
 
+  // chatgpt.com moved the turn container from <article data-testid="conversation-turn-1">
+  // to <section data-turn-id="..." data-testid="conversation-turn-1" data-turn="user">.
+  // driftwatch's chatgpt.com pack tracks that shape; fall back to the legacy hardcoded
+  // selector if driftwatch itself is unavailable (older cached content scripts, injection
+  // order changed) so this never throws.
+  function getDriftwatchChatGptInstance() {
+    try {
+      const dw = window.driftwatch;
+      const pack = dw?.packs?.['chatgpt.com'];
+      if (!dw || !pack || typeof dw.use !== 'function') return null;
+      return dw.use(pack);
+    } catch (_) {
+      return null;
+    }
+  }
+
   function getTailConversationTurns(maxTurns = 2) {
-    const turns = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id]'));
+    const dw = getDriftwatchChatGptInstance();
+    let turns = [];
+    if (dw) {
+      try {
+        turns = dw.resolve('conversationTurn', document)?.els || [];
+      } catch (_) {
+        turns = [];
+      }
+    }
+    if (turns.length === 0) {
+      turns = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id]'));
+    }
     if (turns.length === 0) return [];
     return turns.slice(Math.max(0, turns.length - maxTurns));
   }
@@ -379,7 +406,54 @@
     return classifyChatGPTDomActivity(options);
   }
 
+  function isAssistantTurn(node) {
+    if (!node || typeof node.getAttribute !== 'function') return false;
+    // Current layout marks the turn container directly: <section data-turn="user|assistant">.
+    const turnRole = normalizeText(node.getAttribute('data-turn') || '');
+    if (turnRole) return turnRole === 'assistant';
+    // Older layouts (e.g. <article data-testid="conversation-turn-N">) carry no data-turn.
+    // They may put the author role on the turn element itself, or on a descendant.
+    const ownRole = normalizeText(node.getAttribute('data-message-author-role') || '');
+    if (ownRole) return ownRole === 'assistant';
+    try {
+      return !!node.querySelector('[data-message-author-role="assistant"]');
+    } catch (_) {
+      return false;
+    }
+  }
+
   function getLatestAssistantTurn() {
+    // Must return the turn CONTAINER, not the inner [data-message-author-role="assistant"]
+    // div: the copy/feedback action bar that findResponseCompletionMarkers looks for lives
+    // as a sibling of that div, inside the turn container, not inside it.
+    const dw = getDriftwatchChatGptInstance();
+    if (dw) {
+      let turnEls = null;
+      try {
+        turnEls = dw.resolve('conversationTurn', document)?.els || [];
+      } catch (_) {
+        turnEls = null; // resolver threw: treat as "cannot resolve", fall through below
+      }
+      if (turnEls && turnEls.length > 0) {
+        for (let i = turnEls.length - 1; i >= 0; i -= 1) {
+          const node = turnEls[i];
+          // Assistant turns ONLY. The conversationTurn anchor resolves user turns too, and a
+          // user turn carries its own copy-turn-action-button — returning one would make
+          // findResponseCompletionMarkers report "response complete" the moment the prompt is
+          // sent, before any answer exists. Silently capturing the wrong text is worse than
+          // waiting, so this filters rather than falling back to "last turn of any kind".
+          if (!isAssistantTurn(node)) continue;
+          const text = normalizeText(node.textContent || '');
+          if (!/\bqueued prompt\b/.test(text)) return node;
+        }
+        return null; // no assistant turn yet, or every one was a queued-prompt placeholder
+      }
+    }
+    // Legacy fallback: only reached when the conversationTurn anchor cannot resolve at all
+    // (driftwatch missing/older cached content script, or the anchor is fully broken).
+    // This path returns the inner assistant-role div, NOT the turn container, so it cannot
+    // see the action bar (copy/feedback buttons) outside that div — findResponseCompletionMarkers
+    // will find nothing while this fallback is in effect.
     const candidates = Array.from(document.querySelectorAll('article[data-testid^="conversation-turn-"], article[data-turn-id], [data-message-author-role="assistant"]'));
     for (let i = candidates.length - 1; i >= 0; i -= 1) {
       const node = candidates[i];
