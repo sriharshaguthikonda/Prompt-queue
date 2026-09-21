@@ -21,6 +21,7 @@ Current sidepanel branch:
 | Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; automated tests pass; manual browser smokes pending |
 | Bridge → ChatGPT round-trip (result return path) | [plans/phase-bridge-chatgpt-roundtrip.md](plans/phase-bridge-chatgpt-roundtrip.md) | implemented; native host + extension tests green; live browser E2E pending |
 | Sidepanel visual hierarchy polish (accents, button tiers) | this file, see UI Direction below | implemented |
+| driftwatch pack v2 re-vendor (ChatGPT churn event #2, 2026-09) | [Tampermonkey churn plan](file:///C:/Windows_software/Tampermonkey/docs/plans/chatgpt-2026-09-churn/PLAN.md) | planned; waits on driftwatch pack v2, then re-vendor vendor/driftwatch.js and re-run tests |
 
 ## Planned Hardening Phases
 
