@@ -16,6 +16,7 @@ Current sidepanel branch:
 
 | Phase | Plan | Status |
 |---|---|---|
+| Model bridge ChatGPT channel dead (2026-09-22): extension disabled in Profile 2 + job path on dead literals | [plans/incident-2026-09-22-bridge-channel-dead.md](plans/incident-2026-09-22-bridge-channel-dead.md) (coordination: [Tampermonkey S8](file:///C:/Windows_software/Tampermonkey/docs/plans/chatgpt-2026-09-churn/S8-bridge-recovery.md)) | planned; S8.1 re-enable → S8.2 RED contract test → S8.3 pack routing |
 | ChatGPT send regression + native host install incident | [plans/incident-2026-05-31-chatgpt-send-native-host.md](plans/incident-2026-05-31-chatgpt-send-native-host.md) | implemented in code; live verify + residual hardening pending |
 | ChatGPT send hardening + composer visibility | [plans/phase-chatgpt-send-hardening.md](plans/phase-chatgpt-send-hardening.md) | in progress |
 | Memory Pack Sidepanel + Native Host | [plans/memory-pack-sidepanel-native.md](plans/memory-pack-sidepanel-native.md) | implemented; automated tests pass; manual browser smokes pending |
