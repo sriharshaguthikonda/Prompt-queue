@@ -1,7 +1,7 @@
 # Incident Plan: Model Bridge ChatGPT Channel Dead (2026-09-22)
 
 Date: 2026-09-22
-Status: IN PROGRESS (2026-09-22 15:05). S8.1–S8.4b done; S8.5 live gate pending (needs one manual reload to load S8.4b).
+Status: DONE for this repo (2026-09-22 21:33 IST). S8.1–S8.4b, S8.3b, S8.3c done; S8.5 live gate passed (new chat, same-tab follow-up, L9, L10). Open elsewhere: S8.7c detector and S8.8 user config (bridge).
 Coordination plan (authority for ranking, QA matrix, work packages): [Tampermonkey S8-bridge-recovery.md](file:///C:/Windows_software/Tampermonkey/docs/plans/chatgpt-2026-09-churn/S8-bridge-recovery.md).
 Sibling plans:
 - bridge [browser-channel-recovery-2026-09.md](file:///C:/AI/mcp-model-bridge/docs/plans/browser-channel-recovery-2026-09.md)
@@ -85,6 +85,12 @@ Prompt Queue serves bridge jobs on the September 2026 chatgpt.com DOM again: the
 - One job with `target_url=https://chatgpt.com/?temporary-chat=true`, then one against an existing conversation.
 - Required: `announce → claim → send → stop_observed → completion_decision → finish → result`, `status=done`, `text_chars>0`, `conversation_url` present.
 - Once: disable → enable the extension and require a heartbeat within 15 s (L9 reconnect).
+- DONE 2026-09-22 21:30–21:33 IST, after `ccaa2c2` (S8.3c):
+  - L9: `control/reload` sentinel → `dev_reload requested` 21:30:23.296 → `exit reason=stdin_eof` → `watch start` 21:30:25.245 (1.9 s), heartbeat written the same second. This is the S8.4b self-reload path, not a manual toggle.
+  - New temp chat `20260922T160052Z_c3d0455ed71723dc`: `status=done`, `text_chars=14`, `conversation_url` present, 38 s.
+  - Existing conversation `20260922T160134Z_145e9c858dd5776a` (same `conversation_key`, no `target_url`): `status=done`, `text_chars=14`, same `conversation_url`, 29 s.
+  - Both host traces: `announce → job_recv → claim ok → claimed → send → completion_transition… → completion_decision → finish`.
+  - L10: `ask_chatgpt fallback=false` (temp chat) returned the real answer, `ok=true`, 22.5 s.
 
 ## Owners and lanes
 
