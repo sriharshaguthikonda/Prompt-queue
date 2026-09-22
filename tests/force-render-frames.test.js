@@ -96,7 +96,7 @@ describe('S8.3b content: force-render messaging around the lazy stub wait', () =
     const hiddenComposer = document.getElementById('prompt-textarea');
     hiddenComposer.getBoundingClientRect = jest.fn(() => ({ width: 0, height: 0 }));
 
-    const readyPromise = waitForComposerReadyWithForceRender(true, {
+    const readyPromise = waitForComposerReadyWithForceRender({
       site: 'chatgpt',
       maxWaitMs: 1000,
       stableWindowMs: 50,
@@ -123,17 +123,34 @@ describe('S8.3b content: force-render messaging around the lazy stub wait', () =
     expect(stopIndex).toBeGreaterThan(framesIndex);
   });
 
-  test('hidden tab without an activated stub sends no force-render messages', async () => {
+  test('hidden chatgpt tab without the stub (conversation page) still sends FORCE_RENDER then STOP', async () => {
     setVisibility('hidden');
     document.body.innerHTML = '<div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>';
     document.getElementById('prompt-textarea').getBoundingClientRect = jest.fn(() => ({ width: 320, height: 48 }));
 
-    await waitForComposerReadyWithForceRender(false, {
+    await waitForComposerReadyWithForceRender({
       site: 'chatgpt',
       maxWaitMs: 500,
       stableWindowMs: 20,
       pollMs: 10,
     });
+
+    const types = chrome.runtime.sendMessage.mock.calls
+      .map(([message]) => message?.type)
+      .filter((type) => type === 'PQ_FORCE_RENDER_FRAMES' || type === 'PQ_FORCE_RENDER_STOP');
+    expect(types).toEqual(['PQ_FORCE_RENDER_FRAMES', 'PQ_FORCE_RENDER_STOP']);
+  });
+
+  test('hidden non-chatgpt tab sends no force-render messages', async () => {
+    setVisibility('hidden');
+    document.body.innerHTML = '';
+
+    await waitForComposerReadyWithForceRender({
+      site: 'gemini',
+      maxWaitMs: 100,
+      stableWindowMs: 20,
+      pollMs: 10,
+    }).catch(() => {});
 
     const types = chrome.runtime.sendMessage.mock.calls
       .map(([message]) => message?.type)
@@ -146,7 +163,7 @@ describe('S8.3b content: force-render messaging around the lazy stub wait', () =
     document.body.innerHTML = '<div id="prompt-textarea" contenteditable="plaintext-only" role="textbox"></div>';
     document.getElementById('prompt-textarea').getBoundingClientRect = jest.fn(() => ({ width: 320, height: 48 }));
 
-    await waitForComposerReadyWithForceRender(true, {
+    await waitForComposerReadyWithForceRender({
       site: 'chatgpt',
       maxWaitMs: 500,
       stableWindowMs: 20,

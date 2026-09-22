@@ -68,6 +68,8 @@ Prompt Queue serves bridge jobs on the September 2026 chatgpt.com DOM again: the
 - Fix: in the lazy-stub path, while the tab is hidden, the content script asks background to attach `chrome.debugger` and capture a throwaway frame every 400 ms until `waitForComposerReady` settles (at most 10 s), then detach. This adds the `debugger` permission; Edge shows its "debugging" bar for about 1–2 s per new-chat job.
 - Rejected: activating the job tab, because it steals the user's focus.
 - Lane: Claude Sonnet fallback (codex and Z Code both at quota). The orchestrator fixed a STOP-during-attach race. jest 235/235.
+- S8.3c (found by the S8.5 existing-conversation job, `composer_not_ready`): a hidden chatgpt conversation page renders nothing at all (0 forms, 0 exchanges, no stub), so force render now runs for any hidden chatgpt tab, not only after the stub write. Lane: ornith `test-automator` with byte-exact edits; jest 236/236.
+- Also found: a temporary chat cannot be reopened by `/c/<id>` URL (the page redirects off `/c/`). So the existing-conversation job reuses the job-1 tab: same `conversation_key`, no `target_url` (`preparePromptJobsBridgeTab` then leaves the tab where it is).
 
 ### S8.4 Diagnosable failures
 
