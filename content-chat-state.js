@@ -112,7 +112,53 @@
   }
 
   function getComposerActionButton() {
+    // Resolution model: the composer action control is a document singleton whose pack
+    // strategies are scoped inside composerForm and are state-aware — Stop while streaming,
+    // Send while composing. Both anchors require "enabled", so the idle composer's Send
+    // (it stays mounted but disabled once the composer empties) never resolves as a usable
+    // control; that shape is surfaced for diagnostics by findDisabledComposerSend below.
+    const dw = getDriftwatchChatGptInstance();
+    if (dw) {
+      try {
+        const stop = dw.resolve('stopButton', document, { state: 'streaming' });
+        if (stop?.ok && stop.el) return stop.el;
+      } catch (_) {
+        // fall through to the send probe
+      }
+      try {
+        const send = dw.resolve('sendButton', document, { state: 'composing' });
+        if (send?.ok && send.el) return send.el;
+      } catch (_) {
+        // fall through to the disabled-send probe
+      }
+      const disabledSend = findDisabledComposerSend(dw);
+      if (disabledSend) return disabledSend;
+    }
+    // Legacy July shape / driftwatch-unavailable fallback.
     return document.querySelector('button#composer-submit-button');
+  }
+
+  // The idle composer's disabled Send: present inside the resolved composer form but
+  // excluded by the pack's enabled requirement. Generic shape only — a disabled button
+  // whose accessible name starts with "send" — no site selector literals.
+  function findDisabledComposerSend(dw = getDriftwatchChatGptInstance()) {
+    if (!dw) return null;
+    let form = null;
+    try {
+      form = dw.resolve('composerForm', document)?.el || null;
+    } catch (_) {
+      return null;
+    }
+    if (!form || typeof form.querySelectorAll !== 'function') return null;
+    for (const button of Array.from(form.querySelectorAll('button'))) {
+      const disabled = button.disabled === true
+        || button.getAttribute('disabled') !== null
+        || button.getAttribute('aria-disabled') === 'true';
+      if (!disabled) continue;
+      const label = normalizeText(button.getAttribute('aria-label') || button.textContent || '');
+      if (label.startsWith('send')) return button;
+    }
+    return null;
   }
 
   function getAccessibleButtonName(button) {
@@ -188,11 +234,15 @@
     return hasStop && !hasSend;
   }
 
-  // chatgpt.com moved the turn container from <article data-testid="conversation-turn-1">
-  // to <section data-turn-id="..." data-testid="conversation-turn-1" data-turn="user">.
-  // driftwatch's chatgpt.com pack tracks that shape; fall back to the legacy hardcoded
-  // selector if driftwatch itself is unavailable (older cached content scripts, injection
-  // order changed) so this never throws.
+  // chatgpt.com 2026-09: one [data-turn-key] exchange root holds BOTH the user unit and the
+  // assistant unit, and the pre-Sept turn vocabulary ([data-testid^="conversation-turn-"],
+  // data-turn-id) is gone from the live DOM. The vendored driftwatch pack v2 tracks that
+  // shape under the Resolution model: exchanges are enumerated document-wide via the
+  // exchangeRoot anchor, and per-exchange anchors (assistantUnit, copyResponseButton, ...)
+  // are resolved with the exchange element as scope — never document-wide. The legacy
+  // conversationTurn anchor (and the hardcoded selectors below) cover the July
+  // <section>/<article> per-message shapes and the driftwatch-unavailable case (older cached
+  // content scripts, injection order changed) so this never throws.
   function getDriftwatchChatGptInstance() {
     try {
       const dw = window.driftwatch;
@@ -204,21 +254,31 @@
     }
   }
 
-  function getTailConversationTurns(maxTurns = 2) {
+  // Conversation containers, newest-last: pack v2 exchangeRoot first; the legacy
+  // conversationTurn anchor is kept in the pack for the July per-message shapes.
+  function getConversationContainers() {
     const dw = getDriftwatchChatGptInstance();
-    let turns = [];
     if (dw) {
       try {
-        turns = dw.resolve('conversationTurn', document)?.els || [];
+        const exchanges = dw.resolve('exchangeRoot', document)?.els;
+        if (exchanges && exchanges.length > 0) return exchanges;
       } catch (_) {
-        turns = [];
+        // fall through to the legacy anchor
+      }
+      try {
+        const turns = dw.resolve('conversationTurn', document)?.els;
+        if (turns && turns.length > 0) return turns;
+      } catch (_) {
+        // fall through to the hardcoded selectors
       }
     }
-    if (turns.length === 0) {
-      // No tag qualifier: chatgpt.com moved the turn from <article> to <section>, so the
-      // qualified form matches 0 (verified live).
-      turns = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"], [data-turn-id]'));
-    }
+    // No tag qualifier: chatgpt.com moved the turn from <article> to <section>, so the
+    // qualified form matches 0 (verified live).
+    return Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"], [data-turn-id], [data-turn-key]'));
+  }
+
+  function getTailConversationTurns(maxTurns = 2) {
+    const turns = getConversationContainers();
     if (turns.length === 0) return [];
     return turns.slice(Math.max(0, turns.length - maxTurns));
   }
@@ -442,11 +502,17 @@
 
   function isAssistantTurn(node) {
     if (!node || typeof node.getAttribute !== 'function') return false;
-    // Current layout marks the turn container directly: <section data-turn="user|assistant">.
+    // 2026-09 shape: role lives only in the unit-key suffix of the paired user/assistant
+    // units inside one [data-turn-key] exchange.
+    try {
+      if (node.querySelector('[data-content-search-unit-key$=":assistant"]')) return true;
+    } catch (_) {
+      // keep checking the legacy markers
+    }
+    // July shapes: the turn container is marked directly (section[data-turn]), or the author
+    // role sits on the container itself or on a descendant.
     const turnRole = normalizeText(node.getAttribute('data-turn') || '');
     if (turnRole) return turnRole === 'assistant';
-    // Older layouts (e.g. <article data-testid="conversation-turn-N">) carry no data-turn.
-    // They may put the author role on the turn element itself, or on a descendant.
     const ownRole = normalizeText(node.getAttribute('data-message-author-role') || '');
     if (ownRole) return ownRole === 'assistant';
     try {
@@ -457,44 +523,50 @@
   }
 
   function getLatestAssistantTurn() {
-    // Must return the turn CONTAINER, not the inner [data-message-author-role="assistant"]
-    // div: the copy/feedback action bar that findResponseCompletionMarkers looks for lives
-    // as a sibling of that div, inside the turn container, not inside it.
+    // Must return the exchange/turn CONTAINER, not the inner assistant unit: the copy/feedback
+    // action bar lives as a sibling region of that unit, inside the container (on the 2026-09
+    // shape the action bar is outside the assistant unit but inside the [data-turn-key]
+    // exchange), which is what findResponseCompletionMarkers needs to see.
     const dw = getDriftwatchChatGptInstance();
     if (dw) {
-      let turnEls = null;
-      try {
-        turnEls = dw.resolve('conversationTurn', document)?.els || [];
-      } catch (_) {
-        turnEls = null; // resolver threw: treat as "cannot resolve", fall through below
-      }
-      if (turnEls && turnEls.length > 0) {
-        for (let i = turnEls.length - 1; i >= 0; i -= 1) {
-          const node = turnEls[i];
-          // Assistant turns ONLY. The conversationTurn anchor resolves user turns too, and a
-          // user turn carries its own copy-turn-action-button — returning one would make
-          // findResponseCompletionMarkers report "response complete" the moment the prompt is
-          // sent, before any answer exists. Silently capturing the wrong text is worse than
-          // waiting, so this filters rather than falling back to "last turn of any kind".
-          if (!isAssistantTurn(node)) continue;
-          const text = normalizeText(node.textContent || '');
-          if (!/\bqueued prompt\b/.test(text)) return node;
+      const containers = getConversationContainers();
+      if (containers.length > 0) {
+        for (let i = containers.length - 1; i >= 0; i -= 1) {
+          const container = containers[i];
+          // Resolution model: assistantUnit is a per-exchange anchor resolved with the
+          // container as scope. Scoped resolution never matches the scope root itself, so a
+          // legacy turn carrying the role directly on the container (the old <article>
+          // shape) falls back to isAssistantTurn below.
+          let assistantUnit = null;
+          try {
+            assistantUnit = dw.resolve('assistantUnit', container)?.el || null;
+          } catch (_) {
+            assistantUnit = null;
+          }
+          if (!assistantUnit && !isAssistantTurn(container)) continue;
+          // Assistant turns ONLY. A user-only container carries its own copy control —
+          // returning one would make findResponseCompletionMarkers report "response
+          // complete" the moment the prompt is sent, before any answer exists. Silently
+          // capturing the wrong text is worse than waiting, so this filters rather than
+          // falling back to "last turn of any kind".
+          const text = normalizeText(container.textContent || '');
+          if (!/\bqueued prompt\b/.test(text)) return container;
         }
         return null; // no assistant turn yet, or every one was a queued-prompt placeholder
       }
     }
-    // Legacy fallback: only reached when the conversationTurn anchor cannot resolve at all
-    // (driftwatch missing/older cached content script, or the anchor is fully broken).
+    // Legacy fallback: only reached when driftwatch cannot resolve at all
+    // (driftwatch missing/older cached content script, or every anchor is fully broken).
     // No tag qualifier on the turn selectors, same reason as above. Resolve each candidate
     // to its TURN container first (closest turn selector), the way the driftwatch branch
     // above does, so the action bar outside the inner assistant-role div stays visible to
     // findResponseCompletionMarkers. Only the bare inner div is returned when no turn
     // container wraps it at all.
-    const candidates = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"], [data-turn-id], [data-message-author-role="assistant"]'));
+    const candidates = Array.from(document.querySelectorAll('[data-testid^="conversation-turn-"], [data-turn-id], [data-turn-key], [data-message-author-role="assistant"]'));
     for (let i = candidates.length - 1; i >= 0; i -= 1) {
       const node = candidates[i];
       const role = node.getAttribute?.('data-message-author-role') || '';
-      const resolved = node.closest?.('[data-testid^="conversation-turn-"], [data-turn-id]') || node;
+      const resolved = node.closest?.('[data-testid^="conversation-turn-"], [data-turn-id], [data-turn-key]') || node;
       const text = normalizeText(resolved.textContent || '');
       if (role === 'assistant' || !/\bqueued prompt\b/.test(text)) return resolved;
     }
@@ -514,6 +586,22 @@
       for (const node of nodes) {
         if (!node || !isElementVisible(node)) continue;
         markers.push({ selector, label: getResponseActionLabel(node, selector), node });
+      }
+    }
+    // Pack v2 completion marker (Resolution model): the native Copy control of the response
+    // action bar, resolved with the exchange/turn container as scope. The 2026-09 action
+    // bar's control is aria-label="Copy" — the RESPONSE_ACTION_SELECTORS entries above are
+    // the July shapes and match 0 there; on July shapes this resolve returns nothing and
+    // the selector list above carries it instead.
+    const dw = getDriftwatchChatGptInstance();
+    if (dw && scope) {
+      try {
+        const copy = dw.resolve('copyResponseButton', scope);
+        if (copy?.ok && copy.el && !markers.some((marker) => marker.node === copy.el)) {
+          markers.push({ selector: 'driftwatch:copyResponseButton', label: 'Copy response', node: copy.el });
+        }
+      } catch (_) {
+        // fail soft: the selector-list markers are already collected
       }
     }
     return markers;
