@@ -1,7 +1,7 @@
 # Incident Plan: Model Bridge ChatGPT Channel Dead (2026-09-22)
 
 Date: 2026-09-22
-Status: PLANNED. Investigation is done and implementation has not started.
+Status: IN PROGRESS (2026-09-22 15:05). S8.1–S8.3 done; S8.4 dispatched; S8.5 live gate pending.
 Coordination plan (authority for ranking, QA matrix, work packages): [Tampermonkey S8-bridge-recovery.md](file:///C:/Windows_software/Tampermonkey/docs/plans/chatgpt-2026-09-churn/S8-bridge-recovery.md).
 Sibling plans:
 - bridge [browser-channel-recovery-2026-09.md](file:///C:/AI/mcp-model-bridge/docs/plans/browser-channel-recovery-2026-09.md)
@@ -32,6 +32,8 @@ Prompt Queue serves bridge jobs on the September 2026 chatgpt.com DOM again: the
   - `heartbeats/d42ce029-….json` mtime advancing every ≤15 s;
   - `bridge_health` → `chatgpt_browser.reachable=true`.
 - Expected afterwards: bridge jobs still fail (S8.3 not done yet).
+- DONE 2026-09-22 14:17:59. The user enabled it in the Edge profile whose display name is **"Electronics"** (folder `Profile 2`; folder `Default` shows as "Profile 1"). Evidence: `watch start` → `port_lifecycle connected`, heartbeat advancing, `bridge_health` reachable with 1 instance, `disable_reasons` none.
+- Open: the user reports this profile keeps switching the extension off by itself (possibly Edge Workspaces). The bridge-side detector is S8.7c in the coordination plan.
 
 ### S8.2 RED consumer contract test
 
@@ -51,12 +53,19 @@ Prompt Queue serves bridge jobs on the September 2026 chatgpt.com DOM again: the
 - Lazy new chat: when `composer` is absent and `pendingComposerInput` resolves, write the prompt into the stub through the native `HTMLTextAreaElement` value setter plus a bubbling `input` event, then wait for the real composer. This reuses the live-verified technique in Tampermonkey `edge-extension/modules/25-prompt-send-part1.js:173-199`; copy it, don't reinvent it.
 - Reply capture: `assistantUnit` / `assistantMarkdownRoot` from the pack first, then legacy selectors.
 - No behavioural change outside these two paths. S8.2 goes green; full `npx jest --silent` green; `node --check` on touched files.
+- DONE 2026-09-22 (Z Code GLM-5.3, which timed out at 1794 s after finishing S8.2 and S8.3; reviewed by the orchestrator).
+  - Pack-first routes: `findPromptInputForSite`, `findSendButtonForSite` (state `composing`), `collectResponseCandidates` (per-exchange `assistantMarkdownRoot` / `assistantUnit`), and `getResponseScope` with `[data-turn-key]`.
+  - Lazy stub: `maybeActivatePendingComposer` runs before `waitForComposerReady`, with no second insert when the carried-over text already matches.
+  - `content-input.js` strips trailing newlines before ProseMirror insertion.
+  - Evidence: `consumer-selector-audit.test.js` has 4/8 failing on `a1b448f` and 8/8 passing after. Full jest 227/227 (`NODE_OPTIONS=--experimental-vm-modules`); `node --check` ok.
 
 ### S8.4 Diagnosable failures
 
 - `native_host.py:386` finish log adds the job's error string. Log only fixed code strings or reason codes: never prompt/response text, URLs or DOM text (whitelist rule from the bridge completion-wait plan).
 - `run()` logs one `exit reason=<stdin_eof|exception>` line.
 - Test: `tests/test_native_host_jobs.py::test_native_host_logs_exit_and_error`.
+- Refinement (2026-09-22): job errors are sentences, so the host maps known job-path messages (prefix match) to fixed codes; a value already matching `^[a-z0-9_]{1,48}$` passes through, and anything else becomes `unrecognized`. The code goes to the finish log line and to the result JSON as `error_code`, which the bridge's S8.7b keeps.
+- S8.4b dev self-reload: a `<jobs>/control/reload` sentinel makes the host post `{"type":"dev_reload"}`. `background.js` then calls `chrome.runtime.reload()` only when the manifest has no `update_url`, i.e. only for unpacked installs. This lets the S8.5 gate and L9 reload without a human on `edge://extensions`.
 
 ### S8.5 Live gate (orchestrator, synthetic prompts, temporary chat only)
 

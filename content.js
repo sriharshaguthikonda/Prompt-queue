@@ -41,7 +41,7 @@
 })();
 
 (function () {
-  const CONTENT_SCRIPT_VERSION = '2026-07-28.turn-scope-v5';
+  const CONTENT_SCRIPT_VERSION = '2026-09-22.pack-routes-v6';
   if (window.__aiTaskSequencerInjected === CONTENT_SCRIPT_VERSION) return;
   window.__aiTaskSequencerInjected = CONTENT_SCRIPT_VERSION;
 
@@ -202,7 +202,36 @@
     return null;
   }
 
+  // S8.3 (bridge recovery): chatgpt.com route anchors resolve through the vendored
+  // driftwatch pack FIRST; the literal selector chains stay as fallbacks, never first.
+  // On the Sept-2026 DOM the chains' first matches are decoys (the `Edit code` editor for
+  // the composer, the edit-surface submit for send), which is what killed the bridge.
+  function getDriftwatchSite() {
+    try {
+      const dw = window.driftwatch;
+      const pack = dw?.packs?.['chatgpt.com'];
+      if (!dw || !pack || typeof dw.use !== 'function') return null;
+      return dw.use(pack);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function findPackComposerInput() {
+    const dw = getDriftwatchSite();
+    if (!dw) return null;
+    try {
+      // The pack `composer` anchor is scoped inside composerForm, so editors living in
+      // exchanges (Edit code, edit-message surface) can never resolve here.
+      const composer = dw.resolve('composer', document)?.el || null;
+      if (composer && composer.isConnected && isElementVisible(composer)) return composer;
+    } catch (_) {}
+    return null;
+  }
+
   function findPromptInputForSite(site, settings = currentTargetSettings) {
+    const packComposer = site === 'chatgpt' ? findPackComposerInput() : null;
+    if (packComposer) return packComposer;
     const resolved = typeof targetTools.resolveTarget === 'function'
       ? targetTools.resolveTarget('promptInput', { site, settings })
       : null;
@@ -211,6 +240,19 @@
   }
 
   function findSendButtonForSite(site, inputEl, settings = currentTargetSettings) {
+    if (site === 'chatgpt') {
+      const dw = getDriftwatchSite();
+      if (dw) {
+        try {
+          // Pack sendButton is scoped inside composerForm and requires "enabled" under the
+          // composing state, so the idle disabled Send and the edit-surface decoy submit
+          // never resolve here. Stateless resolve would fail even on a composing page
+          // (state-gated anchor — same call shape as tests/driftwatch-vendor.test.js).
+          const packSend = dw.resolve('sendButton', document, { state: 'composing' })?.el || null;
+          if (packSend && packSend.isConnected) return packSend;
+        } catch (_) {}
+      }
+    }
     const resolved = typeof targetTools.resolveTarget === 'function'
       ? targetTools.resolveTarget('sendButton', { site, settings })
       : null;
@@ -220,6 +262,59 @@
       return direct || findChatGPTSendButton(inputEl);
     }
     return queryFirst(selectorsForSite(site).sendButtonCandidates);
+  }
+
+  // Pre-hydration stub on chatgpt.com's lazy new-chat page (textarea#pending-home-input):
+  // before the first interaction the page has no composer form, only this zero-size stub,
+  // so waitForComposerReady can never see a positive-size composer. Activation technique
+  // copied (live-verified 2026-09-21) from Tampermonkey edge-extension
+  // modules/25-prompt-send-part1.js findPendingComposerInput / writePendingComposerInput.
+  function findPendingComposerInput() {
+    const dw = getDriftwatchSite();
+    if (!dw) return null;
+    let stub = null;
+    try {
+      stub = dw.resolve('pendingComposerInput', document)?.el || null;
+    } catch (_) {
+      return null;
+    }
+    if (!stub || stub.disabled === true || stub.getAttribute('aria-hidden') === 'true') return null;
+    return stub;
+  }
+
+  function writePendingComposerInput(text) {
+    const stub = findPendingComposerInput();
+    if (!stub || stub.tagName !== 'TEXTAREA') return false;
+    const value = String(text || '').replace(/\r\n/g, '\n');
+    try {
+      // Framework-controlled textarea: a plain `.value =` write is invisible to the
+      // framework's change detection, so the write goes through the native prototype
+      // setter and the bubbling `input` event triggers hydration of the real composer.
+      const descriptor = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+      if (!descriptor || typeof descriptor.set !== 'function') return false;
+      descriptor.set.call(stub, value);
+      stub.dispatchEvent(new Event('input', { bubbles: true }));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // One-shot activation for the lazy new-chat page: when no composer exists but the stub
+  // resolves, write the prompt into the stub, then waitForComposerReady's existing timeout
+  // waits for the real composer. The page carries the text over into the real composer, so
+  // the caller must check the composer's text before inserting the prompt a second time.
+  function maybeActivatePendingComposer(site, text) {
+    if (site !== 'chatgpt') return false;
+    if (findPackComposerInput()) return false;
+    if (!findPendingComposerInput()) return false;
+    const wrote = writePendingComposerInput(text);
+    if (wrote) {
+      console.log('[PromptQueue] Pending composer stub activated; waiting for real composer', {
+        textLength: String(text || '').length,
+      });
+    }
+    return wrote;
   }
 
   function resolveStopButtonSelector(site, settings = currentTargetSettings) {
@@ -622,9 +717,37 @@
     return ['main article', '[data-testid*="message"]', '.markdown'];
   }
 
+  // S8.3 (bridge recovery): reply candidates come from the pack FIRST — per-exchange
+  // assistantMarkdownRoot / assistantUnit, each resolved with its exchangeRoot element as
+  // scope (never document-wide, never inside:exchangeRoot). On the Sept-2026 DOM the
+  // legacy selector list below matches 0, which made bridge jobs unable to capture a reply.
+  function collectPackResponseCandidates() {
+    if (detectSite() !== 'chatgpt') return [];
+    const dw = getDriftwatchSite();
+    if (!dw) return [];
+    const out = [];
+    try {
+      const exchanges = dw.resolve('exchangeRoot', document)?.els || [];
+      for (const exchange of exchanges) {
+        for (const anchor of ['assistantMarkdownRoot', 'assistantUnit']) {
+          try {
+            const el = dw.resolve(anchor, exchange)?.el;
+            if (el && !out.includes(el)) out.push(el);
+          } catch (_) {}
+        }
+      }
+    } catch (_) {}
+    return out;
+  }
+
   function collectResponseCandidates(site) {
     const seen = new Set();
     const candidates = [];
+    for (const node of site === 'chatgpt' ? collectPackResponseCandidates() : []) {
+      if (!node || seen.has(node)) continue;
+      seen.add(node);
+      candidates.push(node);
+    }
     for (const selector of responseCandidateSelectors(site)) {
       let nodes = [];
       try {
@@ -658,22 +781,27 @@
     // turn. Measured live: turn scope finds 4 completion markers, inner-div scope finds 0,
     // which silently disabled the response-marker completion path.
     if (!candidate?.closest) return candidate || null;
-    return candidate.closest('[data-testid^="conversation-turn-"], [data-turn-id]')
+    // [data-turn-key] is the Sept-2026 exchange root; the action bar lives inside it,
+    // outside the assistant unit, so the scope must be the exchange (S8.3).
+    return candidate.closest('[data-testid^="conversation-turn-"], [data-turn-id], [data-turn-key]')
       || candidate.closest('[data-message-author-role="assistant"]')
       || candidate;
   }
 
   // Structural author role for a chatgpt.com candidate node, via the turn container's
-  // data-turn or the message div's data-message-author-role — never by reading text.
+  // data-turn, the message div's data-message-author-role, or the Sept-2026 unit key
+  // (data-content-search-unit-key="<exchange>:<n>:<user|assistant>") — never by reading text.
   function chatGptCandidateAuthorRole(node) {
     if (!node) return null;
     try {
-      const marked = node.closest?.('[data-turn], [data-message-author-role]');
+      const marked = node.closest?.('[data-turn], [data-message-author-role], [data-content-search-unit-key]');
       if (!marked) return null;
       const turn = marked.getAttribute('data-turn');
       if (turn === 'user' || turn === 'assistant') return turn;
       const role = marked.getAttribute('data-message-author-role');
       if (role === 'user' || role === 'assistant') return role;
+      const unitRole = (marked.getAttribute('data-content-search-unit-key') || '').split(':').pop();
+      if (unitRole === 'user' || unitRole === 'assistant') return unitRole;
       return null;
     } catch (_) {
       return null;
@@ -1884,6 +2012,9 @@
       }
 
       const composerReadyMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 10000);
+      // Lazy new-chat page: activate the pending stub so the page mounts the real composer,
+      // then the existing waitForComposerReady timeout below waits for it (S8.3).
+      maybeActivatePendingComposer(site, text);
       emitStepUpdate({ step: 'waiting_for_tab', promptId, detail: 'Waiting for visible composer', durationMs: composerReadyMaxWaitMs, endAt: Date.now() + composerReadyMaxWaitMs, log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Waiting for composer readiness', {
         promptId,
@@ -1917,7 +2048,12 @@
 
       emitStepUpdate({ step: 'populating', promptId, detail: 'Writing prompt into visible composer', log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Setting text input', { promptId, textLength: text?.length });
-      setTextInInput(inputEl, text);
+      // Lazy new-chat carry-over: after stub activation the page moves the prompt into the
+      // real composer by itself; inserting again would duplicate it. Insert only when the
+      // composer does not already hold this prompt (S8.3).
+      if (!promptJobComposerTextMatches(getInputCurrentTextQuiet(inputEl), text)) {
+        setTextInInput(inputEl, text);
+      }
       await new Promise((r) => setTimeout(r, 150));
 
       let pasteVerifyAttempts = 0;
@@ -2292,9 +2428,13 @@
     window.PromptQueueContentTest = {
       CONTENT_SCRIPT_VERSION,
       captureLatestAssistantResponse,
+      collectResponseCandidates,
       clickSend,
       detectSite,
       findPromptInputForSite,
+      findPendingComposerInput,
+      maybeActivatePendingComposer,
+      writePendingComposerInput,
       findRenderedMessageMatch,
       findSendButtonForSite,
       isButtonEnabled,

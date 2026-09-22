@@ -148,10 +148,14 @@
   function setTextInInput(el, text) {
     if (!el) throw new Error('Input element not found');
     if (isContentEditableElement(el)) {
+      // chatgpt.com's ProseMirror composer turns an execCommand insertText ending in "\n"
+      // into Enter and sends the prompt, so trailing newlines are stripped before any
+      // contenteditable insertion (incident plan S8.3). Native textareas keep them.
+      const value = String(text ?? '').replace(/(?:\r?\n)+$/, '');
       if (el.id === 'prompt-textarea' || el.classList.contains('ProseMirror')) {
-        setProseMirrorText(el, text);
+        setProseMirrorText(el, value);
       } else {
-        replacePlainContentEditableText(el, text);
+        replacePlainContentEditableText(el, value);
       }
       return;
     }
