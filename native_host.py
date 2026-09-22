@@ -44,6 +44,41 @@ PROMPT_JOB_UNCLAIMED_TTL_SECONDS = 1800
 HEARTBEAT_INTERVAL_SECONDS = 15
 HEARTBEAT_ALIVE_SECONDS = 45
 NATIVE_HOST_LOG_MAX_BYTES = 1_000_000
+ERROR_CODE_PREFIXES = (
+    ("composer did not become ready", "composer_not_ready"),
+    ("chatgpt did not reach a stable send window", "send_window_timeout"),
+    ("could not find chat input", "no_chat_input"),
+    ("could not find prompt input", "no_prompt_input"),
+    ("input field empty before sending", "input_empty_before_send"),
+    ("prompt text not found in chat after send", "prompt_not_found_after_send"),
+    ("no active stream detected after sending", "no_stream_after_send"),
+    ("stream did not stop within timeout", "stream_stop_timeout"),
+    ("waitforcompletion timeout", "completion_timeout"),
+    ("content script was not ready", "content_script_not_ready"),
+    ("content script not ready", "content_script_not_ready"),
+    ("could not establish connection to content script", "content_script_unreachable"),
+    ("content script injection blocked", "injection_blocked"),
+    ("tab did not finish loading", "tab_load_timeout"),
+    ("tab was closed or navigated away", "tab_closed"),
+    ("timed out waiting for prompt submission", "submission_timeout"),
+    ("automation stopped", "automation_stopped"),
+    ("failed to create worker tab", "worker_tab_failed"),
+    ("worker tab is unavailable", "worker_tab_unavailable"),
+)
+ERROR_CODE_RE = re.compile(r"^[a-z0-9_]{1,48}$")
+
+
+def error_code_for(error) -> str | None:
+    if not error:
+        return None
+    value = str(error).strip()
+    if ERROR_CODE_RE.fullmatch(value):
+        return value
+    value = value.lower()
+    for prefix, code in ERROR_CODE_PREFIXES:
+        if value.startswith(prefix):
+            return code
+    return "unrecognized"
 
 class TranscriptionMonitor:
     def __init__(self, memory_base_url=DEFAULT_MEMORY_BASE_URL, http_open=None):
@@ -383,7 +418,12 @@ class TranscriptionMonitor:
                 else:
                     error_path = Path(folder) / f"job_{match.group(1)}.error.json"
                     os.replace(claimed_path, error_path)
-            self.log_info("finish job=%s status=%s", match.group(1), status)
+            self.log_info(
+                "finish job=%s status=%s error_code=%s",
+                match.group(1),
+                status,
+                error_code_for(None if status == "done" else message.get("error") or status) or "none",
+            )
             return {"type": "finish_result", "ok": True, "claimedFile": claimed_file}
         except OSError:
             return {"type": "finish_result", "ok": False, "claimedFile": claimed_file}
@@ -455,6 +495,14 @@ class TranscriptionMonitor:
             try:
                 folder_path = Path(folder)
                 self.maybe_write_heartbeat(folder_path, force=False)
+                reload_path = folder_path / "control" / "reload"
+                try:
+                    if reload_path.exists():
+                        reload_path.unlink()
+                        self.log_info("dev_reload requested")
+                        self.send_message({"type": "dev_reload"})
+                except OSError:
+                    self.log_info("dev_reload os_error")
                 self.write_expired_claim_results(folder_path)
                 self.cleanup_stale_result_files(folder_path)
                 for path in folder_path.glob("job_*.json"):
@@ -583,11 +631,13 @@ class TranscriptionMonitor:
         truncated = text_chars > PROMPT_JOB_RESULT_TEXT_CHARS
         if truncated:
             response_text = response_text[:PROMPT_JOB_RESULT_TEXT_CHARS]
+        error_code = error_code_for(None if status == "done" else error or status)
         payload = {
             "id": job_id,
             "status": status,
             "text": response_text,
             "error": None if status == "done" else str(error or status),
+            "error_code": error_code,
             "truncated": truncated,
             "text_chars": text_chars,
             "ts": datetime.now(timezone.utc).isoformat(),
@@ -914,6 +964,7 @@ class TranscriptionMonitor:
             
     def run(self):
         """Main message loop"""
+        exit_reason = "stdin_eof"
         try:
             while self.running:
                 message = self.read_message()
@@ -924,9 +975,12 @@ class TranscriptionMonitor:
                 self.send_message(response)
                 
         except KeyboardInterrupt:
-            pass
+            exit_reason = "exception"
         except Exception as e:
+            exit_reason = "exception"
             self.send_message({"type": "error", "message": f"Host error: {str(e)}"})
+        finally:
+            self.log_info("exit reason=%s", exit_reason)
 
 if __name__ == '__main__':
     monitor = TranscriptionMonitor()

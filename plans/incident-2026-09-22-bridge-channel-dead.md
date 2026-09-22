@@ -1,7 +1,7 @@
 # Incident Plan: Model Bridge ChatGPT Channel Dead (2026-09-22)
 
 Date: 2026-09-22
-Status: IN PROGRESS (2026-09-22 15:05). S8.1–S8.3 done; S8.4 dispatched; S8.5 live gate pending.
+Status: IN PROGRESS (2026-09-22 15:05). S8.1–S8.4b done; S8.5 live gate pending (needs one manual reload to load S8.4b).
 Coordination plan (authority for ranking, QA matrix, work packages): [Tampermonkey S8-bridge-recovery.md](file:///C:/Windows_software/Tampermonkey/docs/plans/chatgpt-2026-09-churn/S8-bridge-recovery.md).
 Sibling plans:
 - bridge [browser-channel-recovery-2026-09.md](file:///C:/AI/mcp-model-bridge/docs/plans/browser-channel-recovery-2026-09.md)
@@ -66,6 +66,7 @@ Prompt Queue serves bridge jobs on the September 2026 chatgpt.com DOM again: the
 - Test: `tests/test_native_host_jobs.py::test_native_host_logs_exit_and_error`.
 - Refinement (2026-09-22): job errors are sentences, so the host maps known job-path messages (prefix match) to fixed codes; a value already matching `^[a-z0-9_]{1,48}$` passes through, and anything else becomes `unrecognized`. The code goes to the finish log line and to the result JSON as `error_code`, which the bridge's S8.7b keeps.
 - S8.4b dev self-reload: a `<jobs>/control/reload` sentinel makes the host post `{"type":"dev_reload"}`. `background.js` then calls `chrome.runtime.reload()` only when the manifest has no `update_url`, i.e. only for unpacked installs. This lets the S8.5 gate and L9 reload without a human on `edge://extensions`.
+- DONE 2026-09-22 (codex gpt-5.6-terra, reviewed). The orchestrator reverted one deviation: the result `error` keeps the original string and `error_code` sits beside it. The log line carries only `error_code=`. Tests: `test_native_host_logs_exit_and_error` and `test_native_host_dev_reload_sentinel_fires_once`; pytest 31/31, jest 227/227.
 
 ### S8.5 Live gate (orchestrator, synthetic prompts, temporary chat only)
 

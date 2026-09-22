@@ -1,4 +1,5 @@
 import inspect
+import io
 import json
 import os
 import threading
@@ -217,6 +218,58 @@ def test_finish_job_want_result_error_writes_error_result(tmp_path):
     assert result["error"] == "missing_response"
     assert result["truncated"] is False
     assert result["text_chars"] == 0
+
+
+def test_native_host_logs_exit_and_error(tmp_path, monkeypatch):
+    monitor = native_host.TranscriptionMonitor()
+    monitor.configure_logger(tmp_path, "worker")
+    claimed_file = tmp_path / "job_error.claimed.worker.json"
+    write_job(claimed_file, job_id="error", text="prompt", want_result=True)
+
+    monitor.finish_job({
+        "folder": str(tmp_path),
+        "claimedFile": claimed_file.name,
+        "status": "error",
+        "error": "Composer did not become ready before timeout",
+    })
+    result = json.loads((tmp_path / "result_error.json").read_text(encoding="utf-8"))
+
+    assert result["error_code"] == "composer_not_ready"
+    assert result["error"] == "Composer did not become ready before timeout"
+    for handler in monitor.logger.handlers:
+        handler.flush()
+    log_text = (tmp_path / "logs" / "native_host_worker.log").read_text(encoding="utf-8")
+    assert "error_code=composer_not_ready" in log_text
+    assert "Composer did not become ready before timeout" not in log_text
+
+    monitor.write_result_file(tmp_path, "unknown", "error", "", "arbitrary failure")
+    unknown_result = json.loads((tmp_path / "result_unknown.json").read_text(encoding="utf-8"))
+    assert unknown_result["error_code"] == "unrecognized"
+
+    monkeypatch.setattr(native_host.sys, "stdin", type("Input", (), {"buffer": io.BytesIO()})())
+    monkeypatch.setattr(native_host.sys, "stdout", type("Output", (), {"buffer": io.BytesIO()})())
+    monitor.run()
+    for handler in monitor.logger.handlers:
+        handler.flush()
+    assert "exit reason=stdin_eof" in (tmp_path / "logs" / "native_host_worker.log").read_text(encoding="utf-8")
+
+
+def test_native_host_dev_reload_sentinel_fires_once(tmp_path):
+    monitor = native_host.TranscriptionMonitor()
+    sent = []
+    monitor.send_message = sent.append
+    reload_file = tmp_path / "control" / "reload"
+    reload_file.parent.mkdir()
+    reload_file.touch()
+
+    response = monitor.handle_message({"type": "watch_jobs", "folder": str(tmp_path), "pollMs": 25})
+    wait_for(lambda: any(message.get("type") == "dev_reload" for message in sent))
+    time.sleep(0.08)
+    monitor.stop_job_watcher()
+
+    assert response == {"type": "watch_started", "folder": str(tmp_path)}
+    assert [message for message in sent if message.get("type") == "dev_reload"] == [{"type": "dev_reload"}]
+    assert not reload_file.exists()
 
 
 def test_finish_job_voice_job_writes_no_result(tmp_path):

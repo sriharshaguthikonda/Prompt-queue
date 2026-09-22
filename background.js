@@ -4914,6 +4914,11 @@ async function handlePromptJobsPortMessage(msg) {
       await handleJobFound(msg);
       return;
     }
+    case 'dev_reload': {
+      // dev-only, store installs carry update_url.
+      if (!('update_url' in chrome.runtime.getManifest())) chrome.runtime.reload();
+      return;
+    }
     case 'claim_result': {
       await handleClaimResult(msg);
       return;
