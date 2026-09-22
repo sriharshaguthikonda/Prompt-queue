@@ -1830,6 +1830,9 @@ if (self.__PROMPT_QUEUE_TEST__) {
       promptJobsConnectedFlushPromise = Promise.resolve();
       promptJobsLogStorageQueue = Promise.resolve();
     },
+    startForceRenderFrames,
+    stopForceRenderFrames,
+    forceRenderLoopsForTest: () => forceRenderLoops,
   };
 }
 
@@ -3407,6 +3410,55 @@ function hasHistorySignature(history, signature) {
 
 // ============ MESSAGE HANDLERS ============
 
+// S8.3b: hidden bridge job tabs never fire requestAnimationFrame, so chatgpt.com's lazy
+// new-chat page never mounts the real composer from the pending-input stub. Forcing CDP
+// screenshot captures on the hidden tab forces a render frame; we discard the image data.
+const forceRenderLoops = new Map(); // tabId -> { intervalId, timeoutId, frameCount }
+
+async function startForceRenderFrames(tabId) {
+  if (!Number.isInteger(tabId) || forceRenderLoops.has(tabId)) return;
+  // Registered before the attach await so a STOP that arrives mid-attach is not lost.
+  const loop = { intervalId: null, timeoutId: null, frameCount: 0 };
+  forceRenderLoops.set(tabId, loop);
+  try {
+    await chrome.debugger.attach({ tabId }, '1.3');
+  } catch (e) {
+    if (!String(e?.message || e).includes('already attached')) {
+      forceRenderLoops.delete(tabId);
+      return;
+    }
+  }
+  if (forceRenderLoops.get(tabId) !== loop) {
+    // STOP (or tab close) came in while attaching.
+    try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+    return;
+  }
+  console.log('force_render start', tabId);
+  loop.intervalId = setInterval(async () => {
+    try {
+      await chrome.debugger.sendCommand({ tabId }, 'Page.captureScreenshot', { format: 'jpeg', quality: 1 });
+      loop.frameCount += 1;
+    } catch (_) {
+      // Tab may have detached/closed mid-flight; timeout or onRemoved cleans up.
+    }
+  }, 400);
+  loop.timeoutId = setTimeout(() => {
+    stopForceRenderFrames(tabId, 'timeout');
+  }, 10000);
+}
+
+async function stopForceRenderFrames(tabId, reason) {
+  const loop = forceRenderLoops.get(tabId);
+  if (!loop) return;
+  forceRenderLoops.delete(tabId);
+  if (loop.intervalId) clearInterval(loop.intervalId);
+  if (loop.timeoutId) clearTimeout(loop.timeoutId);
+  console.log(`force_render stop frames=${loop.frameCount} reason=${reason}`, tabId);
+  try {
+    await chrome.debugger.detach({ tabId });
+  } catch (_) {}
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     try {
@@ -4232,6 +4284,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           return;
         }
+        case "PQ_FORCE_RENDER_FRAMES": {
+          if (Number.isInteger(sender?.tab?.id)) {
+            await startForceRenderFrames(sender.tab.id);
+          }
+          return;
+        }
+        case "PQ_FORCE_RENDER_STOP": {
+          if (Number.isInteger(sender?.tab?.id)) {
+            await stopForceRenderFrames(sender.tab.id, 'stop');
+          }
+          return;
+        }
         default:
           return;
       }
@@ -4353,6 +4417,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     }
     if (tabSessions.has(tabId)) {
       await stopTabSession(tabId);
+    }
+    if (forceRenderLoops.has(tabId)) {
+      await stopForceRenderFrames(tabId, 'closed');
     }
   })();
 });

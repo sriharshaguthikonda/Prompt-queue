@@ -59,6 +59,16 @@ Prompt Queue serves bridge jobs on the September 2026 chatgpt.com DOM again: the
   - `content-input.js` strips trailing newlines before ProseMirror insertion.
   - Evidence: `consumer-selector-audit.test.js` has 4/8 failing on `a1b448f` and 8/8 passing after. Full jest 227/227 (`NODE_OPTIONS=--experimental-vm-modules`); `node --check` ok.
 
+### S8.3b Hidden job tabs never mount the lazy composer (found in the S8.5 live gate)
+
+- Live job `20260922T095555Z_da3fcb241f99c9fe` failed with `error_code=composer_not_ready`. Verified on the live page:
+  - bridge job tabs are `active:false`, so hidden, and `requestAnimationFrame` never fires in them;
+  - the stub write alone does not mount the composer, and a page-side rAF shim does not either;
+  - one CDP `Page.captureScreenshot` mounted it at once, with the text carried over.
+- Fix: in the lazy-stub path, while the tab is hidden, the content script asks background to attach `chrome.debugger` and capture a throwaway frame every 400 ms until `waitForComposerReady` settles (at most 10 s), then detach. This adds the `debugger` permission; Edge shows its "debugging" bar for about 1–2 s per new-chat job.
+- Rejected: activating the job tab, because it steals the user's focus.
+- Lane: Claude Sonnet fallback (codex and Z Code both at quota). The orchestrator fixed a STOP-during-attach race. jest 235/235.
+
 ### S8.4 Diagnosable failures
 
 - `native_host.py:386` finish log adds the job's error string. Log only fixed code strings or reason codes: never prompt/response text, URLs or DOM text (whitelist rule from the bridge completion-wait plan).

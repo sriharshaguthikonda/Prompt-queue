@@ -121,6 +121,11 @@ global.chrome = {
   notifications: {
     create: jest.fn(),
   },
+  debugger: {
+    attach: jest.fn(async () => {}),
+    detach: jest.fn(async () => {}),
+    sendCommand: jest.fn(async () => ({})),
+  },
 };
 
 global.self = global;

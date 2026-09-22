@@ -317,6 +317,30 @@
     return wrote;
   }
 
+  // Hidden bridge job tabs never fire requestAnimationFrame, so the lazy composer stub
+  // above never mounts the real composer on its own (S8.3b). Ask background to force
+  // render frames via CDP screenshots while waitForComposerReady waits, and tell it to
+  // stop once that settles, either way. Visible tabs render normally, so no messages are
+  // sent for them. Extracted so the messaging can be unit-tested without driving the full
+  // send flow.
+  async function waitForComposerReadyWithForceRender(stubActivated, readyParams) {
+    const forceRenderNeeded = stubActivated === true && document.visibilityState === 'hidden';
+    if (forceRenderNeeded) {
+      try {
+        chrome.runtime.sendMessage({ type: 'PQ_FORCE_RENDER_FRAMES' });
+      } catch (_) {}
+    }
+    try {
+      return await waitForComposerReady(readyParams);
+    } finally {
+      if (forceRenderNeeded) {
+        try {
+          chrome.runtime.sendMessage({ type: 'PQ_FORCE_RENDER_STOP' });
+        } catch (_) {}
+      }
+    }
+  }
+
   function resolveStopButtonSelector(site, settings = currentTargetSettings) {
     if (typeof targetTools.getCustomSelectorForRole === 'function') {
       const customSelector = targetTools.getCustomSelectorForRole('stopButton', settings);
@@ -2014,14 +2038,14 @@
       const composerReadyMaxWaitMs = Math.min(options?.maxWaitMs || DEFAULTS.maxWaitMs, 10000);
       // Lazy new-chat page: activate the pending stub so the page mounts the real composer,
       // then the existing waitForComposerReady timeout below waits for it (S8.3).
-      maybeActivatePendingComposer(site, text);
+      const pendingStubActivated = maybeActivatePendingComposer(site, text);
       emitStepUpdate({ step: 'waiting_for_tab', promptId, detail: 'Waiting for visible composer', durationMs: composerReadyMaxWaitMs, endAt: Date.now() + composerReadyMaxWaitMs, log: options?.perStepConsoleLogging === true });
       console.log('[PromptQueue] Waiting for composer readiness', {
         promptId,
         composerReadyMaxWaitMs,
       });
       try {
-        inputEl = await waitForComposerReady({
+        inputEl = await waitForComposerReadyWithForceRender(pendingStubActivated, {
           site,
           settings: options,
           inputEl,
@@ -2444,6 +2468,7 @@
       setTextInInput,
       shouldBlockOnPromptRenderFailure,
       waitForComposerReady,
+      waitForComposerReadyWithForceRender,
       waitForCompletion,
       waitForChatGPTSendWindow,
       waitForStreamsToStop,

@@ -13,7 +13,8 @@
     "sidePanel",
     "offscreen",
     "nativeMessaging",
-    "clipboardRead"
+    "clipboardRead",
+    "debugger"
   ],
   "host_permissions": [
     "https://chat.openai.com/*",
